@@ -1,193 +1,127 @@
-"""
-High-Level Agent
-----------------
-Simplified high-level controller for the hierarchical tutoring system.
+# agents/high_level_agents.py
 
-This agent chooses among:
-- Subtasks (e.g., topic 0, 1, 2, ...)
-- Optionally: "invoke tutee" as a special high-level action
-
-It uses a tabular Q-learning approach with an epsilon-greedy policy.
-The state is assumed to be a small, hashable representation of the
-learner/environment (e.g., a tuple of mastery/motivation/error/retention
-and maybe a subtask progress flag).
-
-The decoding of high-level actions is:
-    action_id in [0, n_subtasks - 1]  -> select subtask `action_id`
-    if include_tutee:
-        action_id == n_subtasks      -> invoke tutee interaction
-"""
-
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Dict, Tuple, Hashable, List
 import random
-from collections import defaultdict, deque
-from typing import Any, Tuple, List
+import math
 
 
-State = Any
-Action = int
-Transition = Tuple[State, Action, float, State, bool]
+StateType = Tuple[Hashable, ...]
 
 
-class ReplayBuffer:
-    """Minimal replay buffer for high-level experiences."""
-    def __init__(self, capacity: int = 10000):
-        self.buffer = deque(maxlen=capacity)
-
-    def add(self, transition: Transition):
-        self.buffer.append(transition)
-
-    def sample(self, batch_size: int) -> List[Transition]:
-        if len(self.buffer) == 0:
-            return []
-        batch_size = min(batch_size, len(self.buffer))
-        return random.sample(self.buffer, batch_size)
-
-    def __len__(self) -> int:
-        return len(self.buffer)
+@dataclass
+class HighLevelAgentConfig:
+    num_topics: int
+    use_tutee: bool = True
+    alpha: float = 0.1   # learning rate
+    gamma: float = 0.99  # discount factor
+    epsilon: float = 0.1 # exploration rate
+    state_rounding: int = 2  # decimals to round continuous state to
 
 
 class HighLevelAgent:
     """
-    Tabular Q-learning high-level agent.
+    High-level tabular Q-learning agent.
 
-    Parameters
-    ----------
-    n_subtasks : int
-        Number of subtasks (topics) the learner can work on.
-    include_tutee : bool
-        If True, an extra high-level action "invoke tutee" is added.
-    epsilon : float
-        Exploration probability for epsilon-greedy policy.
-    gamma : float
-        Discount factor.
-    lr : float
-        Learning rate for Q updates.
-    buffer_capacity : int
-        Capacity of the replay buffer.
+    - Chooses between:
+        * PRACTICE_TOPIC_i  (send learner to tutor low-level agent on topic i)
+        * TEACH_TUTEE_TOPIC_i (invoke tutee low-level agent on topic i) if use_tutee=True
     """
 
-    def __init__(
-        self,
-        n_subtasks: int,
-        include_tutee: bool = True,
-        epsilon: float = 0.1,
-        gamma: float = 0.9,
-        lr: float = 0.1,
-        buffer_capacity: int = 10000,
-    ):
-        self.n_subtasks = n_subtasks
-        self.include_tutee = include_tutee
-        self.epsilon = epsilon
-        self.gamma = gamma
-        self.lr = lr
+    def __init__(self, config: HighLevelAgentConfig):
+        self.cfg = config
+        self.q_table: Dict[Tuple[StateType, int], float] = {}
+        self._build_action_space()
 
-        # number of available high-level actions
-        self.n_actions = n_subtasks + (1 if include_tutee else 0)
+    # ----------------- public API -----------------
 
-        # Q-table: maps (state, action) -> value
-        self.q_table = defaultdict(float)
+    @property
+    def num_actions(self) -> int:
+        return len(self.actions)
 
-        # replay buffer
-        self.memory = ReplayBuffer(capacity=buffer_capacity)
+    def get_action_meanings(self) -> List[str]:
+        """Human-readable list, useful for logging/debugging."""
+        return self.actions
 
-    # ------------------------------------------------------------------
-    # Action selection
-    # ------------------------------------------------------------------
-
-    def select_action(self, state: State) -> Action:
+    def select_action(self, obs: List[float]) -> int:
         """
-        Epsilon-greedy selection over high-level actions.
-
-        Returns
-        -------
-        action_id : int
-            Index in [0, n_actions - 1]:
-              - 0..n_subtasks-1: choose that subtask
-              - n_subtasks:     invoke tutee (if include_tutee=True)
+        Epsilon-greedy action selection given a raw observation vector.
+        Returns an integer action index in [0, num_actions).
         """
-        # exploration
-        if random.random() < self.epsilon:
-            return random.randrange(self.n_actions)
+        state = self._encode_state(obs)
 
-        # exploitation: pick argmax_a Q(s, a)
-        q_values = [self.q_table[(state, a)] for a in range(self.n_actions)]
-        max_q = max(q_values)
-        best_actions = [a for a, q in enumerate(q_values) if q == max_q]
+        if random.random() < self.cfg.epsilon:
+            return random.randrange(self.num_actions)
+
+        # exploit
+        q_vals = [self.q_table.get((state, a), 0.0) for a in range(self.num_actions)]
+        max_q = max(q_vals)
+        # break ties randomly
+        best_actions = [a for a, q in enumerate(q_vals) if math.isclose(q, max_q)]
         return random.choice(best_actions)
 
-    def decode_action(self, action_id: int):
-        """
-        Convert integer action_id to a semantic decision.
-
-        Returns
-        -------
-        decision_type : str
-            "subtask" or "tutee"
-        value : int or None
-            If "subtask": subtask index (0..n_subtasks-1)
-            If "tutee": None
-        """
-        if action_id < self.n_subtasks:
-            return "subtask", action_id
-        elif self.include_tutee and action_id == self.n_subtasks:
-            return "tutee", None
-        else:
-            raise ValueError(f"Invalid action_id {action_id} for configuration.")
-
-    # ------------------------------------------------------------------
-    # Experience storage
-    # ------------------------------------------------------------------
-
-    def store_transition(
+    def update(
         self,
-        state: State,
-        action: Action,
+        obs: List[float],
+        action: int,
         reward: float,
-        next_state: State,
+        next_obs: List[float],
         done: bool,
-    ):
+    ) -> None:
         """
-        Store a high-level transition in replay buffer.
+        Standard tabular Q-learning update.
         """
-        self.memory.add((state, action, reward, next_state, done))
+        state = self._encode_state(obs)
+        next_state = self._encode_state(next_obs)
 
-    # ------------------------------------------------------------------
-    # Learning
-    # ------------------------------------------------------------------
+        key = (state, action)
+        old_q = self.q_table.get(key, 0.0)
 
-    def train(self, batch_size: int = 32):
+        if done:
+            target = reward
+        else:
+            next_qs = [self.q_table.get((next_state, a), 0.0) for a in range(self.num_actions)]
+            target = reward + self.cfg.gamma * max(next_qs, default=0.0)
+
+        new_q = old_q + self.cfg.alpha * (target - old_q)
+        self.q_table[key] = new_q
+
+    # ----------------- action encoding -----------------
+
+    def decode_action(self, action: int) -> Tuple[str, int]:
         """
-        Sample a batch from replay buffer and perform Q-learning updates.
-        If there's not enough data, this function is a no-op.
+        Decode an action index into (mode, topic_id).
+
+        mode ∈ {"tutor", "tutee"}
+        topic_id ∈ [0, num_topics)
         """
-        if len(self.memory) == 0:
-            return
+        meaning = self.actions[action]
+        # examples:
+        # "tutor_topic_0", "tutee_topic_2"
+        mode_str, _, topic_str = meaning.partition("_topic_")
+        topic_id = int(topic_str)
+        mode = "tutor" if mode_str == "tutor" else "tutee"
+        return mode, topic_id
 
-        batch = self.memory.sample(batch_size)
+    # ----------------- internal helpers -----------------
 
-        for (s, a, r, s_next, done) in batch:
-            old_q = self.q_table[(s, a)]
+    def _build_action_space(self) -> None:
+        self.actions: List[str] = []
 
-            if done:
-                target = r
-            else:
-                # max_a' Q(s_next, a')
-                next_qs = [self.q_table[(s_next, a2)] for a2 in range(self.n_actions)]
-                target = r + self.gamma * max(next_qs)
+        # tutor actions for each topic
+        for t in range(self.cfg.num_topics):
+            self.actions.append(f"tutor_topic_{t}")
 
-            td_error = target - old_q
-            self.q_table[(s, a)] = old_q + self.lr * td_error
+        # tutee actions for each topic (optional)
+        if self.cfg.use_tutee:
+            for t in range(self.cfg.num_topics):
+                self.actions.append(f"tutee_topic_{t}")
 
-    # ------------------------------------------------------------------
-    # Utilities
-    # ------------------------------------------------------------------
-
-    def set_epsilon(self, epsilon: float):
-        """Update exploration rate (for annealing)."""
-        self.epsilon = epsilon
-
-    def __repr__(self):
-        return (
-            f"HighLevelAgent(n_subtasks={self.n_subtasks}, "
-            f"include_tutee={self.include_tutee}, epsilon={self.epsilon})"
-        )
+    def _encode_state(self, obs: List[float]) -> StateType:
+        """
+        Convert continuous observation vector to a discrete key for the Q-table.
+        Here we just round; you can replace this with a better discretization later.
+        """
+        r = self.cfg.state_rounding
+        return tuple(round(x, r) for x in obs)

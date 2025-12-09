@@ -1,147 +1,299 @@
-"""
-Learner Model
--------------
-A simplified synthetic learner used for the hierarchical RL tutoring system.
+# environment/learner_model.py
 
-The learner maintains a small set of interpretable state variables:
-- mastery:    how well the learner understands the topic (0–1)
-- motivation: how willing the learner is to continue effort (0–1)
-- error_rate: likelihood of making mistakes (0–1)
-- retention:  long-term consolidation of knowledge (0–1)
-
-The learner is updated after:
-1. Tutor actions (e.g., hint, worked example, reflection prompt)
-2. Tutee interactions (Protégé Effect → deeper processing)
-
-This module does NOT simulate real humans — it simulates *qualitative*
-learning dynamics consistent with educational psychology.
-"""
-
-import numpy as np
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import List, Dict, Tuple
+import random
+import math
 
 
-class Learner:
-    def __init__(
-        self,
-        mastery: float = 0.2,
-        motivation: float = 0.7,
-        error_rate: float = 0.6,
-        retention: float = 0.1,
-        noise_std: float = 0.02,
-    ):
+@dataclass
+class LearnerTuteeState:
+    """
+    Holds the internal state of the human learner + tutee.
+
+    - mastery_learner[i]: learner's mastery in topic i ∈ [0,1]
+    - mastery_tutee[i]: tutee's mastery in topic i ∈ [0,1]
+    - motivation: learner's motivation ∈ [0,1]
+    - error_rate: approximate probability of making mistakes ∈ [0,1]
+    - retention: how stable the learned knowledge is ∈ [0,1]
+    """
+    num_topics: int
+    mastery_learner: List[float] = field(init=False)
+    mastery_tutee: List[float] = field(init=False)
+    motivation: float = 0.7
+    error_rate: float = 0.3
+    retention: float = 0.5
+    step_count: int = 0
+
+    def __post_init__(self):
+        # initialize with random or low mastery
+        self.mastery_learner = [random.uniform(0.1, 0.4) for _ in range(self.num_topics)]
+        self.mastery_tutee = [random.uniform(0.0, 0.2) for _ in range(self.num_topics)]
+
+    def clone(self) -> "LearnerTuteeState":
+        copy = LearnerTuteeState(num_topics=self.num_topics)
+        copy.mastery_learner = self.mastery_learner[:]
+        copy.mastery_tutee = self.mastery_tutee[:]
+        copy.motivation = self.motivation
+        copy.error_rate = self.error_rate
+        copy.retention = self.retention
+        copy.step_count = self.step_count
+        return copy
+
+
+class LearnerModel:
+    """
+    Abstract simulated environment for:
+      - a human learner
+      - an apprentice/tutee agent
+
+    This does NOT implement the RL loop; it just:
+      - stores state,
+      - applies tutor and tutee actions,
+      - computes rewards.
+
+    High-level + low-level agents will use this class inside a training loop.
+    """
+
+    def __init__(self, num_topics: int):
+        self.num_topics = num_topics
+        self.state = LearnerTuteeState(num_topics=num_topics)
+
+        # reward weights (you can tweak these)
+        self.w_mastery = 1.0
+        self.w_motivation = 0.3
+        self.w_error = 0.5
+        self.w_retention = 0.2
+
+        # threshold to consider an episode "done"
+        self.mastery_target = 0.85
+        self.max_steps = 200
+
+    # --------------- core API ----------------
+
+    def reset(self) -> List[float]:
+        self.state = LearnerTuteeState(num_topics=self.num_topics)
+        return self.get_observation()
+
+    def get_observation(self) -> List[float]:
         """
-        Initialize the learner state.
-        Noise is added to updates so that each learner seed is slightly different.
+        Flatten state into a numeric vector for RL agents.
+
+        Current design:
+          [ mastery_learner..., mastery_tutee..., motivation, error_rate, retention ]
         """
-        self.mastery = mastery
-        self.motivation = motivation
-        self.error_rate = error_rate
-        self.retention = retention
-        self.noise_std = noise_std
+        obs = []
+        obs.extend(self.state.mastery_learner)
+        obs.extend(self.state.mastery_tutee)
+        obs.append(self.state.motivation)
+        obs.append(self.state.error_rate)
+        obs.append(self.state.retention)
+        return obs
 
-    # ----------------------------------------------------------------------
-    # Utility functions
-    # ----------------------------------------------------------------------
-
-    def _clip(self):
-        """Ensure all values remain in [0, 1]."""
-        self.mastery = np.clip(self.mastery, 0.0, 1.0)
-        self.motivation = np.clip(self.motivation, 0.0, 1.0)
-        self.error_rate = np.clip(self.error_rate, 0.0, 1.0)
-        self.retention = np.clip(self.retention, 0.0, 1.0)
-
-    def _noise(self):
-        """Small Gaussian noise added to updates (realistic variation)."""
-        return np.random.normal(0, self.noise_std)
-
-    # ----------------------------------------------------------------------
-    # Tutor Interaction Updates
-    # ----------------------------------------------------------------------
-
-    def update_after_tutor_action(self, action: str):
+    def step_tutor(self, topic_id: int, tutor_action: str) -> Tuple[List[float], float, bool, Dict]:
         """
-        Apply effects of tutor actions.
-        The magnitudes are chosen to be small and realistic in simulation.
+        Apply a Tutor low-level action on a given topic.
+
+        Returns: next_obs, reward, done, info
         """
+        prev_state = self.state.clone()
+        self._apply_tutor_action(topic_id, tutor_action)
+        self.state.step_count += 1
+
+        reward = self._compute_reward(prev_state, self.state)
+        done = self._check_done()
+        return self.get_observation(), reward, done, {}
+
+    def step_tutee(self, topic_id: int, tutee_action: str) -> Tuple[List[float], float, bool, Dict]:
+        """
+        Apply a Tutee low-level action on a given topic.
+
+        Returns: next_obs, reward, done, info
+        """
+        prev_state = self.state.clone()
+        self._apply_tutee_action(topic_id, tutee_action)
+        self.state.step_count += 1
+
+        reward = self._compute_reward(prev_state, self.state)
+        done = self._check_done()
+        return self.get_observation(), reward, done, {}
+
+    # --------------- internal dynamics ----------------
+
+    def _apply_tutor_action(self, topic_id: int, action: str) -> None:
+        """
+        Simplified tutor effects on the learner.
+
+        You can refine these formulas later if needed.
+        """
+        M = self.state.mastery_learner[topic_id]
+        m = self.state.motivation
+        e = self.state.error_rate
+        r = self.state.retention
+
+        # base learning rate depends on motivation and retention
+        base_gain = 0.05 + 0.1 * m + 0.05 * r
 
         if action == "hint":
-            self.mastery += 0.03 + self._noise()
-            self.error_rate -= 0.03 + self._noise()
-
+            delta_M = base_gain * 0.6 * (1 - M)
+            delta_m = 0.01
+            delta_e = -0.02
         elif action == "worked_example":
-            self.mastery += 0.07 + self._noise()
-            self.motivation += 0.03 + self._noise()
-            self.error_rate -= 0.05 + self._noise()
-
+            delta_M = base_gain * 1.0 * (1 - M)
+            delta_m = 0.0
+            delta_e = -0.03
         elif action == "reflection_question":
-            self.mastery += 0.04 + self._noise()
-            self.retention += 0.03 + self._noise()
-
+            # harder, more gain if motivation is high; can hurt if motivation low
+            if m > 0.5:
+                delta_M = base_gain * 1.1 * (1 - M)
+                delta_m = 0.02
+            else:
+                delta_M = base_gain * 0.5 * (1 - M)
+                delta_m = -0.02
+            delta_e = -0.01
         elif action == "no_help":
-            # learner becomes discouraged when struggling
-            self.motivation -= 0.03 + self._noise()
-            self.error_rate += 0.03 + self._noise()
-
+            # pure practice: small gain, error may increase slightly
+            delta_M = base_gain * 0.3 * (1 - M)
+            delta_m = 0.0
+            delta_e = 0.01
         else:
-            # Unknown action – no effect
-            pass
+            # unknown action: no change
+            delta_M = 0.0
+            delta_m = 0.0
+            delta_e = 0.0
 
-        self._clip()
+        # apply with noise
+        noise = random.gauss(0.0, 0.01)
+        self.state.mastery_learner[topic_id] = _clip01(M + delta_M + noise)
+        self.state.motivation = _clip01(m + delta_m)
+        self.state.error_rate = _clip01(e + delta_e)
+        # retention grows slowly as mastery increases
+        self.state.retention = _clip01(r + 0.02 * delta_M)
 
-    # ----------------------------------------------------------------------
-    # Tutee Interaction Updates (Your Thesis Contribution)
-    # ----------------------------------------------------------------------
-
-    def update_after_tutee_interaction(self, response_quality: str):
+    def _apply_tutee_action(self, topic_id: int, action: str) -> None:
         """
-        response_quality ∈ {"correct", "partial", "incorrect"}
+        Tutee request + learner teaching attempt.
 
-        This simulates the Protégé Effect:
-        - explaining helps mastery & motivation
-        - incorrect explanations reveal gaps
+        Implements the protégé effect:
+          - learner gains extra mastery when successfully teaching
+          - tutee's own mastery is updated
         """
+        ML = self.state.mastery_learner[topic_id]
+        MT = self.state.mastery_tutee[topic_id]
+        m = self.state.motivation
+        e = self.state.error_rate
+        r = self.state.retention
 
-        if response_quality == "correct":
-            self.mastery += 0.05 + self._noise()
-            self.motivation += 0.04 + self._noise()
-            self.error_rate -= 0.04 + self._noise()
-            self.retention += 0.05 + self._noise()
+        # probability that learner gives a good explanation depends on learner mastery + motivation
+        p_success = _clip01(0.2 + 0.6 * ML + 0.2 * m)
+        p_partial = _clip01(0.1 + 0.3 * ML)
+        # re-normalize
+        total = p_success + p_partial
+        if total > 1.0:
+            p_success /= total
+            p_partial /= total
+        p_fail = 1.0 - (p_success + p_partial)
 
-        elif response_quality == "partial":
-            self.mastery += 0.02 + self._noise()
-            self.motivation += 0.02 + self._noise()
-            self.retention += 0.02 + self._noise()
+        outcome = _sample_outcome(p_success, p_partial, p_fail)
 
-        elif response_quality == "incorrect":
-            self.motivation -= 0.03 + self._noise()
-            self.error_rate += 0.05 + self._noise()
+        # base teaching gain
+        base_gain = 0.04 + 0.08 * m + 0.04 * r
+        protege_bonus = 0.03  # extra gain for learner when teaching succeeds
 
+        if action == "ask_explanation":
+            learner_mult = 1.2
+            tutee_mult = 1.0
+        elif action == "ask_worked_example":
+            learner_mult = 1.0
+            tutee_mult = 1.1
+        elif action == "ask_summary":
+            learner_mult = 0.8
+            tutee_mult = 0.8
+        elif action == "show_mistake_and_ask_fix":
+            learner_mult = 1.3
+            tutee_mult = 1.2
         else:
-            # no effect if unknown keyword
-            pass
+            learner_mult = 1.0
+            tutee_mult = 1.0
 
-        self._clip()
+        if outcome == "success":
+            delta_M_learner = base_gain * learner_mult * (1 - ML) + protege_bonus
+            delta_M_tutee = base_gain * tutee_mult * (1 - MT)
+            delta_m = 0.02
+            delta_e = -0.02
+        elif outcome == "partial":
+            delta_M_learner = base_gain * 0.7 * learner_mult * (1 - ML) + protege_bonus * 0.5
+            delta_M_tutee = base_gain * 0.6 * tutee_mult * (1 - MT)
+            delta_m = 0.0
+            delta_e = -0.01
+        else:  # fail ("I don't know" / incorrect)
+            delta_M_learner = -0.01  # small setback / confusion
+            delta_M_tutee = base_gain * 0.2 * (1 - MT)  # tutee still learns a bit
+            delta_m = -0.02
+            delta_e = 0.02
 
-    # ----------------------------------------------------------------------
-    # State Access
-    # ----------------------------------------------------------------------
+        # apply with noise
+        noise_L = random.gauss(0.0, 0.01)
+        noise_T = random.gauss(0.0, 0.01)
 
-    def get_state(self):
+        self.state.mastery_learner[topic_id] = _clip01(ML + delta_M_learner + noise_L)
+        self.state.mastery_tutee[topic_id] = _clip01(MT + delta_M_tutee + noise_T)
+        self.state.motivation = _clip01(m + delta_m)
+        self.state.error_rate = _clip01(e + delta_e)
+        self.state.retention = _clip01(r + 0.03 * max(delta_M_learner, 0.0))
+
+    # --------------- reward & termination ----------------
+
+    def _compute_reward(self, prev: LearnerTuteeState, cur: LearnerTuteeState) -> float:
         """
-        Return a compact representation usable by RL agents.
-        You may discretize it later (optional).
+        Reward encourages:
+          - increases in learner mastery (primary)
+          - increases in motivation and retention
+          - decreases in error_rate
+
+        You can also experiment with including tutee mastery here if you want
+        the tutor to care explicitly about the tutee.
         """
-        return (
-            round(self.mastery, 3),
-            round(self.motivation, 3),
-            round(self.error_rate, 3),
-            round(self.retention, 3),
+        avg_prev_mastery = sum(prev.mastery_learner) / prev.num_topics
+        avg_cur_mastery = sum(cur.mastery_learner) / cur.num_topics
+
+        delta_mastery = avg_cur_mastery - avg_prev_mastery
+        delta_motivation = cur.motivation - prev.motivation
+        delta_error = cur.error_rate - prev.error_rate
+        delta_retention = cur.retention - prev.retention
+
+        reward = (
+            self.w_mastery * delta_mastery
+            + self.w_motivation * delta_motivation
+            - self.w_error * delta_error
+            + self.w_retention * delta_retention
         )
 
-    def __repr__(self):
-        return (
-            f"Learner(mastery={self.mastery:.2f}, "
-            f"motivation={self.motivation:.2f}, "
-            f"error_rate={self.error_rate:.2f}, "
-            f"retention={self.retention:.2f})"
-        )
+        return reward
+
+    def _check_done(self) -> bool:
+        avg_mastery = sum(self.state.mastery_learner) / self.num_topics
+        if avg_mastery >= self.mastery_target:
+            return True
+        if self.state.step_count >= self.max_steps:
+            return True
+        return False
+
+
+# --------------- helpers ----------------
+
+def _clip01(x: float) -> float:
+    return max(0.0, min(1.0, x))
+
+
+def _sample_outcome(p_success: float, p_partial: float, p_fail: float) -> str:
+    """
+    Sample one of {"success", "partial", "fail"} given probabilities.
+    """
+    r = random.random()
+    if r < p_success:
+        return "success"
+    if r < p_success + p_partial:
+        return "partial"
+    return "fail"
