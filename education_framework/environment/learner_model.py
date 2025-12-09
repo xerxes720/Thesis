@@ -67,8 +67,12 @@ class LearnerModel:
         self.w_retention = 0.2
 
         # threshold to consider an episode "done"
-        self.mastery_target = 0.85
-        self.max_steps = 200
+        self.mastery_target = 0.95
+        self.max_steps = 80
+        self.prereqs = {
+            1: [0],  # to learn topic 1 well, you need topic 0
+            2: [1],  # to learn topic 2, you need topic 1
+        }
 
     # --------------- core API ----------------
 
@@ -102,6 +106,9 @@ class LearnerModel:
         self.state.step_count += 1
 
         reward = self._compute_reward(prev_state, self.state)
+        # # high cost
+        # if tutor_action == "worked_example":
+        #     reward -= 1
         done = self._check_done()
         return self.get_observation(), reward, done, {}
 
@@ -120,6 +127,21 @@ class LearnerModel:
         return self.get_observation(), reward, done, {}
 
     # --------------- internal dynamics ----------------
+
+    def _prereq_factor(self, topic_id: int) -> float:
+        """Return how 'ready' the learner is for this topic based on prereqs."""
+        if topic_id not in self.prereqs:
+            return 1.0  # no prereqs → full learning rate
+
+        prereq_ids = self.prereqs[topic_id]
+        if not prereq_ids:
+            return 1.0
+
+        # e.g. average mastery over prerequisites
+        avg_prereq_mastery = sum(self.state.mastery_learner[i] for i in prereq_ids) / len(prereq_ids)
+
+        # map [0,1] → [0.2, 1.0] so it's never completely zero
+        return 0.2 + 0.8 * avg_prereq_mastery
 
     def _apply_tutor_action(self, topic_id: int, action: str) -> None:
         """
@@ -154,15 +176,17 @@ class LearnerModel:
             delta_e = -0.01
         elif action == "no_help":
             # pure practice: small gain, error may increase slightly
-            delta_M = base_gain * 0.3 * (1 - M)
+            delta_M = base_gain * 0.2 * (1 - M)
             delta_m = 0.0
-            delta_e = 0.01
+            delta_e = 0.05
         else:
             # unknown action: no change
             delta_M = 0.0
             delta_m = 0.0
             delta_e = 0.0
 
+        factor = self._prereq_factor(topic_id)
+        delta_M *= factor
         # apply with noise
         noise = random.gauss(0.0, 0.01)
         self.state.mastery_learner[topic_id] = _clip01(M + delta_M + noise)
@@ -269,6 +293,8 @@ class LearnerModel:
             - self.w_error * delta_error
             + self.w_retention * delta_retention
         )
+        # Time cost
+        reward -= 0.01
 
         return reward
 
