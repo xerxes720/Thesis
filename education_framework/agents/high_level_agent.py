@@ -119,9 +119,32 @@ class HighLevelAgent:
                 self.actions.append(f"tutee_topic_{t}")
 
     def _encode_state(self, obs: List[float]) -> StateType:
+        # """
+        # Convert continuous observation vector to a discrete key for the Q-table.
+        # Here we just round; you can replace this with a better discretization later.
+        # """
+        # r = self.cfg.state_rounding
+        # return tuple(round(x, r) for x in obs)
+
         """
-        Convert continuous observation vector to a discrete key for the Q-table.
-        Here we just round; you can replace this with a better discretization later.
+        Coarse, discrete state for high-level decisions.
+
+        We only use learner's mastery per topic, bucketed into 3 levels:
+          0 = low   (0.0 - 0.33)
+          1 = mid   (0.33 - 0.66)
+          2 = high  (0.66 - 1.0)
+        This keeps the state space tiny (3^num_topics).
         """
-        r = self.cfg.state_rounding
-        return tuple(round(x, r) for x in obs)
+        num_topics = self.cfg.num_topics
+        learner_mastery = obs[:num_topics]  # first num_topics are learner mastery
+
+        buckets = []
+        for m in learner_mastery:
+            if m < 0.33:
+                buckets.append(0)
+            elif m < 0.66:
+                buckets.append(1)
+            else:
+                buckets.append(2)
+
+        return tuple(buckets)

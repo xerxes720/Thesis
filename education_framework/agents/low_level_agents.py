@@ -6,7 +6,6 @@ from typing import Dict, Tuple, Hashable, List
 import random
 import math
 
-
 StateType = Tuple[Hashable, ...]
 
 
@@ -47,12 +46,12 @@ class TabularLowLevelAgent:
         return random.choice(best_actions)
 
     def update(
-        self,
-        obs: List[float],
-        action: int,
-        reward: float,
-        next_obs: List[float],
-        done: bool,
+            self,
+            obs: List[float],
+            action: int,
+            reward: float,
+            next_obs: List[float],
+            done: bool,
     ) -> None:
         state = self._encode_state(obs)
         next_state = self._encode_state(next_obs)
@@ -72,8 +71,25 @@ class TabularLowLevelAgent:
     # --------- internal helpers ---------
 
     def _encode_state(self, obs: List[float]) -> StateType:
-        r = self.cfg.state_rounding
-        return tuple(round(x, r) for x in obs)
+        # r = self.cfg.state_rounding
+        # return tuple(round(x, r) for x in obs)
+        """
+        Expect obs to be: [full_high_level_obs..., topic_id].
+        We compress this to (topic_id, mastery_bucket) for the learner.
+        """
+        topic_id = int(round(obs[-1]))  # last element is topic_id
+        num_topics = 3  # or pass via config if you want
+        learner_mastery = obs[0:num_topics]  # first num_topics: learner mastery
+
+        m = learner_mastery[topic_id]
+        if m < 0.33:
+            bucket = 0
+        elif m < 0.66:
+            bucket = 1
+        else:
+            bucket = 2
+
+        return topic_id, bucket
 
 
 # ---------- TUTOR low-level agents ----------
@@ -84,10 +100,10 @@ def build_tutor_actions() -> List[str]:
     You can tweak this list later.
     """
     return [
-        "hint",              # small nudge
-        "worked_example",    # show full solution
+        "hint",  # small nudge
+        "worked_example",  # show full solution
         "reflection_question",  # ask the learner to think/explain
-        "no_help",           # let learner struggle / practice
+        "no_help",  # let learner struggle / practice
     ]
 
 
@@ -95,6 +111,7 @@ class TutorLowLevelAgent(TabularLowLevelAgent):
     """
     One instance per topic, or a shared instance if you include topic_id in the state.
     """
+
     def __init__(self, config: LowLevelAgentConfig):
         super().__init__(config, actions=build_tutor_actions())
 
@@ -106,10 +123,10 @@ def build_tutee_actions() -> List[str]:
     Discrete requests made by the Tutee to the learner.
     """
     return [
-        "ask_explanation",             # "Can you explain this to me?"
-        "ask_worked_example",          # "Can you show me how to solve this?"
-        "ask_summary",                 # "Can you summarize this topic?"
-        "show_mistake_and_ask_fix",    # tutee presents possibly-wrong solution; learner must correct
+        "ask_explanation",  # "Can you explain this to me?"
+        "ask_worked_example",  # "Can you show me how to solve this?"
+        "ask_summary",  # "Can you summarize this topic?"
+        "show_mistake_and_ask_fix",  # tutee presents possibly-wrong solution; learner must correct
     ]
 
 
@@ -118,5 +135,6 @@ class TuteeLowLevelAgent(TabularLowLevelAgent):
     Single instance for the whole system.
     Topic information should be part of the state passed to select_action().
     """
+
     def __init__(self, config: LowLevelAgentConfig):
         super().__init__(config, actions=build_tutee_actions())

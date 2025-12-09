@@ -67,7 +67,7 @@ class LearnerModel:
         self.w_retention = 0.2
 
         # threshold to consider an episode "done"
-        self.mastery_target = 0.95
+        self.mastery_target = 0.85
         self.max_steps = 80
         self.prereqs = {
             1: [0],  # to learn topic 1 well, you need topic 0
@@ -252,9 +252,9 @@ class LearnerModel:
             delta_m = 0.0
             delta_e = -0.01
         else:  # fail ("I don't know" / incorrect)
-            delta_M_learner = -0.01  # small setback / confusion
+            delta_M_learner = -0.05  # small setback / confusion
             delta_M_tutee = base_gain * 0.2 * (1 - MT)  # tutee still learns a bit
-            delta_m = -0.02
+            delta_m = -0.05
             delta_e = 0.02
 
         # apply with noise
