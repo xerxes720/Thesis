@@ -14,8 +14,8 @@ StateType = Tuple[Hashable, ...]
 class HighLevelAgentConfig:
     num_topics: int
     use_tutee: bool = True
-    alpha: float = 0.1   # learning rate
-    gamma: float = 0.99  # discount factor
+    alpha: float = 0.001   # learning rate
+    gamma: float = 0.9  # discount factor
     epsilon: float = 0.1 # exploration rate
     state_rounding: int = 2  # decimals to round continuous state to
 
@@ -114,6 +114,7 @@ class HighLevelAgent:
             self.actions.append(f"tutor_topic_{t}")
 
         # tutee actions for each topic (optional)
+        # TODO check if it's needed
         if self.cfg.use_tutee:
             for t in range(self.cfg.num_topics):
                 self.actions.append(f"tutee_topic_{t}")

@@ -67,8 +67,8 @@ class LearnerModel:
         self.w_retention = 0.2
 
         # threshold to consider an episode "done"
-        self.mastery_target = 0.85
-        self.max_steps = 80
+        self.mastery_target = 0.95
+        self.max_steps = 100
         self.prereqs = {
             1: [0],  # to learn topic 1 well, you need topic 0
             2: [1],  # to learn topic 2, you need topic 1
@@ -129,6 +129,7 @@ class LearnerModel:
     # --------------- internal dynamics ----------------
 
     def _prereq_factor(self, topic_id: int) -> float:
+        #TODO revise
         """Return how 'ready' the learner is for this topic based on prereqs."""
         if topic_id not in self.prereqs:
             return 1.0  # no prereqs → full learning rate
@@ -210,7 +211,11 @@ class LearnerModel:
         r = self.state.retention
 
         # probability that learner gives a good explanation depends on learner mastery + motivation
-        p_success = _clip01(0.2 + 0.6 * ML + 0.2 * m)
+        #TODO refine it
+        if ML < 0.5:
+            p_success = 0
+        else:
+            p_success = _clip01(0.2 + 0.6 * ML + 0.2 * m)
         p_partial = _clip01(0.1 + 0.3 * ML)
         # re-normalize
         total = p_success + p_partial
@@ -317,6 +322,9 @@ def _sample_outcome(p_success: float, p_partial: float, p_fail: float) -> str:
     """
     Sample one of {"success", "partial", "fail"} given probabilities.
     """
+    #TODO refine later
+    if p_success < 0.2:
+        return "fail"
     r = random.random()
     if r < p_success:
         return "success"

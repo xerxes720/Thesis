@@ -38,6 +38,10 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
       - topic_counts: how many times each topic was chosen by high-level
       - tutor_action_counts: how many times each tutor low-level action was used
       - tutee_action_counts: how many times each tutee low-level action was used
+      - tutor_hl_count: number of high-level 'tutor' decisions
+      - tutee_hl_count: number of high-level 'tutee' decisions
+      - hl_trace: ordered list of high-level decisions as strings
+                  e.g. ["tutor_topic_1", "tutee_topic_1", "tutor_topic_2", ...]
     """
     obs = env.reset()
     done = False
@@ -46,6 +50,9 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 
     tutor_hl_count = 0
     tutee_hl_count = 0
+
+    # record high-level decision sequence for this episode
+    hl_trace = []
 
     num_topics = env.num_topics
     topic_counts = [0 for _ in range(num_topics)]
@@ -70,10 +77,15 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         mode, topic_id = high_level_agent.decode_action(hl_action_idx)
         topic_counts[topic_id] += 1
 
+        # record this high-level step, e.g. "tutor_topic_1" or "tutee_topic_2"
+        hl_trace.append(f"{mode}_topic_{topic_id}")
+
         # === Low-level + env step ===
         if mode == "tutor":
             tutor_hl_count += 1
             tutor_agent = tutor_agents[topic_id]
+
+            # augment observation with topic_id so tutor knows which topic
             tutor_obs = obs + [float(topic_id)]
 
             ll_action_idx = tutor_agent.select_action(tutor_obs)
@@ -92,31 +104,26 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
                     done,
                 )
 
-        elif mode == "tutee":
+        elif mode == "tutee" and tutee_agent is not None:
             tutee_hl_count += 1
-            if tutee_agent is None:
-                # if tutee disabled, fall back to no_help tutoring
-                next_obs, reward, done, _ = env.step_tutor(topic_id, "no_help")
-                if train:
-                    high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
-            else:
-                tutee_obs = obs + [float(topic_id)]
 
-                ll_action_idx = tutee_agent.select_action(tutee_obs)
-                ll_action_str = tutee_agent.get_action_meanings()[ll_action_idx]
-                tutee_action_counts[ll_action_str] += 1
+            # tutee also sees which topic we're in
+            tutee_obs = obs + [float(topic_id)]
+            ll_action_idx = tutee_agent.select_action(tutee_obs)
+            ll_action_str = tutee_agent.get_action_meanings()[ll_action_idx]
+            tutee_action_counts[ll_action_str] += 1
 
-                next_obs, reward, done, _ = env.step_tutee(topic_id, ll_action_str)
+            next_obs, reward, done, _ = env.step_tutee(topic_id, ll_action_str)
 
-                if train:
-                    high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
-                    tutee_agent.update(
-                        tutee_obs,
-                        ll_action_idx,
-                        reward,
-                        next_obs + [float(topic_id)],
-                        done,
-                    )
+            if train:
+                high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
+                tutee_agent.update(
+                    tutee_obs,
+                    ll_action_idx,
+                    reward,
+                    next_obs + [float(topic_id)],
+                    done,
+                )
 
         else:
             # Safety fallback
@@ -128,15 +135,24 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         steps += 1
         obs = next_obs
 
-    return total_reward, steps, topic_counts, tutor_action_counts, tutee_action_counts, tutor_hl_count, tutee_hl_count
+    return (
+        total_reward,
+        steps,
+        topic_counts,
+        tutor_action_counts,
+        tutee_action_counts,
+        tutor_hl_count,
+        tutee_hl_count,
+        hl_trace,
+    )
 
 
 def main():
     # ---------------- config ----------------
-    num_topics = 3
+    num_topics = 8
     use_tutee = True           # you said tutee is off for now
-    num_episodes = 200
-    log_window = 50
+    num_episodes = 10000
+    log_window = 1000
 
     env = LearnerModel(num_topics=num_topics)
     high_level_agent, tutor_agents, tutee_agent = create_agents(
@@ -147,9 +163,8 @@ def main():
     print("=== Training hierarchical RL tutor ===")
     print(f"- Number of topics: {num_topics}")
     print(f"- Tutee enabled:   {use_tutee}")
-    print(f"- Episodes:        {num_episodes}\n")
 
-    # rolling stats
+    # sliding window stats
     window_rewards = []
     window_mastery_learner = []
     window_mastery_tutee = []
@@ -166,7 +181,16 @@ def main():
         window_tutee_action_counts = {}
 
     for episode in range(1, num_episodes + 1):
-        total_reward, steps, topic_counts, tutor_action_counts, tutee_action_counts, tutor_hl_count, tutee_hl_count = run_episode(
+        (
+            total_reward,
+            steps,
+            topic_counts,
+            tutor_action_counts,
+            tutee_action_counts,
+            tutor_hl_count,
+            tutee_hl_count,
+            hl_trace,
+        ) = run_episode(
             env,
             high_level_agent,
             tutor_agents,
@@ -194,13 +218,16 @@ def main():
         window_tutor_hl += tutor_hl_count
         window_tutee_hl += tutee_hl_count
         # log every log_window episodes
-        if episode % log_window == 0:
+        if episode % log_window == 0 or episode == 1:
             w = log_window
             mean_reward = sum(window_rewards) / w
-            mean_mastery_learner = sum(window_mastery_learner) / w
+            # mean_mastery_learner = sum(window_mastery_learner) / w
+            mean_mastery_learner = window_mastery_learner[-1]
             mean_mastery_tutee = sum(window_mastery_tutee) / w
-            mean_steps = sum(window_steps) / w
-
+            #TODO check
+            #
+            # mean_steps = sum(window_steps) / w
+            mean_steps = window_steps[-1]
             total_topic_choices = sum(window_topic_counts) or 1
             topic_freqs = [c / total_topic_choices for c in window_topic_counts]
 
@@ -212,7 +239,7 @@ def main():
 
             print(f"[Episode {episode:4d}]")
             print(f"  Mean reward (last {w}):          {mean_reward: .4f}")
-            print(f"  Mean steps per episode:         {mean_steps: .2f}")
+            print(f"  Mean steps per episode:         {mean_steps}")
             print(f"  Mean learner mastery:           {mean_mastery_learner: .3f}")
             print(f"  Mean tutee mastery:             {mean_mastery_tutee: .3f}")
             print(f"  Topic choice frequencies:")
@@ -232,6 +259,13 @@ def main():
             print(f"  High-level mode frequencies (last {w} episodes):")
             print(f"    - tutor: {window_tutor_hl / total_hl * 100:5.1f}% of high-level decisions")
             print(f"    - tutee: {window_tutee_hl / total_hl * 100:5.1f}% of high-level decisions")
+
+            # show the exact high-level decision path for the most recent episode
+            if hl_trace:
+                hl_path_str = " --> ".join(hl_trace)
+                print("  High-level decision sequence (last episode):")
+                print(f"    --> {hl_path_str}")
+
             print()
 
             # reset window stats

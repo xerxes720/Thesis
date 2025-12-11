@@ -11,8 +11,8 @@ StateType = Tuple[Hashable, ...]
 
 @dataclass
 class LowLevelAgentConfig:
-    alpha: float = 0.1
-    gamma: float = 0.99
+    alpha: float = 0.001
+    gamma: float = 0.9
     epsilon: float = 0.1
     state_rounding: int = 2
 
@@ -78,7 +78,7 @@ class TabularLowLevelAgent:
         We compress this to (topic_id, mastery_bucket) for the learner.
         """
         topic_id = int(round(obs[-1]))  # last element is topic_id
-        num_topics = 3  # or pass via config if you want
+        num_topics = 8  # or pass via config if you want
         learner_mastery = obs[0:num_topics]  # first num_topics: learner mastery
 
         m = learner_mastery[topic_id]
