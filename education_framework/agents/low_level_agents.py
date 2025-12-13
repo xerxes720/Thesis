@@ -11,6 +11,8 @@ StateType = Tuple[Hashable, ...]
 
 @dataclass
 class LowLevelAgentConfig:
+    num_topics: int
+    num_buckets = 5
     alpha: float = 0.001
     gamma: float = 0.9
     epsilon: float = 0.1
@@ -45,6 +47,9 @@ class TabularLowLevelAgent:
         best_actions = [a for a, q in enumerate(q_vals) if math.isclose(q, max_q)]
         return random.choice(best_actions)
 
+    def set_epsilon(self, epsilon: float) -> None:
+        self.cfg.epsilon = max(0.0, float(epsilon))
+
     def update(
             self,
             obs: List[float],
@@ -78,16 +83,19 @@ class TabularLowLevelAgent:
         We compress this to (topic_id, mastery_bucket) for the learner.
         """
         topic_id = int(round(obs[-1]))  # last element is topic_id
-        num_topics = 8  # or pass via config if you want
+        # num_topics = 8  # TODO pass via config
+        num_topics = self.cfg.num_topics
+        bucket_count = self.cfg.num_buckets
         learner_mastery = obs[0:num_topics]  # first num_topics: learner mastery
 
         m = learner_mastery[topic_id]
-        if m < 0.33:
-            bucket = 0
-        elif m < 0.66:
-            bucket = 1
-        else:
-            bucket = 2
+        bucket = min(bucket_count - 1, int(m * bucket_count))
+        # if m < 0.33:
+        #     bucket = 0
+        # elif m < 0.66:
+        #     bucket = 1
+        # else:
+        #     bucket = 2
 
         return topic_id, bucket
 
@@ -97,7 +105,6 @@ class TabularLowLevelAgent:
 def build_tutor_actions() -> List[str]:
     """
     Discrete assistance types given by the Tutor to the learner.
-    You can tweak this list later.
     """
     return [
         "hint",  # small nudge
@@ -109,7 +116,7 @@ def build_tutor_actions() -> List[str]:
 
 class TutorLowLevelAgent(TabularLowLevelAgent):
     """
-    One instance per topic, or a shared instance if you include topic_id in the state.
+    One instance per topic
     """
 
     def __init__(self, config: LowLevelAgentConfig):

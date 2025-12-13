@@ -21,7 +21,7 @@ def create_agents(num_topics: int, use_tutee: bool = True):
     hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
     high_level_agent = HighLevelAgent(hl_cfg)
 
-    ll_cfg = LowLevelAgentConfig()
+    ll_cfg = LowLevelAgentConfig(num_topics=num_topics)
     tutor_agents = [TutorLowLevelAgent(ll_cfg) for _ in range(num_topics)]
     tutee_agent = TuteeLowLevelAgent(ll_cfg) if use_tutee else None
 
@@ -150,11 +150,23 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 def main():
     # ---------------- config ----------------
     num_topics = 8
-    use_tutee = True           # you said tutee is off for now
-    num_episodes = 10000
+    use_tutee = True
+    num_episodes = 6000
     log_window = 1000
+    eps_start = 0.2
+    eps_end = 0.0
+    eps_decay_episodes = num_episodes
+    prereqs = {
+        1: [0],  # to learn topic 1 well, you need topic 0
+        2: [1],  # to learn topic 2, you need topic 1
+        3: [2],
+        4: [2],
+        5: [2],
+        6: [5],
+        7: [6]
+    }
 
-    env = LearnerModel(num_topics=num_topics)
+    env = LearnerModel(num_topics=num_topics, prereqs=prereqs)
     high_level_agent, tutor_agents, tutee_agent = create_agents(
         num_topics=num_topics,
         use_tutee=use_tutee,
@@ -221,10 +233,11 @@ def main():
         if episode % log_window == 0 or episode == 1:
             w = log_window
             mean_reward = sum(window_rewards) / w
+            # mean_reward = window_rewards[-1]
             # mean_mastery_learner = sum(window_mastery_learner) / w
             mean_mastery_learner = window_mastery_learner[-1]
             mean_mastery_tutee = sum(window_mastery_tutee) / w
-            #TODO check
+            # TODO check
             #
             # mean_steps = sum(window_steps) / w
             mean_steps = window_steps[-1]
@@ -244,17 +257,17 @@ def main():
             print(f"  Mean tutee mastery:             {mean_mastery_tutee: .3f}")
             print(f"  Topic choice frequencies:")
             for i, f in enumerate(topic_freqs):
-                print(f"    - Topic {i}: {f*100:5.1f}% of high-level choices")
+                print(f"    - Topic {i}: {f * 100:5.1f}% of high-level choices")
             print(f"  Tutor action frequencies:")
             for a, f in tutor_action_freqs.items():
-                print(f"    - {a:20s}: {f*100:5.1f}% of tutor actions")
+                print(f"    - {a:20s}: {f * 100:5.1f}% of tutor actions")
 
             if use_tutee and window_tutee_action_counts:
                 total_tutee_actions = sum(window_tutee_action_counts.values()) or 1
                 print(f"  Tutee action frequencies:")
                 for a, c in window_tutee_action_counts.items():
                     f = c / total_tutee_actions
-                    print(f"    - {a:20s}: {f*100:5.1f}% of tutee actions")
+                    print(f"    - {a:20s}: {f * 100:5.1f}% of tutee actions")
             total_hl = window_tutor_hl + window_tutee_hl or 1
             print(f"  High-level mode frequencies (last {w} episodes):")
             print(f"    - tutor: {window_tutor_hl / total_hl * 100:5.1f}% of high-level decisions")
@@ -278,6 +291,19 @@ def main():
             if use_tutee and tutee_agent is not None:
                 window_tutee_action_counts = {a: 0 for a in tutee_action_names}
 
+            progress = min(1.0, episode / eps_decay_episodes)
+            eps = eps_start + (eps_end - eps_start) * progress  # linear
+
+            high_level_agent.set_epsilon(eps)
+
+            for a in tutor_agents:
+                a.set_epsilon(eps)
+
+            if tutee_agent is not None:
+                tutee_agent.set_epsilon(eps)
+            print(f"eps: {eps}")
+            if episode == 6000:
+                print(env.get_observation())
     print("Training finished.")
 
 

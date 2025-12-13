@@ -25,3 +25,5 @@ Numbers in learner model should have a description as why I've chosen them, It's
 optimize hyperparameters for convergence
 
 شرط مستری لرنر برای توتی برای احتمال پاسخ درست باید متناسب با همان تاپیک باشد.
+
+پیشرفت tutee نقشی در تمرین مدل ندارد میشود سیستمی پیاده کرد که تاثیر روی تصمیم به توضیح بیشتر و یا قرارگیری آن بذارد

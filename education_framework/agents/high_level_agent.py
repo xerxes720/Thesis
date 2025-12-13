@@ -13,6 +13,7 @@ StateType = Tuple[Hashable, ...]
 @dataclass
 class HighLevelAgentConfig:
     num_topics: int
+    num_buckets = 5
     use_tutee: bool = True
     alpha: float = 0.001   # learning rate
     gamma: float = 0.9  # discount factor
@@ -60,6 +61,9 @@ class HighLevelAgent:
         # break ties randomly
         best_actions = [a for a, q in enumerate(q_vals) if math.isclose(q, max_q)]
         return random.choice(best_actions)
+
+    def set_epsilon(self, epsilon: float) -> None:
+        self.cfg.epsilon = max(0.0, float(epsilon))
 
     def update(
         self,
@@ -120,13 +124,6 @@ class HighLevelAgent:
                 self.actions.append(f"tutee_topic_{t}")
 
     def _encode_state(self, obs: List[float]) -> StateType:
-        # """
-        # Convert continuous observation vector to a discrete key for the Q-table.
-        # Here we just round; you can replace this with a better discretization later.
-        # """
-        # r = self.cfg.state_rounding
-        # return tuple(round(x, r) for x in obs)
-
         """
         Coarse, discrete state for high-level decisions.
 
@@ -134,18 +131,20 @@ class HighLevelAgent:
           0 = low   (0.0 - 0.33)
           1 = mid   (0.33 - 0.66)
           2 = high  (0.66 - 1.0)
-        This keeps the state space tiny (3^num_topics).
+        (3^num_topics).
         """
         num_topics = self.cfg.num_topics
+        bucket_count = self.cfg.num_buckets
         learner_mastery = obs[:num_topics]  # first num_topics are learner mastery
 
         buckets = []
         for m in learner_mastery:
-            if m < 0.33:
-                buckets.append(0)
-            elif m < 0.66:
-                buckets.append(1)
-            else:
-                buckets.append(2)
+            buckets.append(min(bucket_count - 1, int(m * bucket_count)))
+            # if m < 0.33:
+            #     buckets.append(0)
+            # elif m < 0.66:
+            #     buckets.append(1)
+            # else:
+            #     buckets.append(2)
 
         return tuple(buckets)

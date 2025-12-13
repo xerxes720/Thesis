@@ -28,8 +28,8 @@ class LearnerTuteeState:
 
     def __post_init__(self):
         # initialize with random or low mastery
-        self.mastery_learner = [random.uniform(0.1, 0.4) for _ in range(self.num_topics)]
-        self.mastery_tutee = [random.uniform(0.0, 0.2) for _ in range(self.num_topics)]
+        self.mastery_learner = [random.uniform(0.1, 0.2) for _ in range(self.num_topics)]
+        self.mastery_tutee = [random.uniform(0.0, 0.1) for _ in range(self.num_topics)]
 
     def clone(self) -> "LearnerTuteeState":
         copy = LearnerTuteeState(num_topics=self.num_topics)
@@ -56,11 +56,11 @@ class LearnerModel:
     High-level + low-level agents will use this class inside a training loop.
     """
 
-    def __init__(self, num_topics: int):
+    def __init__(self, num_topics: int, prereqs):
         self.num_topics = num_topics
         self.state = LearnerTuteeState(num_topics=num_topics)
 
-        # reward weights (you can tweak these)
+        # reward weights
         self.w_mastery = 1.0
         self.w_motivation = 0.3
         self.w_error = 0.5
@@ -68,11 +68,9 @@ class LearnerModel:
 
         # threshold to consider an episode "done"
         self.mastery_target = 0.95
-        self.max_steps = 100
-        self.prereqs = {
-            1: [0],  # to learn topic 1 well, you need topic 0
-            2: [1],  # to learn topic 2, you need topic 1
-        }
+        self.max_steps = 200
+        self.prereqs = prereqs
+        self.flag = [True]*num_topics
 
     # --------------- core API ----------------
 
@@ -110,6 +108,9 @@ class LearnerModel:
         # if tutor_action == "worked_example":
         #     reward -= 1
         done = self._check_done()
+        if done and self.state.step_count < self.max_steps and self.flag[topic_id]:
+            self.flag[topic_id] = False
+            reward += 1
         return self.get_observation(), reward, done, {}
 
     def step_tutee(self, topic_id: int, tutee_action: str) -> Tuple[List[float], float, bool, Dict]:
@@ -129,7 +130,7 @@ class LearnerModel:
     # --------------- internal dynamics ----------------
 
     def _prereq_factor(self, topic_id: int) -> float:
-        #TODO revise
+        # TODO revise
         """Return how 'ready' the learner is for this topic based on prereqs."""
         if topic_id not in self.prereqs:
             return 1.0  # no prereqs → full learning rate
@@ -142,13 +143,14 @@ class LearnerModel:
         avg_prereq_mastery = sum(self.state.mastery_learner[i] for i in prereq_ids) / len(prereq_ids)
 
         # map [0,1] → [0.2, 1.0] so it's never completely zero
-        return 0.2 + 0.8 * avg_prereq_mastery
+        # return 0.2 + 0.8 * avg_prereq_mastery
+        return avg_prereq_mastery
 
     def _apply_tutor_action(self, topic_id: int, action: str) -> None:
         """
         Simplified tutor effects on the learner.
 
-        You can refine these formulas later if needed.
+        Will refine these formulas later if needed.
         """
         M = self.state.mastery_learner[topic_id]
         m = self.state.motivation
@@ -188,6 +190,8 @@ class LearnerModel:
 
         factor = self._prereq_factor(topic_id)
         delta_M *= factor
+        delta_m *= factor
+        delta_e *= factor
         # apply with noise
         noise = random.gauss(0.0, 0.01)
         self.state.mastery_learner[topic_id] = _clip01(M + delta_M + noise)
@@ -211,11 +215,12 @@ class LearnerModel:
         r = self.state.retention
 
         # probability that learner gives a good explanation depends on learner mastery + motivation
-        #TODO refine it
-        if ML < 0.5:
-            p_success = 0
-        else:
-            p_success = _clip01(0.2 + 0.6 * ML + 0.2 * m)
+        # TODO refine it
+        # if ML < 0.5:
+        #     p_success = 0
+        # else:
+        #     p_success = _clip01(0.2 + 0.6 * ML + 0.2 * m)
+        p_success = _clip01(-0.1 + 0.8 * ML + 0.3 * m)
         p_partial = _clip01(0.1 + 0.3 * ML)
         # re-normalize
         total = p_success + p_partial
@@ -228,7 +233,8 @@ class LearnerModel:
 
         # base teaching gain
         base_gain = 0.04 + 0.08 * m + 0.04 * r
-        protege_bonus = 0.03  # extra gain for learner when teaching succeeds
+        # TODO refine this hyperparameter
+        protege_bonus = 0.1  # extra gain for learner when teaching succeeds
 
         if action == "ask_explanation":
             learner_mult = 1.2
@@ -262,6 +268,8 @@ class LearnerModel:
             delta_m = -0.05
             delta_e = 0.02
 
+        factor = self._prereq_factor(topic_id)
+        delta_M_learner *= factor
         # apply with noise
         noise_L = random.gauss(0.0, 0.01)
         noise_T = random.gauss(0.0, 0.01)
@@ -281,7 +289,7 @@ class LearnerModel:
           - increases in motivation and retention
           - decreases in error_rate
 
-        You can also experiment with including tutee mastery here if you want
+        Can also experiment with including tutee mastery here if we want
         the tutor to care explicitly about the tutee.
         """
         avg_prev_mastery = sum(prev.mastery_learner) / prev.num_topics
@@ -293,22 +301,34 @@ class LearnerModel:
         delta_retention = cur.retention - prev.retention
 
         reward = (
-            self.w_mastery * delta_mastery
-            + self.w_motivation * delta_motivation
-            - self.w_error * delta_error
-            + self.w_retention * delta_retention
+                self.w_mastery * delta_mastery
+                + self.w_motivation * delta_motivation
+                - self.w_error * delta_error
+                + self.w_retention * delta_retention
         )
         # Time cost
-        reward -= 0.01
+        reward -= 0.008
 
         return reward
 
     def _check_done(self) -> bool:
-        avg_mastery = sum(self.state.mastery_learner) / self.num_topics
-        if avg_mastery >= self.mastery_target:
+        # avg_mastery = sum(self.state.mastery_learner) / self.num_topics
+        # if avg_mastery >= self.mastery_target:
+        #     return True
+        # if self.state.step_count >= self.max_steps:
+        #     return True
+        # return False
+        # Episode ends only when ALL learner topics reach mastery threshold
+        for m in self.state.mastery_learner:
+            if m < self.mastery_target:
+                break
+        else:
             return True
+
+        # Safety cap on episode length
         if self.state.step_count >= self.max_steps:
             return True
+
         return False
 
 
@@ -322,9 +342,9 @@ def _sample_outcome(p_success: float, p_partial: float, p_fail: float) -> str:
     """
     Sample one of {"success", "partial", "fail"} given probabilities.
     """
-    #TODO refine later
-    if p_success < 0.2:
-        return "fail"
+    # TODO refine later
+    # if p_success < 0.2:
+    #     return "fail"
     r = random.random()
     if r < p_success:
         return "success"
