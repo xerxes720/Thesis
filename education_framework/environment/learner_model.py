@@ -2,75 +2,173 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import random
 import math
 
 
+# -------------------- helpers --------------------
+
+def _clip01(x: float) -> float:
+    return max(0.0, min(1.0, x))
+
+
+QUALITY_LEVELS = ["very_bad", "bad", "neutral", "good", "very_good"]
+Q2I = {q: i for i, q in enumerate(QUALITY_LEVELS)}
+
+
+def _degrade_quality(q: str, k: int = 1) -> str:
+    """Move quality down by k steps (bounded)."""
+    i = max(0, Q2I.get(q, 2) - k)
+    return QUALITY_LEVELS[i]
+
+
+def _upgrade_quality(q: str, k: int = 1) -> str:
+    """Move quality up by k steps (bounded)."""
+    i = min(len(QUALITY_LEVELS) - 1, Q2I.get(q, 2) + k)
+    return QUALITY_LEVELS[i]
+
+
+def _pct_change(cur: float, prev: float, eps: float = 1e-3) -> float:
+    """
+    Percentage change term similar to "average % change" concept.
+    We clamp to avoid extreme blow-ups when prev is tiny.
+    """
+    val = (cur - prev) / (abs(prev) + eps)
+    return max(-1.0, min(1.0, val))
+
+
+# -------------------- state --------------------
+
 @dataclass
 class LearnerTuteeState:
     """
-    Holds the internal state of the human learner + tutee.
+    Multi-variable learner state in [0,1] to mimic the paper's 'performance variables'.
 
-    - mastery_learner[i]: learner's mastery in topic i ∈ [0,1]
-    - mastery_tutee[i]: tutee's mastery in topic i ∈ [0,1]
-    - motivation: learner's motivation ∈ [0,1]
-    - error_rate: approximate probability of making mistakes ∈ [0,1]
-    - retention: how stable the learned knowledge is ∈ [0,1]
+    Per-topic:
+      - mastery_learner[i]
+      - mastery_tutee[i]
+      - score[i]         (proxy for test score / knowledge performance)
+      - test_speed[i]    (1 = fast, 0 = slow)  (proxy for test time)
+      - segment_speed[i] (1 = fast progress, 0 = slow) (proxy for time in game segment)
+      - emotion[i]       (1 = positive/engaged, 0 = negative)
+      - input_quality[i] (1 = good inputs / fewer mistakes, 0 = poor)
+
+    Global:
+      - motivation
+      - retention
+      - accuracy          (1 = low error rate, 0 = high error rate)
+
+    Control:
+      - topic_done[i]
+      - step_count
+      - assist_count
     """
     num_topics: int
     mastery_learner: List[float] = field(init=False)
     mastery_tutee: List[float] = field(init=False)
+
+    score: List[float] = field(init=False)
+    test_speed: List[float] = field(init=False)
+    segment_speed: List[float] = field(init=False)
+    emotion: List[float] = field(init=False)
+    input_quality: List[float] = field(init=False)
+
     motivation: float = 0.7
-    error_rate: float = 0.3
     retention: float = 0.5
+    accuracy: float = 0.6
+
+    topic_done: List[bool] = field(init=False)
     step_count: int = 0
+    assist_count: int = 0
 
     def __post_init__(self):
-        # initialize with random or low mastery
-        self.mastery_learner = [random.uniform(0.1, 0.2) for _ in range(self.num_topics)]
-        self.mastery_tutee = [random.uniform(0.0, 0.1) for _ in range(self.num_topics)]
+        self.mastery_learner = [random.uniform(0.10, 0.20) for _ in range(self.num_topics)]
+        self.mastery_tutee = [random.uniform(0.00, 0.10) for _ in range(self.num_topics)]
+
+        # initialize performance variables with weak-to-moderate values correlated with mastery
+        self.score = [_clip01(m + random.gauss(0.0, 0.05)) for m in self.mastery_learner]
+        self.test_speed = [random.uniform(0.35, 0.55) for _ in range(self.num_topics)]
+        self.segment_speed = [random.uniform(0.35, 0.55) for _ in range(self.num_topics)]
+        self.emotion = [random.uniform(0.50, 0.70) for _ in range(self.num_topics)]
+        self.input_quality = [random.uniform(0.40, 0.60) for _ in range(self.num_topics)]
+
+        self.topic_done = [False for _ in range(self.num_topics)]
 
     def clone(self) -> "LearnerTuteeState":
-        copy = LearnerTuteeState(num_topics=self.num_topics)
-        copy.mastery_learner = self.mastery_learner[:]
-        copy.mastery_tutee = self.mastery_tutee[:]
-        copy.motivation = self.motivation
-        copy.error_rate = self.error_rate
-        copy.retention = self.retention
-        copy.step_count = self.step_count
-        return copy
+        c = LearnerTuteeState(num_topics=self.num_topics)
+        c.mastery_learner = self.mastery_learner[:]
+        c.mastery_tutee = self.mastery_tutee[:]
+        c.score = self.score[:]
+        c.test_speed = self.test_speed[:]
+        c.segment_speed = self.segment_speed[:]
+        c.emotion = self.emotion[:]
+        c.input_quality = self.input_quality[:]
+        c.motivation = self.motivation
+        c.retention = self.retention
+        c.accuracy = self.accuracy
+        c.topic_done = self.topic_done[:]
+        c.step_count = self.step_count
+        c.assist_count = self.assist_count
+        return c
 
+
+# -------------------- per-topic dynamics --------------------
+
+@dataclass
+class TopicDynamics:
+    """
+    Topic-specific parameters to emulate different environment dynamics (φ) per topic.
+    """
+    difficulty: float          # >1 = harder, <1 = easier
+    noise_std: float           # stochasticity of learner response
+    impatience: float          # how quickly motivation/emotion drop under poor help
+
+
+# -------------------- main environment --------------------
 
 class LearnerModel:
     """
-    Abstract simulated environment for:
-      - a human learner
-      - an apprentice/tutee agent
-
-    This does NOT implement the RL loop; it just:
-      - stores state,
-      - applies tutor and tutee actions,
-      - computes rewards.
-
-    High-level + low-level agents will use this class inside a training loop.
+    Simulator aligned with the paper's computational experiment approach:
+    - Multi-variable learner state in [0,1]
+    - Action quality categorized into 5 levels
+    - Category-based variable shifts (topic-specific dynamics)
+    - Reward = average % change of learner variables + completion bonus
+    - Diminishing returns per learner
     """
 
-    def __init__(self, num_topics: int, prereqs):
+    def __init__(
+        self,
+        num_topics: int,
+        prereqs: Optional[Dict[int, List[int]]] = None,
+        seed: Optional[int] = 123,
+    ):
         self.num_topics = num_topics
-        self.state = LearnerTuteeState(num_topics=num_topics)
+        self.prereqs = prereqs or {}
+        self.rng = random.Random(seed)
 
-        # reward weights
-        self.w_mastery = 1.0
-        self.w_motivation = 0.3
-        self.w_error = 0.5
-        self.w_retention = 0.2
-
-        # threshold to consider an episode "done"
-        self.mastery_target = 0.95
+        # termination / completion thresholds
+        self.mastery_target = 0.90
+        self.score_target = 0.85
+        self.accuracy_target = 0.60
         self.max_steps = 200
-        self.prereqs = prereqs
-        self.flag = [True]*num_topics
+
+        # reward parameters
+        self.completion_bonus = 0.5  # analogous to r_c
+        self.reward_clip = (-2.0, 3.0)  # safe default; you can widen if needed
+        self.diminishing_k = 0.02       # per-learner diminishing returns strength
+
+        # build topic-specific dynamics
+        self.topic_dyn: List[TopicDynamics] = []
+        for t in range(num_topics):
+            # deterministic per-topic randomness (so runs are reproducible across resets)
+            self.rng.seed((seed or 0) * 10_000 + t * 97)
+            difficulty = self.rng.uniform(0.85, 1.25)
+            noise_std = self.rng.uniform(0.01, 0.03)
+            impatience = self.rng.uniform(0.015, 0.05)
+            self.topic_dyn.append(TopicDynamics(difficulty=difficulty, noise_std=noise_std, impatience=impatience))
+
+        self.state = LearnerTuteeState(num_topics=num_topics)
 
     # --------------- core API ----------------
 
@@ -80,274 +178,466 @@ class LearnerModel:
 
     def get_observation(self) -> List[float]:
         """
-        Flatten state into a numeric vector for RL agents.
+        Observation vector in a fixed order.
 
-        Current design:
-          [ mastery_learner..., mastery_tutee..., motivation, error_rate, retention ]
+        Order:
+          - mastery_learner[0..T-1]
+          - mastery_tutee[0..T-1]
+          - score[0..T-1]
+          - test_speed[0..T-1]
+          - segment_speed[0..T-1]
+          - emotion[0..T-1]
+          - input_quality[0..T-1]
+          - motivation, retention, accuracy
         """
         obs = []
         obs.extend(self.state.mastery_learner)
         obs.extend(self.state.mastery_tutee)
+        obs.extend(self.state.score)
+        obs.extend(self.state.test_speed)
+        obs.extend(self.state.segment_speed)
+        obs.extend(self.state.emotion)
+        obs.extend(self.state.input_quality)
         obs.append(self.state.motivation)
-        obs.append(self.state.error_rate)
         obs.append(self.state.retention)
+        obs.append(self.state.accuracy)
         return obs
 
     def step_tutor(self, topic_id: int, tutor_action: str) -> Tuple[List[float], float, bool, Dict]:
-        """
-        Apply a Tutor low-level action on a given topic.
-
-        Returns: next_obs, reward, done, info
-        """
-        prev_state = self.state.clone()
-        self._apply_tutor_action(topic_id, tutor_action)
+        prev = self.state.clone()
+        self._apply_action(topic_id, mode="tutor", action=tutor_action)
         self.state.step_count += 1
+        self.state.assist_count += 1
 
-        reward = self._compute_reward(prev_state, self.state)
-        # # high cost
-        # if tutor_action == "worked_example":
-        #     reward -= 1
+        reward = self._compute_reward(prev, self.state, topic_id)
         done = self._check_done()
-        if done and self.state.step_count < self.max_steps and self.flag[topic_id]:
-            self.flag[topic_id] = False
-            reward += 1
-        return self.get_observation(), reward, done, {}
+        return self.get_observation(), reward, done, {"mode": "tutor"}
 
     def step_tutee(self, topic_id: int, tutee_action: str) -> Tuple[List[float], float, bool, Dict]:
-        """
-        Apply a Tutee low-level action on a given topic.
-
-        Returns: next_obs, reward, done, info
-        """
-        prev_state = self.state.clone()
-        self._apply_tutee_action(topic_id, tutee_action)
+        prev = self.state.clone()
+        self._apply_action(topic_id, mode="tutee", action=tutee_action)
         self.state.step_count += 1
+        self.state.assist_count += 1
 
-        reward = self._compute_reward(prev_state, self.state)
+        reward = self._compute_reward(prev, self.state, topic_id)
         done = self._check_done()
-        return self.get_observation(), reward, done, {}
+        return self.get_observation(), reward, done, {"mode": "tutee"}
 
     # --------------- internal dynamics ----------------
 
     def _prereq_factor(self, topic_id: int) -> float:
-        # TODO revise
-        """Return how 'ready' the learner is for this topic based on prereqs."""
+        """
+        Readiness factor based on prereqs (paper uses different dynamics; this is a defensible proxy).
+        Returns [0,1]. Low prereq mastery reduces the effectiveness of help.
+        """
         if topic_id not in self.prereqs:
-            return 1.0  # no prereqs → full learning rate
-
-        prereq_ids = self.prereqs[topic_id]
+            return 1.0
+        prereq_ids = self.prereqs[topic_id] or []
         if not prereq_ids:
             return 1.0
+        avg = sum(self.state.mastery_learner[i] for i in prereq_ids) / len(prereq_ids)
+        return _clip01(avg)
 
-        # e.g. average mastery over prerequisites
-        avg_prereq_mastery = sum(self.state.mastery_learner[i] for i in prereq_ids) / len(prereq_ids)
-
-        # map [0,1] → [0.2, 1.0] so it's never completely zero
-        # return 0.2 + 0.8 * avg_prereq_mastery
-        return avg_prereq_mastery
-
-    def _apply_tutor_action(self, topic_id: int, action: str) -> None:
+    def _topic_complete_now(self, topic_id: int) -> bool:
         """
-        Simplified tutor effects on the learner.
+        Multi-criteria completion for a topic.
+        """
+        return (
+            self.state.mastery_learner[topic_id] >= self.mastery_target
+            and self.state.score[topic_id] >= self.score_target
+            and self.state.accuracy >= self.accuracy_target
+        )
 
-        Will refine these formulas later if needed.
+    def _apply_action(self, topic_id: int, mode: str, action: str) -> None:
+        """
+        Convert the selected action into a quality category, then apply category-based variable shifts.
+        """
+        dyn = self.topic_dyn[topic_id]
+        prereq = self._prereq_factor(topic_id)
+
+        # Determine action "quality category" based on current learner variables
+        q = self._action_quality(topic_id, mode, action)
+
+        # If prereq readiness is low, degrade quality (harder to learn out-of-order)
+        if prereq < 0.35:
+            q = _degrade_quality(q, 2)
+        elif prereq < 0.60:
+            q = _degrade_quality(q, 1)
+
+        # Apply category-based shifts
+        self._apply_quality_shifts(topic_id, mode, q, dyn, prereq)
+
+        # Update completion flag
+        if (not self.state.topic_done[topic_id]) and self._topic_complete_now(topic_id):
+            self.state.topic_done[topic_id] = True
+
+    def _action_quality(self, topic_id: int, mode: str, action: str) -> str:
+        """
+        Procedural 'decision-tree-like' mapping from MULTIPLE learner variables to a 5-level
+        action-quality category. This is a defensible surrogate for the paper's fitted trees.
+
+        Uses:
+          M  = mastery_learner[topic]
+          S  = score[topic]
+          ts = test_speed[topic]       (1 fast, 0 slow)
+          ss = segment_speed[topic]    (1 fast, 0 slow)
+          emo= emotion[topic]
+          iq = input_quality[topic]
+          mot= motivation (global)
+          acc= accuracy   (global)
+          ret= retention  (global)
+
+        Returns one of: very_bad, bad, neutral, good, very_good
         """
         M = self.state.mastery_learner[topic_id]
-        m = self.state.motivation
-        e = self.state.error_rate
-        r = self.state.retention
+        S = self.state.score[topic_id]
+        ts = self.state.test_speed[topic_id]
+        ss = self.state.segment_speed[topic_id]
+        emo = self.state.emotion[topic_id]
+        iq = self.state.input_quality[topic_id]
+        mot = self.state.motivation
+        acc = self.state.accuracy
+        ret = self.state.retention
 
-        # base learning rate depends on motivation and retention
-        base_gain = 0.05 + 0.1 * m + 0.05 * r
+        # --- aggregate signals ---
+        # "Struggle" increases when: low score, slow, poor input quality, low accuracy,
+        # low emotion/motivation.
+        struggle = (
+                (1.0 - S) * 0.30 +
+                (1.0 - ts) * 0.15 +
+                (1.0 - ss) * 0.10 +
+                (1.0 - iq) * 0.20 +
+                (1.0 - acc) * 0.15 +
+                (1.0 - emo) * 0.05 +
+                (1.0 - mot) * 0.05
+        )
+        struggle = _clip01(struggle)
 
-        if action == "hint":
-            delta_M = base_gain * 0.6 * (1 - M)
-            delta_m = 0.01
-            delta_e = -0.02
-        elif action == "worked_example":
-            delta_M = base_gain * 1.0 * (1 - M)
-            delta_m = 0.0
-            delta_e = -0.03
-        elif action == "reflection_question":
-            # harder, more gain if motivation is high; can hurt if motivation low
-            if m > 0.5:
-                delta_M = base_gain * 1.1 * (1 - M)
-                delta_m = 0.02
+        # "Teach readiness": learner benefits from teaching when mastery/score are decent,
+        # inputs/accuracy are decent, and motivation/emotion are not too low.
+        teach_ready = (
+                M * 0.35 +
+                S * 0.25 +
+                iq * 0.15 +
+                acc * 0.15 +
+                mot * 0.05 +
+                emo * 0.05
+        )
+        teach_ready = _clip01(teach_ready)
+
+        # If a topic is already done, extra instruction should be less valuable.
+        topic_done = self.state.topic_done[topic_id]
+
+        # ---------------- Tutor mode ----------------
+        if mode == "tutor":
+            # Completed topic: prefer practice/no_help, discourage worked examples.
+            if topic_done:
+                if action == "no_help":
+                    return "very_good"
+                if action == "reflection_question":
+                    return "good" if (mot > 0.45 and emo > 0.40) else "neutral"
+                if action == "hint":
+                    return "neutral"
+                if action == "worked_example":
+                    return "bad"
+                return "neutral"
+
+            # Phase by mastery, but modulated strongly by struggle/motivation/emotion/accuracy/input quality/speed.
+            if M < 0.35:
+                # Early stage: worked examples are often helpful if struggle is high.
+                if struggle > 0.60:
+                    if action == "worked_example":
+                        return "very_good"
+                    if action == "hint":
+                        return "good"
+                    if action == "reflection_question":
+                        return "neutral" if mot > 0.55 else "bad"
+                    if action == "no_help":
+                        return "very_bad"
+                else:
+                    # Learner not in severe struggle: hint + example are both good.
+                    if action == "worked_example":
+                        return "good"
+                    if action == "hint":
+                        return "very_good"
+                    if action == "reflection_question":
+                        return "neutral" if (mot > 0.55 and emo > 0.45) else "bad"
+                    if action == "no_help":
+                        return "bad"
+                return "neutral"
+
+            if 0.35 <= M < 0.70:
+                # Mid stage: prefer scaffolding (hint/reflection) unless struggle is high.
+                if struggle > 0.65:
+                    if action == "worked_example":
+                        return "very_good"
+                    if action == "hint":
+                        return "good"
+                    if action == "reflection_question":
+                        return "neutral" if (mot > 0.55 and acc > 0.55) else "bad"
+                    if action == "no_help":
+                        return "very_bad" if (mot < 0.5 or emo < 0.45) else "bad"
+                elif struggle > 0.35:
+                    if action == "hint":
+                        return "very_good"
+                    if action == "reflection_question":
+                        # reflection works if learner has enough affect + accuracy
+                        return "good" if (mot > 0.55 and emo > 0.45 and acc > 0.55) else "neutral"
+                    if action == "worked_example":
+                        return "good" if S < 0.60 else "neutral"
+                    if action == "no_help":
+                        return "neutral" if mot > 0.55 else "bad"
+                else:
+                    # Low struggle: push toward autonomy and reflection, minimize worked examples
+                    if action == "reflection_question":
+                        return "very_good" if (mot > 0.55 and emo > 0.45) else "good"
+                    if action == "no_help":
+                        return "good" if (mot > 0.50 and acc > 0.55) else "neutral"
+                    if action == "hint":
+                        return "neutral"
+                    if action == "worked_example":
+                        return "bad" if S > 0.75 else "neutral"
+                return "neutral"
+
+            # M >= 0.70
+            # Advanced: reflection/practice is best; worked example is usually wasteful; hint only if motivation/emotion low.
+            if struggle > 0.55:
+                # Even advanced learners can struggle (e.g., low accuracy/inputs). Use hints/targeted reflection.
+                if action == "hint":
+                    return "very_good"
+                if action == "reflection_question":
+                    return "good" if (mot > 0.50 and emo > 0.45) else "neutral"
+                if action == "no_help":
+                    return "neutral" if mot > 0.55 else "bad"
+                if action == "worked_example":
+                    return "neutral" if S < 0.70 else "bad"
             else:
-                delta_M = base_gain * 0.5 * (1 - M)
-                delta_m = -0.02
-            delta_e = -0.01
-        elif action == "no_help":
-            # pure practice: small gain, error may increase slightly
-            delta_M = base_gain * 0.2 * (1 - M)
-            delta_m = 0.0
-            delta_e = 0.05
-        else:
-            # unknown action: no change
-            delta_M = 0.0
-            delta_m = 0.0
-            delta_e = 0.0
+                if action == "reflection_question":
+                    return "very_good" if (mot > 0.50 and emo > 0.45) else "good"
+                if action == "no_help":
+                    return "very_good" if (mot > 0.55 and acc > 0.60) else "good"
+                if action == "hint":
+                    return "good" if (mot < 0.45 or emo < 0.40) else "neutral"
+                if action == "worked_example":
+                    return "bad"
+            return "neutral"
 
-        factor = self._prereq_factor(topic_id)
-        delta_M *= factor
-        delta_m *= factor
-        delta_e *= factor
-        # apply with noise
-        noise = random.gauss(0.0, 0.01)
-        self.state.mastery_learner[topic_id] = _clip01(M + delta_M + noise)
-        self.state.motivation = _clip01(m + delta_m)
-        self.state.error_rate = _clip01(e + delta_e)
-        # retention grows slowly as mastery increases
-        self.state.retention = _clip01(r + 0.02 * delta_M)
+        # ---------------- Tutee mode ----------------
+        if mode == "tutee":
+            # If topic already done, teaching is generally good for consolidation if motivation not too low.
+            if topic_done and mot > 0.40:
+                if action == "show_mistake_and_ask_fix":
+                    return "very_good" if teach_ready > 0.70 else "good"
+                if action == "ask_explanation":
+                    return "good"
+                if action == "ask_summary":
+                    return "good" if ret > 0.45 else "neutral"
+                if action == "ask_worked_example":
+                    return "neutral"
+                return "neutral"
 
-    def _apply_tutee_action(self, topic_id: int, action: str) -> None:
+            # Low teach readiness: forcing explanation/fix is risky; worked-example requests are safer.
+            if teach_ready < 0.45:
+                if action == "ask_worked_example":
+                    return "good" if struggle > 0.55 else "neutral"
+                if action == "ask_explanation":
+                    return "neutral" if mot > 0.55 else "bad"
+                if action == "ask_summary":
+                    return "neutral" if emo > 0.45 else "bad"
+                if action == "show_mistake_and_ask_fix":
+                    return "very_bad" if struggle > 0.55 else "bad"
+                return "neutral"
+
+            # Medium teach readiness: explanation/summary/fix can be good if affect/accuracy are reasonable.
+            if 0.45 <= teach_ready < 0.75:
+                if action == "ask_explanation":
+                    return "very_good" if (mot > 0.55 and acc > 0.55) else "good"
+                if action == "ask_summary":
+                    return "good" if (emo > 0.45 and ret > 0.40) else "neutral"
+                if action == "show_mistake_and_ask_fix":
+                    return "good" if (acc > 0.55 and iq > 0.50) else "neutral"
+                if action == "ask_worked_example":
+                    # at this stage, asking for worked example gives less learner-side benefit
+                    return "neutral"
+                return "neutral"
+
+            # High teach readiness: mistake-fixing is strongest protégé-style consolidation.
+            # But if motivation/emotion are low, explanation is safer.
+            if action == "show_mistake_and_ask_fix":
+                return "very_good" if (mot > 0.45 and emo > 0.40 and acc > 0.55) else "good"
+            if action == "ask_explanation":
+                return "very_good" if mot > 0.50 else "good"
+            if action == "ask_summary":
+                return "good" if ret > 0.45 else "neutral"
+            if action == "ask_worked_example":
+                return "neutral" if struggle > 0.65 else "bad"
+            return "neutral"
+
+        return "neutral"
+
+    def _apply_quality_shifts(self, topic_id: int, mode: str, q: str, dyn: TopicDynamics, prereq: float) -> None:
         """
-        Tutee request + learner teaching attempt.
-
-        Implements the protégé effect:
-          - learner gains extra mastery when successfully teaching
-          - tutee's own mastery is updated
+        Category-based shifts of ALL learner variables (topic-specific dynamics).
+        This is the key structural alignment with the paper's simulation design.
         """
-        ML = self.state.mastery_learner[topic_id]
-        MT = self.state.mastery_tutee[topic_id]
-        m = self.state.motivation
-        e = self.state.error_rate
-        r = self.state.retention
+        # base magnitude by quality level
+        # positive gains reduce with difficulty; negative effects increase with difficulty
+        if q == "very_good":
+            base = 0.16 / dyn.difficulty
+            emo_delta = 0.04
+            mot_delta = 0.02
+            acc_delta = 0.02
+        elif q == "good":
+            base = 0.09 / dyn.difficulty
+            emo_delta = 0.02
+            mot_delta = 0.01
+            acc_delta = 0.01
+        elif q == "neutral":
+            base = 0.02 / dyn.difficulty
+            emo_delta = 0.00
+            mot_delta = 0.00
+            acc_delta = 0.00
+        elif q == "bad":
+            base = -0.05 * dyn.difficulty
+            emo_delta = -0.02 - dyn.impatience
+            mot_delta = -0.02 - dyn.impatience
+            acc_delta = -0.01
+        else:  # very_bad
+            base = -0.09 * dyn.difficulty
+            emo_delta = -0.04 - 2.0 * dyn.impatience
+            mot_delta = -0.04 - 2.0 * dyn.impatience
+            acc_delta = -0.02
 
-        # probability that learner gives a good explanation depends on learner mastery + motivation
-        # TODO refine it
-        # if ML < 0.5:
-        #     p_success = 0
-        # else:
-        #     p_success = _clip01(0.2 + 0.6 * ML + 0.2 * m)
-        p_success = _clip01(-0.1 + 0.8 * ML + 0.3 * m)
-        p_partial = _clip01(0.1 + 0.3 * ML)
-        # re-normalize
-        total = p_success + p_partial
-        if total > 1.0:
-            p_success /= total
-            p_partial /= total
-        p_fail = 1.0 - (p_success + p_partial)
+        # apply prereq scaling (readiness)
+        base *= (0.40 + 0.60 * prereq)
 
-        outcome = _sample_outcome(p_success, p_partial, p_fail)
+        # stochastic noise
+        n = dyn.noise_std
+        noise = lambda: self.rng.gauss(0.0, n)
 
-        # base teaching gain
-        base_gain = 0.04 + 0.08 * m + 0.04 * r
-        # TODO refine this hyperparameter
-        protege_bonus = 0.1  # extra gain for learner when teaching succeeds
+        # shorthand
+        M = self.state.mastery_learner[topic_id]
+        S = self.state.score[topic_id]
+        ts = self.state.test_speed[topic_id]
+        ss = self.state.segment_speed[topic_id]
+        emo = self.state.emotion[topic_id]
+        iq = self.state.input_quality[topic_id]
 
-        if action == "ask_explanation":
-            learner_mult = 1.2
-            tutee_mult = 1.0
-        elif action == "ask_worked_example":
-            learner_mult = 1.0
-            tutee_mult = 1.1
-        elif action == "ask_summary":
-            learner_mult = 0.8
-            tutee_mult = 0.8
-        elif action == "show_mistake_and_ask_fix":
-            learner_mult = 1.3
-            tutee_mult = 1.2
+        # mastery and score improve with diminishing returns when near 1
+        if base >= 0:
+            dM = base * (1.0 - M) + noise()
+            dS = (base * 0.9) * (1.0 - S) + noise()
+            dts = (base * 0.6) * (1.0 - ts) + noise()
+            dss = (base * 0.6) * (1.0 - ss) + noise()
+            diq = (base * 0.7) * (1.0 - iq) + noise()
         else:
-            learner_mult = 1.0
-            tutee_mult = 1.0
+            # negative base: push down more when variables are already low (fragility)
+            dM = base * (0.30 + 0.70 * M) + noise()
+            dS = (base * 0.8) * (0.30 + 0.70 * S) + noise()
+            dts = (base * 0.4) * (0.30 + 0.70 * ts) + noise()
+            dss = (base * 0.4) * (0.30 + 0.70 * ss) + noise()
+            diq = (base * 0.6) * (0.30 + 0.70 * iq) + noise()
 
-        if outcome == "success":
-            delta_M_learner = base_gain * learner_mult * (1 - ML) + protege_bonus
-            delta_M_tutee = base_gain * tutee_mult * (1 - MT)
-            delta_m = 0.02
-            delta_e = -0.02
-        elif outcome == "partial":
-            delta_M_learner = base_gain * 0.7 * learner_mult * (1 - ML) + protege_bonus * 0.5
-            delta_M_tutee = base_gain * 0.6 * tutee_mult * (1 - MT)
-            delta_m = 0.0
-            delta_e = -0.01
-        else:  # fail ("I don't know" / incorrect)
-            delta_M_learner = -0.05  # small setback / confusion
-            delta_M_tutee = base_gain * 0.2 * (1 - MT)  # tutee still learns a bit
-            delta_m = -0.05
-            delta_e = 0.02
+        # protégé effect: when mode == tutee and quality is positive, learner gets extra mastery/retention boost
+        protege_bonus = 0.0
+        if mode == "tutee":
+            if q in ("good", "very_good"):
+                protege_bonus = 0.04 if q == "very_good" else 0.02
 
-        factor = self._prereq_factor(topic_id)
-        delta_M_learner *= factor
-        # apply with noise
-        noise_L = random.gauss(0.0, 0.01)
-        noise_T = random.gauss(0.0, 0.01)
+        # update topic variables
+        self.state.mastery_learner[topic_id] = _clip01(M + dM + protege_bonus)
+        self.state.score[topic_id] = _clip01(S + dS)
+        self.state.test_speed[topic_id] = _clip01(ts + dts)
+        self.state.segment_speed[topic_id] = _clip01(ss + dss)
+        self.state.input_quality[topic_id] = _clip01(iq + diq)
 
-        self.state.mastery_learner[topic_id] = _clip01(ML + delta_M_learner + noise_L)
-        self.state.mastery_tutee[topic_id] = _clip01(MT + delta_M_tutee + noise_T)
-        self.state.motivation = _clip01(m + delta_m)
-        self.state.error_rate = _clip01(e + delta_e)
-        self.state.retention = _clip01(r + 0.03 * max(delta_M_learner, 0.0))
+        # emotion and motivation/global accuracy
+        self.state.emotion[topic_id] = _clip01(emo + emo_delta + noise())
+        self.state.motivation = _clip01(self.state.motivation + mot_delta + noise() * 0.5)
+        self.state.accuracy = _clip01(self.state.accuracy + acc_delta + noise() * 0.3)
+
+        # retention grows slowly with positive learning (and especially through teaching)
+        if dM + protege_bonus > 0:
+            self.state.retention = _clip01(self.state.retention + 0.03 * (dM + protege_bonus))
+        else:
+            # slight forgetting / instability under poor intervention
+            self.state.retention = _clip01(self.state.retention + 0.01 * dM)
+
+        # tutee mastery update: improves mainly when mode == tutee and learner performs well
+        if mode == "tutee":
+            MT = self.state.mastery_tutee[topic_id]
+            if q == "very_good":
+                dT = 0.10 * (1.0 - MT) + noise()
+            elif q == "good":
+                dT = 0.06 * (1.0 - MT) + noise()
+            elif q == "neutral":
+                dT = 0.02 * (1.0 - MT) + noise()
+            else:
+                dT = 0.01 * (1.0 - MT) + noise()  # still learns a bit
+            self.state.mastery_tutee[topic_id] = _clip01(MT + dT)
 
     # --------------- reward & termination ----------------
 
-    def _compute_reward(self, prev: LearnerTuteeState, cur: LearnerTuteeState) -> float:
+    def _compute_reward(self, prev: LearnerTuteeState, cur: LearnerTuteeState, topic_id: int) -> float:
         """
-        Reward encourages:
-          - increases in learner mastery (primary)
-          - increases in motivation and retention
-          - decreases in error_rate
-
-        Can also experiment with including tutee mastery here if we want
-        the tutor to care explicitly about the tutee.
+        Reward = average percentage change across learner performance variables + completion bonus.
+        Applies diminishing returns per learner (assist_count).
         """
-        avg_prev_mastery = sum(prev.mastery_learner) / prev.num_topics
-        avg_cur_mastery = sum(cur.mastery_learner) / cur.num_topics
+        # Build variable lists (exclude tutee mastery from reward by default)
+        prev_vars: List[float] = []
+        cur_vars: List[float] = []
 
-        delta_mastery = avg_cur_mastery - avg_prev_mastery
-        delta_motivation = cur.motivation - prev.motivation
-        delta_error = cur.error_rate - prev.error_rate
-        delta_retention = cur.retention - prev.retention
+        # per-topic learner variables
+        prev_vars.extend(prev.mastery_learner)
+        cur_vars.extend(cur.mastery_learner)
 
-        reward = (
-                self.w_mastery * delta_mastery
-                + self.w_motivation * delta_motivation
-                - self.w_error * delta_error
-                + self.w_retention * delta_retention
-        )
-        # Time cost
-        reward -= 0.008
+        prev_vars.extend(prev.score)
+        cur_vars.extend(cur.score)
 
+        prev_vars.extend(prev.test_speed)
+        cur_vars.extend(cur.test_speed)
+
+        prev_vars.extend(prev.segment_speed)
+        cur_vars.extend(cur.segment_speed)
+
+        prev_vars.extend(prev.emotion)
+        cur_vars.extend(cur.emotion)
+
+        prev_vars.extend(prev.input_quality)
+        cur_vars.extend(cur.input_quality)
+
+        # global learner variables
+        prev_vars.append(prev.motivation)
+        cur_vars.append(cur.motivation)
+
+        prev_vars.append(prev.retention)
+        cur_vars.append(cur.retention)
+
+        prev_vars.append(prev.accuracy)
+        cur_vars.append(cur.accuracy)
+
+        # average % change
+        changes = [_pct_change(c, p) for c, p in zip(cur_vars, prev_vars)]
+        reward = sum(changes) / max(1, len(changes))
+
+        # completion bonus if this step completed the topic
+        if (not prev.topic_done[topic_id]) and cur.topic_done[topic_id]:
+            reward += self.completion_bonus
+
+        # diminishing returns per learner (discourage excessive assistance)
+        decay = 1.0 / (1.0 + self.diminishing_k * max(0, cur.assist_count))
+        reward *= decay
+
+        # clip reward
+        lo, hi = self.reward_clip
+        reward = max(lo, min(hi, reward))
         return reward
 
     def _check_done(self) -> bool:
-        # avg_mastery = sum(self.state.mastery_learner) / self.num_topics
-        # if avg_mastery >= self.mastery_target:
-        #     return True
-        # if self.state.step_count >= self.max_steps:
-        #     return True
-        # return False
-        # Episode ends only when ALL learner topics reach mastery threshold
-        for m in self.state.mastery_learner:
-            if m < self.mastery_target:
-                break
-        else:
+        # end when all topics are complete
+        if all(self.state.topic_done):
             return True
-
-        # Safety cap on episode length
+        # safety cap
         if self.state.step_count >= self.max_steps:
             return True
-
         return False
-
-
-# --------------- helpers ----------------
-
-def _clip01(x: float) -> float:
-    return max(0.0, min(1.0, x))
-
-
-def _sample_outcome(p_success: float, p_partial: float, p_fail: float) -> str:
-    """
-    Sample one of {"success", "partial", "fail"} given probabilities.
-    """
-    # TODO refine later
-    # if p_success < 0.2:
-    #     return "fail"
-    r = random.random()
-    if r < p_success:
-        return "success"
-    if r < p_success + p_partial:
-        return "partial"
-    return "fail"

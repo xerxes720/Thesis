@@ -2,102 +2,298 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Tuple, Hashable, List
+from typing import List, Optional, Sequence, Tuple
 import random
-import math
+from collections import deque
 
-StateType = Tuple[Hashable, ...]
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
 
 @dataclass
 class LowLevelAgentConfig:
     num_topics: int
-    num_buckets = 5
-    alpha: float = 0.001
-    gamma: float = 0.9
+
+    # DQN hyperparameters
+    gamma: float = 0.95
+    lr: float = 1e-3
     epsilon: float = 0.1
-    state_rounding: int = 2
+
+    buffer_size: int = 50_000
+    batch_size: int = 128
+    min_replay_size: int = 1_000
+
+    target_update_steps: int = 1_000
+    train_every_steps: int = 1
+
+    max_grad_norm: float = 10.0
+    device: str = "cpu"
+
+    # --- Experience sharing ---
+    experience_sharing: bool = True
+    share_mode: str = "weighted_cka"  # options: "off", "mutual", "weighted_cka"
+    max_peers_per_update: int = 3     # sample up to this many peers each train step (for speed)
+    peer_batch_size: int = 32         # how many transitions to sample from each peer
+    min_peer_replay_size: int = 500   # peers must have at least this many samples to participate
+    share_weight_floor: float = 0.0   # clamp similarity weights
+    share_weight_ceiling: float = 1.0
+    cka_layers: Tuple[str, ...] = ("h1", "h2")  # which layers to use for similarity
 
 
-class TabularLowLevelAgent:
+# ---------------- Replay Buffer ----------------
+
+class ReplayBuffer:
+    def __init__(self, capacity: int):
+        self.buffer = deque(maxlen=capacity)
+
+    def push(self, s, a, r, s2, done):
+        self.buffer.append((s, a, r, s2, done))
+
+    def __len__(self):
+        return len(self.buffer)
+
+    def sample(self, batch_size: int):
+        batch = random.sample(self.buffer, batch_size)
+        s, a, r, s2, d = zip(*batch)
+        return list(s), list(a), list(r), list(s2), list(d)
+
+class QNetwork(nn.Module):
     """
-    Generic tabular Q-learning agent for low-level decisions.
-    Concrete subclasses only need to define `actions` (list of str).
+    MLP 64-64, with optional access to intermediate hidden representations for CKA.
+    """
+    def __init__(self, input_dim: int, num_actions: int):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.out = nn.Linear(64, num_actions)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h1 = torch.relu(self.fc1(x))
+        h2 = torch.relu(self.fc2(h1))
+        return self.out(h2)
+
+    def forward_with_reps(self, x: torch.Tensor) -> dict:
+        h1 = torch.relu(self.fc1(x))
+        h2 = torch.relu(self.fc2(h1))
+        q = self.out(h2)
+        return {"h1": h1, "h2": h2, "q": q}
+
+# ---------------- Similarity (Linear CKA) ----------------
+
+def linear_cka(X: torch.Tensor, Y: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """
+    Linear CKA similarity between representations X and Y.
+    X: [n, d1], Y: [n, d2]
+    Uses centered features (mean-subtracted) which is common in practice.
+    Returns scalar tensor in [0, 1] (approximately).
+    """
+    X = X - X.mean(dim=0, keepdim=True)
+    Y = Y - Y.mean(dim=0, keepdim=True)
+
+    # numerator = || X^T Y ||_F^2
+    XT_Y = X.T @ Y
+    num = (XT_Y ** 2).sum()
+
+    # denom = sqrt(||X^T X||_F^2 * ||Y^T Y||_F^2)
+    XT_X = X.T @ X
+    YT_Y = Y.T @ Y
+    denom = torch.sqrt(((XT_X ** 2).sum() * (YT_Y ** 2).sum()).clamp_min(eps))
+
+    return (num / denom).clamp(0.0, 1.0)
+
+def avg_layer_cka(
+    net_a: QNetwork,
+    net_b: QNetwork,
+    states: torch.Tensor,
+    layers: Sequence[str],
+) -> float:
+    """
+    Compute average Linear CKA across specified layers using the same input states.
+    """
+    with torch.no_grad():
+        reps_a = net_a.forward_with_reps(states)
+        reps_b = net_b.forward_with_reps(states)
+
+        vals = []
+        for layer in layers:
+            if layer not in reps_a or layer not in reps_b:
+                continue
+            cka = linear_cka(reps_a[layer], reps_b[layer]).item()
+            vals.append(cka)
+
+        if not vals:
+            return 0.0
+        return float(sum(vals) / len(vals))
+
+
+class DQNLowLevelAgent:
+    """
+    Generic DQN low-level agent with optional experience sharing.
+
+    - Each agent has its own replay buffer.
+    - During training, it can also sample from peer buffers.
+    - Peer samples are weighted (mutual or similarity-weighted via CKA).
     """
 
     def __init__(self, config: LowLevelAgentConfig, actions: List[str]):
         self.cfg = config
         self.actions = actions
-        self.q_table: Dict[Tuple[StateType, int], float] = {}
+        self.device = torch.device(self.cfg.device)
+
+        self.replay = ReplayBuffer(self.cfg.buffer_size)
+        self.policy_net: Optional[QNetwork] = None
+        self.target_net: Optional[QNetwork] = None
+        self.optimizer: Optional[optim.Optimizer] = None
+
+        self.total_steps = 0
+        self._peers: List["DQNLowLevelAgent"] = []
+
 
     @property
     def num_actions(self) -> int:
         return len(self.actions)
 
+
     def get_action_meanings(self) -> List[str]:
         return self.actions
 
-    def select_action(self, obs: List[float]) -> int:
-        state = self._encode_state(obs)
-        if random.random() < self.cfg.epsilon:
-            return random.randrange(self.num_actions)
-
-        q_vals = [self.q_table.get((state, a), 0.0) for a in range(self.num_actions)]
-        max_q = max(q_vals)
-        best_actions = [a for a, q in enumerate(q_vals) if math.isclose(q, max_q)]
-        return random.choice(best_actions)
 
     def set_epsilon(self, epsilon: float) -> None:
         self.cfg.epsilon = max(0.0, float(epsilon))
 
-    def update(
-            self,
-            obs: List[float],
-            action: int,
-            reward: float,
-            next_obs: List[float],
-            done: bool,
-    ) -> None:
-        state = self._encode_state(obs)
-        next_state = self._encode_state(next_obs)
 
-        key = (state, action)
-        old_q = self.q_table.get(key, 0.0)
-
-        if done:
-            target = reward
-        else:
-            next_qs = [self.q_table.get((next_state, a), 0.0) for a in range(self.num_actions)]
-            target = reward + self.cfg.gamma * max(next_qs, default=0.0)
-
-        new_q = old_q + self.cfg.alpha * (target - old_q)
-        self.q_table[key] = new_q
-
-    # --------- internal helpers ---------
-
-    def _encode_state(self, obs: List[float]) -> StateType:
-        # r = self.cfg.state_rounding
-        # return tuple(round(x, r) for x in obs)
+    def set_peers(self, peers: List["DQNLowLevelAgent"]) -> None:
         """
-        Expect obs to be: [full_high_level_obs..., topic_id].
-        We compress this to (topic_id, mastery_bucket) for the learner.
+        Set peer agents used for experience sharing. Typically called once after creation.
         """
-        topic_id = int(round(obs[-1]))  # last element is topic_id
-        # num_topics = 8  # TODO pass via config
-        num_topics = self.cfg.num_topics
-        bucket_count = self.cfg.num_buckets
-        learner_mastery = obs[0:num_topics]  # first num_topics: learner mastery
+        # avoid self references
+        self._peers = [p for p in peers if p is not self]
 
-        m = learner_mastery[topic_id]
-        bucket = min(bucket_count - 1, int(m * bucket_count))
-        # if m < 0.33:
-        #     bucket = 0
-        # elif m < 0.66:
-        #     bucket = 1
-        # else:
-        #     bucket = 2
 
-        return topic_id, bucket
+    def select_action(self, obs: List[float]) -> int:
+        self._ensure_networks(input_dim=len(obs))
+
+        if random.random() < self.cfg.epsilon:
+            return random.randrange(self.num_actions)
+
+        with torch.no_grad():
+            x = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+            q = self.policy_net(x)
+            return int(torch.argmax(q, dim=1).item())
+
+
+    def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool) -> None:
+        self._ensure_networks(input_dim=len(obs))
+
+        # store own transition
+        self.replay.push(list(obs), int(action), float(reward), list(next_obs), bool(done))
+        self.total_steps += 1
+
+        if self.total_steps % self.cfg.train_every_steps != 0:
+            return
+
+        if len(self.replay) < max(self.cfg.min_replay_size, self.cfg.batch_size):
+            return
+
+        # -------- Build training batch: own + shared --------
+        batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w = self._build_shared_batch()
+
+        s_t = torch.tensor(batch_s, dtype=torch.float32, device=self.device)
+        a_t = torch.tensor(batch_a, dtype=torch.int64, device=self.device).unsqueeze(1)
+        r_t = torch.tensor(batch_r, dtype=torch.float32, device=self.device)
+        s2_t = torch.tensor(batch_s2, dtype=torch.float32, device=self.device)
+        d_t = torch.tensor(batch_d, dtype=torch.float32, device=self.device)
+        w_t = torch.tensor(batch_w, dtype=torch.float32, device=self.device)
+
+        # Q(s,a)
+        q_sa = self.policy_net(s_t).gather(1, a_t).squeeze(1)
+
+        # Double DQN target:
+        with torch.no_grad():
+            next_actions = torch.argmax(self.policy_net(s2_t), dim=1, keepdim=True)
+            next_q = self.target_net(s2_t).gather(1, next_actions).squeeze(1)
+            target = r_t + self.cfg.gamma * (1.0 - d_t) * next_q
+
+        # Weighted TD loss
+        td = (q_sa - target)
+        loss = (w_t * (td ** 2)).mean()
+
+        self.optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.cfg.max_grad_norm)
+        self.optimizer.step()
+
+        # target net update
+        if self.total_steps % self.cfg.target_update_steps == 0:
+            self.target_net.load_state_dict(self.policy_net.state_dict())
+
+
+    # -------- internals --------
+
+    def _build_shared_batch(self):
+        """
+        Returns combined batch arrays:
+          s, a, r, s2, d, w (weights)
+        """
+        # Start with own batch weight 1.0
+        s, a, r, s2, d = self.replay.sample(self.cfg.batch_size)
+        w = [1.0] * len(s)
+
+        if (not self.cfg.experience_sharing) or self.cfg.share_mode == "off":
+            return s, a, r, s2, d, w
+
+        # Determine eligible peers (enough replay)
+        eligible = [
+            p for p in self._peers
+            if len(p.replay) >= max(self.cfg.min_peer_replay_size, self.cfg.peer_batch_size)
+               and p.policy_net is not None
+        ]
+        if not eligible:
+            return s, a, r, s2, d, w
+
+        # Sample a subset of peers for this update (for speed)
+        k = min(self.cfg.max_peers_per_update, len(eligible))
+        peers = random.sample(eligible, k)
+
+        # We compute similarity on the peer states (s) used for sharing.
+        for p in peers:
+            ps, pa, pr, ps2, pd = p.replay.sample(self.cfg.peer_batch_size)
+
+            if self.cfg.share_mode == "mutual":
+                weight = 1.0
+            elif self.cfg.share_mode == "weighted_cka":
+                # compute CKA between representations on the SAME states
+                states_t = torch.tensor(ps, dtype=torch.float32, device=self.device)
+                # Note: networks live on potentially different devices; move peer net to our device temporarily not advised.
+                # Best practice: enforce same device in config.
+                weight = avg_layer_cka(self.policy_net, p.policy_net, states_t, self.cfg.cka_layers)
+            else:
+                weight = 0.0
+
+            weight = max(self.cfg.share_weight_floor, min(self.cfg.share_weight_ceiling, float(weight)))
+
+            # append peer transitions with per-sample weight
+            s.extend(ps)
+            a.extend(pa)
+            r.extend(pr)
+            s2.extend(ps2)
+            d.extend(pd)
+            w.extend([weight] * len(ps))
+
+        return s, a, r, s2, d, w
+
+
+    def _ensure_networks(self, input_dim: int) -> None:
+        if self.policy_net is not None:
+            return
+
+        self.policy_net = QNetwork(input_dim=input_dim, num_actions=self.num_actions).to(self.device)
+        self.target_net = QNetwork(input_dim=input_dim, num_actions=self.num_actions).to(self.device)
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.target_net.eval()
+
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.cfg.lr)
 
 
 # ---------- TUTOR low-level agents ----------
@@ -114,14 +310,9 @@ def build_tutor_actions() -> List[str]:
     ]
 
 
-class TutorLowLevelAgent(TabularLowLevelAgent):
-    """
-    One instance per topic
-    """
-
+class TutorLowLevelAgent(DQNLowLevelAgent):
     def __init__(self, config: LowLevelAgentConfig):
         super().__init__(config, actions=build_tutor_actions())
-
 
 # ---------- TUTEE low-level agent ----------
 
@@ -137,11 +328,6 @@ def build_tutee_actions() -> List[str]:
     ]
 
 
-class TuteeLowLevelAgent(TabularLowLevelAgent):
-    """
-    Single instance for the whole system.
-    Topic information should be part of the state passed to select_action().
-    """
-
+class TuteeLowLevelAgent(DQNLowLevelAgent):
     def __init__(self, config: LowLevelAgentConfig):
         super().__init__(config, actions=build_tutee_actions())

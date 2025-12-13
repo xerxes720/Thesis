@@ -25,6 +25,11 @@ def create_agents(num_topics: int, use_tutee: bool = True):
     tutor_agents = [TutorLowLevelAgent(ll_cfg) for _ in range(num_topics)]
     tutee_agent = TuteeLowLevelAgent(ll_cfg) if use_tutee else None
 
+    # --- NEW: wire experience sharing among tutor agents ---
+    for i, agent in enumerate(tutor_agents):
+        peers = [p for j, p in enumerate(tutor_agents) if j != i]
+        agent.set_peers(peers)
+
     return high_level_agent, tutor_agents, tutee_agent
 
 
