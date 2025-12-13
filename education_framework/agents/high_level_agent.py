@@ -25,15 +25,15 @@ class HighLevelAgentConfig:
     epsilon: float = 0.1
 
     buffer_size: int = 50_000
-    batch_size: int = 128
+    batch_size: int = 1024
     min_replay_size: int = 1_000
 
     target_update_steps: int = 1_000
-    train_every_steps: int = 1
+    train_every_steps: int = 500
 
     # for numerical stability
     max_grad_norm: float = 10.0
-    device: str = "cpu"  # change to "cuda" if you want
+    device: str = "cuda"  # change to "cuda" if you want
 
 
 class ReplayBuffer:

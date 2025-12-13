@@ -21,22 +21,24 @@ class LowLevelAgentConfig:
     epsilon: float = 0.1
 
     buffer_size: int = 50_000
-    batch_size: int = 128
+    batch_size: int = 1024
     min_replay_size: int = 1_000
 
     target_update_steps: int = 1_000
-    train_every_steps: int = 1
+    train_every_steps: int = 500
 
     max_grad_norm: float = 10.0
-    device: str = "cpu"
+    device: str = "cuda"
 
     # --- Experience sharing ---
     experience_sharing: bool = True
+    # experience_sharing: bool = False
     share_mode: str = "weighted_cka"  # options: "off", "mutual", "weighted_cka"
-    max_peers_per_update: int = 3     # sample up to this many peers each train step (for speed)
-    peer_batch_size: int = 32         # how many transitions to sample from each peer
-    min_peer_replay_size: int = 500   # peers must have at least this many samples to participate
-    share_weight_floor: float = 0.0   # clamp similarity weights
+    # share_mode: str = "off"  # options: "off", "mutual", "weighted_cka"
+    max_peers_per_update: int = 3  # sample up to this many peers each train step (for speed)
+    peer_batch_size: int = 32  # how many transitions to sample from each peer
+    min_peer_replay_size: int = 500  # peers must have at least this many samples to participate
+    share_weight_floor: float = 0.0  # clamp similarity weights
     share_weight_ceiling: float = 1.0
     cka_layers: Tuple[str, ...] = ("h1", "h2")  # which layers to use for similarity
 
@@ -58,10 +60,12 @@ class ReplayBuffer:
         s, a, r, s2, d = zip(*batch)
         return list(s), list(a), list(r), list(s2), list(d)
 
+
 class QNetwork(nn.Module):
     """
     MLP 64-64, with optional access to intermediate hidden representations for CKA.
     """
+
     def __init__(self, input_dim: int, num_actions: int):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, 64)
@@ -78,6 +82,7 @@ class QNetwork(nn.Module):
         h2 = torch.relu(self.fc2(h1))
         q = self.out(h2)
         return {"h1": h1, "h2": h2, "q": q}
+
 
 # ---------------- Similarity (Linear CKA) ----------------
 
@@ -102,11 +107,12 @@ def linear_cka(X: torch.Tensor, Y: torch.Tensor, eps: float = 1e-8) -> torch.Ten
 
     return (num / denom).clamp(0.0, 1.0)
 
+
 def avg_layer_cka(
-    net_a: QNetwork,
-    net_b: QNetwork,
-    states: torch.Tensor,
-    layers: Sequence[str],
+        net_a: QNetwork,
+        net_b: QNetwork,
+        states: torch.Tensor,
+        layers: Sequence[str],
 ) -> float:
     """
     Compute average Linear CKA across specified layers using the same input states.
@@ -149,19 +155,15 @@ class DQNLowLevelAgent:
         self.total_steps = 0
         self._peers: List["DQNLowLevelAgent"] = []
 
-
     @property
     def num_actions(self) -> int:
         return len(self.actions)
 
-
     def get_action_meanings(self) -> List[str]:
         return self.actions
 
-
     def set_epsilon(self, epsilon: float) -> None:
         self.cfg.epsilon = max(0.0, float(epsilon))
-
 
     def set_peers(self, peers: List["DQNLowLevelAgent"]) -> None:
         """
@@ -169,7 +171,6 @@ class DQNLowLevelAgent:
         """
         # avoid self references
         self._peers = [p for p in peers if p is not self]
-
 
     def select_action(self, obs: List[float]) -> int:
         self._ensure_networks(input_dim=len(obs))
@@ -181,7 +182,6 @@ class DQNLowLevelAgent:
             x = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             q = self.policy_net(x)
             return int(torch.argmax(q, dim=1).item())
-
 
     def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool) -> None:
         self._ensure_networks(input_dim=len(obs))
@@ -227,7 +227,6 @@ class DQNLowLevelAgent:
         # target net update
         if self.total_steps % self.cfg.target_update_steps == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
-
 
     # -------- internals --------
 
@@ -283,7 +282,6 @@ class DQNLowLevelAgent:
 
         return s, a, r, s2, d, w
 
-
     def _ensure_networks(self, input_dim: int) -> None:
         if self.policy_net is not None:
             return
@@ -313,6 +311,7 @@ def build_tutor_actions() -> List[str]:
 class TutorLowLevelAgent(DQNLowLevelAgent):
     def __init__(self, config: LowLevelAgentConfig):
         super().__init__(config, actions=build_tutor_actions())
+
 
 # ---------- TUTEE low-level agent ----------
 

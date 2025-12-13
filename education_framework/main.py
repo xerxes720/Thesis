@@ -10,6 +10,12 @@ from agents.low_level_agents import (
 )
 from environment.learner_model import LearnerModel
 
+import sys, torch
+print("PYTHON EXE:", sys.executable)
+print("torch:", torch.__version__)
+print("torch cuda build:", torch.version.cuda)
+print("cuda available:", torch.cuda.is_available())
+
 
 def create_agents(num_topics: int, use_tutee: bool = True):
     """
@@ -157,7 +163,7 @@ def main():
     num_topics = 8
     use_tutee = True
     num_episodes = 6000
-    log_window = 1000
+    log_window = 100
     eps_start = 0.2
     eps_end = 0.0
     eps_decay_episodes = num_episodes
