@@ -1,332 +1,213 @@
-# main.py
 
-from collections import defaultdict
+# main_batched.py
+import numpy as np
+import torch
 
 from agents.high_level_agent import HighLevelAgent, HighLevelAgentConfig
-from agents.low_level_agents import (
-    TutorLowLevelAgent,
-    TuteeLowLevelAgent,
-    LowLevelAgentConfig,
-)
-from environment.learner_model import LearnerModel
-
-import sys, torch
-
-print("PYTHON EXE:", sys.executable)
-print("torch:", torch.__version__)
-print("torch cuda build:", torch.version.cuda)
-print("cuda available:", torch.cuda.is_available())
+from agents.low_level_agents import TutorLowLevelAgent, TuteeLowLevelAgent, LowLevelAgentConfig
+from environment.vector_env import VectorLearnerModel
 
 
 def create_agents(num_topics: int, use_tutee: bool = True):
-    """
-    Create and return:
-      - one high-level agent
-      - a list of low-level tutor agents (one per topic)
-      - one low-level tutee agent (or None if use_tutee=False)
-    """
     hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
-    high_level_agent = HighLevelAgent(hl_cfg)
-
     ll_cfg = LowLevelAgentConfig(num_topics=num_topics)
+
+    high_level_agent = HighLevelAgent(hl_cfg)
     tutor_agents = [TutorLowLevelAgent(ll_cfg) for _ in range(num_topics)]
     tutee_agent = TuteeLowLevelAgent(ll_cfg) if use_tutee else None
-
-    # --- NEW: wire experience sharing among tutor agents ---
-    for i, agent in enumerate(tutor_agents):
-        peers = [p for j, p in enumerate(tutor_agents) if j != i]
-        agent.set_peers(peers)
-
     return high_level_agent, tutor_agents, tutee_agent
 
 
-def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = True):
-    """
-    Run one full episode (a single synthetic learner).
-
-    Returns:
-      - total_reward
-      - steps
-      - topic_counts: how many times each topic was chosen by high-level
-      - tutor_action_counts: how many times each tutor low-level action was used
-      - tutee_action_counts: how many times each tutee low-level action was used
-      - tutor_hl_count: number of high-level 'tutor' decisions
-      - tutee_hl_count: number of high-level 'tutee' decisions
-      - hl_trace: ordered list of high-level decisions as strings
-                  e.g. ["tutor_topic_1", "tutee_topic_1", "tutor_topic_2", ...]
-    """
-
-
-
-    obs = env.reset()
-    done = False
-    total_reward = 0.0
-    steps = 0
-
-    tutor_hl_count = 0
-    tutee_hl_count = 0
-
-    # record high-level decision sequence for this episode
-    hl_trace = []
-
-    num_topics = env.num_topics
-    topic_counts = [0 for _ in range(num_topics)]
-
-    # Initialize action counters
-    tutor_action_counts = defaultdict(int)
-    tutee_action_counts = defaultdict(int)
-
-    # we can get action names from any tutor agent
-    tutor_action_names = tutor_agents[0].get_action_meanings()
-    for a in tutor_action_names:
-        tutor_action_counts[a] = 0
-
-    if tutee_agent is not None:
-        tutee_action_names = tutee_agent.get_action_meanings()
-        for a in tutee_action_names:
-            tutee_action_counts[a] = 0
-
-    while not done:
-        # import time
-        # start_time = time.time()
-        # === High-level decision ===
-        hl_action_idx = high_level_agent.select_action(obs)
-        mode, topic_id = high_level_agent.decode_action(hl_action_idx)
-        topic_counts[topic_id] += 1
-
-        # record this high-level step, e.g. "tutor_topic_1" or "tutee_topic_2"
-        hl_trace.append(f"{mode}_topic_{topic_id}")
-
-
-        # === Low-level + env step ===
-        if mode == "tutor":
-            tutor_hl_count += 1
-            tutor_agent = tutor_agents[topic_id]
-
-            # augment observation with topic_id so tutor knows which topic
-            tutor_obs = obs + [float(topic_id)]
-
-            ll_action_idx = tutor_agent.select_action(tutor_obs)
-            ll_action_str = tutor_agent.get_action_meanings()[ll_action_idx]
-            tutor_action_counts[ll_action_str] += 1
-
-            next_obs, reward, done, _ = env.step_tutor(topic_id, ll_action_str)
-
-            if train:
-                high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
-                tutor_agent.update(
-                    tutor_obs,
-                    ll_action_idx,
-                    reward,
-                    next_obs + [float(topic_id)],
-                    done,
-                )
-
-        elif mode == "tutee" and tutee_agent is not None:
-            tutee_hl_count += 1
-
-            # tutee also sees which topic we're in
-            tutee_obs = obs + [float(topic_id)]
-            ll_action_idx = tutee_agent.select_action(tutee_obs)
-            ll_action_str = tutee_agent.get_action_meanings()[ll_action_idx]
-            tutee_action_counts[ll_action_str] += 1
-
-            next_obs, reward, done, _ = env.step_tutee(topic_id, ll_action_str)
-
-            if train:
-                high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
-                tutee_agent.update(
-                    tutee_obs,
-                    ll_action_idx,
-                    reward,
-                    next_obs + [float(topic_id)],
-                    done,
-                )
-
-        else:
-            # Safety fallback
-            next_obs, reward, done, _ = env.step_tutor(topic_id, "no_help")
-            if train:
-                high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
-
-        total_reward += reward
-        steps += 1
-        obs = next_obs
-        # print("time elapsed: {:.4f}s".format(time.time() - start_time))
-
-    return (
-        total_reward,
-        steps,
-        topic_counts,
-        tutor_action_counts,
-        tutee_action_counts,
-        tutor_hl_count,
-        tutee_hl_count,
-        hl_trace,
-    )
-
-
-def main():
-    # ---------------- config ----------------
-    num_topics = 8
-    use_tutee = True
-    num_episodes = 6000
-    log_window = 100
-    eps_start = 0.2
-    eps_end = 0.0
-    eps_decay_episodes = num_episodes
+def train_vectorized(
+    num_topics: int = 8,
+    use_tutee: bool = True,
+    num_envs: int = 256,
+    learner_batches: int = 6000 // 256 + 1,  # approx same "episode count"
+    log_every_batches: int = 10,
+):
     prereqs = {
-        1: [0],  # to learn topic 1 well, you need topic 0
-        2: [1],  # to learn topic 2, you need topic 1
+        1: [0],
+        2: [1],
         3: [2],
         4: [2],
         5: [2],
         6: [5],
-        7: [6]
+        7: [6],
     }
 
-    env = LearnerModel(num_topics=num_topics, prereqs=prereqs)
-    high_level_agent, tutor_agents, tutee_agent = create_agents(
-        num_topics=num_topics,
-        use_tutee=use_tutee,
-    )
+    env = VectorLearnerModel(num_envs=num_envs, num_topics=num_topics, prereqs=prereqs)
+    hl, tutors, tutee = create_agents(num_topics=num_topics, use_tutee=use_tutee)
 
-    print("=== Training hierarchical RL tutor ===")
-    print(f"- Number of topics: {num_topics}")
-    print(f"- Tutee enabled:   {use_tutee}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.backends.cudnn.benchmark = True
+    if hasattr(torch, "set_float32_matmul_precision"):
+        torch.set_float32_matmul_precision("high")
 
-    # sliding window stats
-    window_rewards = []
-    window_mastery_learner = []
-    window_mastery_tutee = []
-    window_steps = []
-    window_topic_counts = [0 for _ in range(num_topics)]
-    # get tutor action names to keep order stable
-    tutor_action_names = tutor_agents[0].get_action_meanings()
-    window_tutor_action_counts = {a: 0 for a in tutor_action_names}
+    print("device:", device)
+    print("num_envs:", num_envs, "obs_dim:", env.obs_dim)
 
-    if tutee_agent is not None:
-        tutee_action_names = tutee_agent.get_action_meanings()
-        window_tutee_action_counts = {a: 0 for a in tutee_action_names}
-    else:
-        window_tutee_action_counts = {}
+    tutor_action_names = tutors[0].get_action_meanings()
+    tutor_action_to_idx = {a: i for i, a in enumerate(tutor_action_names)}
+    tutee_action_names = tutee.get_action_meanings() if tutee is not None else []
+    tutee_action_to_idx = {a: i for i, a in enumerate(tutee_action_names)}
 
+    # Epsilon schedule across batches
+    eps_start, eps_end = 0.2, 0.0
+    total_batches = int(learner_batches)
 
-    for episode in range(1, num_episodes + 1):
+    for batch_idx in range(1, total_batches + 1):
+        progress = min(1.0, batch_idx / total_batches)
+        eps = eps_start + (eps_end - eps_start) * progress
+        hl.set_epsilon(eps)
+        for a in tutors:
+            a.set_epsilon(eps)
+        if tutee is not None:
+            tutee.set_epsilon(eps)
 
-        (
-            total_reward,
-            steps,
-            topic_counts,
-            tutor_action_counts,
-            tutee_action_counts,
-            tutor_hl_count,
-            tutee_hl_count,
-            hl_trace,
-        ) = run_episode(
-            env,
-            high_level_agent,
-            tutor_agents,
-            tutee_agent,
-            train=True,
-        )
+        obs = env.reset()  # [N, obs_dim] float32
+        done = np.zeros((num_envs,), dtype=bool)
 
-        avg_mastery_learner = sum(env.state.mastery_learner) / env.num_topics
-        avg_mastery_tutee = sum(env.state.mastery_tutee) / env.num_topics
+        total_reward = np.zeros((num_envs,), dtype=np.float32)
+        steps = 0
 
-        # accumulate
-        window_tutor_hl = 0
-        window_tutee_hl = 0
-        window_rewards.append(total_reward)
-        window_mastery_learner.append(avg_mastery_learner)
-        window_mastery_tutee.append(avg_mastery_tutee)
-        window_steps.append(steps)
-        for i in range(num_topics):
-            window_topic_counts[i] += topic_counts[i]
-        for a in tutor_action_names:
-            window_tutor_action_counts[a] += tutor_action_counts[a]
-        for a in window_tutee_action_counts:
-            window_tutee_action_counts[a] += tutee_action_counts.get(a, 0)
+        # Logging counters
+        topic_counts = np.zeros((num_topics,), dtype=np.int64)
+        tutor_action_counts = {a: 0 for a in tutor_action_names}
+        tutee_action_counts = {a: 0 for a in tutee_action_names}
 
-        window_tutor_hl += tutor_hl_count
-        window_tutee_hl += tutee_hl_count
-        # log every log_window episodes
-        if episode % log_window == 0 or episode == 1:
-            w = log_window
-            mean_reward = sum(window_rewards) / w
-            # mean_reward = window_rewards[-1]
-            # mean_mastery_learner = sum(window_mastery_learner) / w
-            mean_mastery_learner = window_mastery_learner[-1]
-            mean_mastery_tutee = sum(window_mastery_tutee) / w
-            # TODO check
-            #
-            # mean_steps = sum(window_steps) / w
-            mean_steps = window_steps[-1]
-            total_topic_choices = sum(window_topic_counts) or 1
-            topic_freqs = [c / total_topic_choices for c in window_topic_counts]
+        while not done.all():
+            obs_t = torch.from_numpy(obs).to(device=device, non_blocking=True)
 
-            total_tutor_actions = sum(window_tutor_action_counts.values()) or 1
-            tutor_action_freqs = {
-                a: window_tutor_action_counts[a] / total_tutor_actions
-                for a in tutor_action_names
-            }
+            # High-level batched
+            hl_actions = hl.select_action_batch(obs_t)  # [N] int64 on GPU
+            hl_modes_t, hl_topics_t = hl.decode_actions_batch(hl_actions)
 
-            print(f"[Episode {episode:4d}]")
-            print(f"  Mean reward (last {w}):          {mean_reward: .4f}")
-            print(f"  Mean steps per episode:         {mean_steps}")
-            print(f"  Mean learner mastery:           {mean_mastery_learner: .3f}")
-            print(f"  Mean tutee mastery:             {mean_mastery_tutee: .3f}")
-            print(f"  Topic choice frequencies:")
-            for i, f in enumerate(topic_freqs):
-                print(f"    - Topic {i}: {f * 100:5.1f}% of high-level choices")
-            print(f"  Tutor action frequencies:")
-            for a, f in tutor_action_freqs.items():
-                print(f"    - {a:20s}: {f * 100:5.1f}% of tutor actions")
+            hl_modes = hl_modes_t.detach().cpu().numpy().astype(bool)
+            hl_topics = hl_topics_t.detach().cpu().numpy().astype(np.int64)
 
-            if use_tutee and window_tutee_action_counts:
-                total_tutee_actions = sum(window_tutee_action_counts.values()) or 1
-                print(f"  Tutee action frequencies:")
-                for a, c in window_tutee_action_counts.items():
-                    f = c / total_tutee_actions
-                    print(f"    - {a:20s}: {f * 100:5.1f}% of tutee actions")
-            total_hl = window_tutor_hl + window_tutee_hl or 1
-            print(f"  High-level mode frequencies (last {w} episodes):")
-            print(f"    - tutor: {window_tutor_hl / total_hl * 100:5.1f}% of high-level decisions")
-            print(f"    - tutee: {window_tutee_hl / total_hl * 100:5.1f}% of high-level decisions")
+            # Low-level decisions stored as both index and string
+            tutor_action_idx_per_env = np.full((num_envs,), -1, dtype=np.int64)
+            tutee_action_idx_per_env = np.full((num_envs,), -1, dtype=np.int64)
+            ll_action_strs = ["no_help"] * num_envs
 
-            # show the exact high-level decision path for the most recent episode
-            if hl_trace:
-                hl_path_str = " --> ".join(hl_trace)
-                print("  High-level decision sequence (last episode):")
-                print(f"    --> {hl_path_str}")
+            # Tutor groups by topic
+            for t in range(num_topics):
+                idx = np.where((~hl_modes) & (hl_topics == t) & (~done))[0]
+                if idx.size == 0:
+                    continue
 
+                topic_col = torch.full((idx.size, 1), float(t), device=device)
+                ll_obs = torch.cat([obs_t[idx], topic_col], dim=1)
+
+                ll_actions = tutors[t].select_action_batch(ll_obs).detach().cpu().numpy().astype(np.int64)
+                tutor_action_idx_per_env[idx] = ll_actions
+
+                for k, env_i in enumerate(idx.tolist()):
+                    a_str = tutor_action_names[int(ll_actions[k])]
+                    ll_action_strs[env_i] = a_str
+                    tutor_action_counts[a_str] += 1
+
+                topic_counts[t] += idx.size
+
+            # Tutee group
+            if use_tutee and tutee is not None:
+                idx = np.where((hl_modes) & (~done))[0]
+                if idx.size > 0:
+                    topic_col = torch.from_numpy(hl_topics[idx]).to(device=device).float().unsqueeze(1)
+                    ll_obs = torch.cat([obs_t[idx], topic_col], dim=1)
+
+                    ll_actions = tutee.select_action_batch(ll_obs).detach().cpu().numpy().astype(np.int64)
+                    tutee_action_idx_per_env[idx] = ll_actions
+
+                    for k, env_i in enumerate(idx.tolist()):
+                        a_str = tutee_action_names[int(ll_actions[k])]
+                        ll_action_strs[env_i] = a_str
+                        tutee_action_counts[a_str] += 1
+
+                    for t in hl_topics[idx]:
+                        topic_counts[int(t)] += 1
+
+            # Step envs
+            next_obs, rewards, done2 = env.step(hl_modes, hl_topics, ll_action_strs, done)
+
+            # Training updates (batched)
+            active_idx = np.where(~done)[0]
+            if active_idx.size > 0:
+                actions_cpu = hl_actions.detach().cpu()
+                hl.update_batch(
+                    obs=torch.from_numpy(obs[active_idx]),
+                    actions=actions_cpu[active_idx],
+                    rewards=torch.from_numpy(rewards[active_idx]),
+                    next_obs=torch.from_numpy(next_obs[active_idx]),
+                    dones=torch.from_numpy(done2[active_idx].astype(np.float32)),
+                )
+
+                # Tutor updates by topic
+                for t in range(num_topics):
+                    idx = np.where((~hl_modes) & (hl_topics == t) & (~done))[0]
+                    if idx.size == 0:
+                        continue
+                    ll_obs = np.concatenate([obs[idx], np.full((idx.size, 1), float(t), dtype=np.float32)], axis=1)
+                    ll_next = np.concatenate([next_obs[idx], np.full((idx.size, 1), float(t), dtype=np.float32)], axis=1)
+                    a_idx = tutor_action_idx_per_env[idx]
+                    tutors[t].update_batch(
+                        obs=torch.from_numpy(ll_obs),
+                        actions=torch.from_numpy(a_idx),
+                        rewards=torch.from_numpy(rewards[idx]),
+                        next_obs=torch.from_numpy(ll_next),
+                        dones=torch.from_numpy(done2[idx].astype(np.float32)),
+                    )
+
+                # Tutee updates
+                if use_tutee and tutee is not None:
+                    idx = np.where((hl_modes) & (~done))[0]
+                    if idx.size > 0:
+                        ll_obs = np.concatenate([obs[idx], hl_topics[idx].astype(np.float32).reshape(-1, 1)], axis=1)
+                        ll_next = np.concatenate([next_obs[idx], hl_topics[idx].astype(np.float32).reshape(-1, 1)], axis=1)
+                        a_idx = tutee_action_idx_per_env[idx]
+                        tutee.update_batch(
+                            obs=torch.from_numpy(ll_obs),
+                            actions=torch.from_numpy(a_idx),
+                            rewards=torch.from_numpy(rewards[idx]),
+                            next_obs=torch.from_numpy(ll_next),
+                            dones=torch.from_numpy(done2[idx].astype(np.float32)),
+                        )
+
+            total_reward[~done] += rewards[~done]
+            obs = next_obs
+            done = done2
+            steps += 1
+
+        if (batch_idx % log_every_batches) == 0 or batch_idx == 1:
+            mean_reward = float(np.mean(total_reward))
+            mastery = np.array([sum(e.state.mastery_learner) / e.num_topics for e in env.envs], dtype=np.float32)
+            mean_mastery = float(mastery.mean())
+
+            total_topic = int(topic_counts.sum()) or 1
+            topic_freq = topic_counts / total_topic
+
+            print(f"[Batch {batch_idx:4d}/{total_batches}] eps={eps:.3f}")
+            print(f"  Mean reward (per learner): {mean_reward:.4f}")
+            print(f"  Mean steps (vector horizon): {int(steps)}")
+            print(f"  Mean learner mastery: {mean_mastery:.3f}")
+            print("  Topic choice frequencies:")
+            for t in range(num_topics):
+                print(f"    - Topic {t}: {topic_freq[t] * 100:5.1f}%")
+
+            total_tutor = sum(tutor_action_counts.values()) or 1
+            print("  Tutor action frequencies:")
+            for a in tutor_action_names:
+                print(f"    - {a:20s}: {tutor_action_counts[a] / total_tutor * 100:5.1f}%")
+
+            if use_tutee and tutee is not None:
+                total_tutee = sum(tutee_action_counts.values()) or 1
+                print("  Tutee action frequencies:")
+                for a in tutee_action_names:
+                    print(f"    - {a:20s}: {tutee_action_counts[a] / total_tutee * 100:5.1f}%")
             print()
 
-            # reset window stats
-            window_rewards.clear()
-            window_mastery_learner.clear()
-            window_mastery_tutee.clear()
-            window_steps.clear()
-            window_topic_counts = [0 for _ in range(num_topics)]
-            window_tutor_action_counts = {a: 0 for a in tutor_action_names}
-            if use_tutee and tutee_agent is not None:
-                window_tutee_action_counts = {a: 0 for a in tutee_action_names}
-
-            progress = min(1.0, episode / eps_decay_episodes)
-            eps = eps_start + (eps_end - eps_start) * progress  # linear
-
-            high_level_agent.set_epsilon(eps)
-
-            for a in tutor_agents:
-                a.set_epsilon(eps)
-
-            if tutee_agent is not None:
-                tutee_agent.set_epsilon(eps)
-            print(f"eps: {eps}")
-            if episode == 6000:
-                print(env.get_observation())
     print("Training finished.")
 
 
 if __name__ == "__main__":
-    main()
+    train_vectorized()

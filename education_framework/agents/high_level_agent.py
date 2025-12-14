@@ -1,66 +1,51 @@
-# agents/high_level_agents.py
 
+# agents/high_level_agent.py  (BATCHED VERSION)
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 import random
-from collections import deque
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-
-# StateType = Tuple[Hashable, ...]
-
+import torch_replay
+from torch_replay import TorchReplayBuffer
 
 @dataclass
 class HighLevelAgentConfig:
     num_topics: int
     use_tutee: bool = True
 
-    # DQN hyperparameters
     gamma: float = 0.95
     lr: float = 1e-3
     epsilon: float = 0.1
 
-    buffer_size: int = 50_000
-    batch_size: int = 1024
-    min_replay_size: int = 1_000
+    buffer_size: int = 200_000
+    batch_size: int = 4096
+    min_replay_size: int = 10_000
 
-    target_update_steps: int = 1_000
-    train_every_steps: int = 500
+    target_update_steps: int = 5_000
+    train_every_steps: int = 1
 
-    # for numerical stability
+    # Do more than 1 gradient step per env step to keep GPU busy
+    grad_steps_per_update: int = 2
+
     max_grad_norm: float = 10.0
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"  # change to "cuda" if you want
+    hidden_dim: int = 256
 
-
-class ReplayBuffer:
-    def __init__(self, capacity: int):
-        self.buffer = deque(maxlen=capacity)
-
-    def push(self, s, a, r, s2, done):
-        self.buffer.append((s, a, r, s2, done))
-
-    def __len__(self):
-        return len(self.buffer)
-
-    def sample(self, batch_size: int):
-        batch = random.sample(self.buffer, batch_size)
-        s, a, r, s2, d = zip(*batch)
-        return s, a, r, s2, d
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class QNetwork(nn.Module):
-    def __init__(self, input_dim: int, num_actions: int):
+    def __init__(self, input_dim: int, num_actions: int, hidden_dim: int = 256):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 64),
+            nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(64, num_actions),
+            nn.Linear(hidden_dim, num_actions),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -69,155 +54,126 @@ class QNetwork(nn.Module):
 
 class HighLevelAgent:
     """
-    High-level DQN agent.
-
-    Action space:
-      - tutor_topic_i for i in [0..num_topics-1]
-      - tutee_topic_i for i in [0..num_topics-1] if use_tutee=True
+    High-level DQN agent, optimized for batched training/inference.
+    Action encoding:
+      - 0..T-1      -> tutor_topic_t
+      - T..2T-1     -> tutee_topic_(a-T) (if use_tutee)
     """
 
     def __init__(self, config: HighLevelAgentConfig):
         self.cfg = config
-        self.actions: List[str] = []
-        self._build_action_space()
-
         self.device = torch.device(self.cfg.device)
-        self.replay = ReplayBuffer(self.cfg.buffer_size)
 
+        self.total_steps = 0
         self.policy_net: Optional[QNetwork] = None
         self.target_net: Optional[QNetwork] = None
         self.optimizer: Optional[optim.Optimizer] = None
 
-        self.total_steps = 0
-
-    # ----------------- public API -----------------
+        self.obs_dim: Optional[int] = None
+        self.replay: Optional[TorchReplayBuffer] = None
 
     @property
     def num_actions(self) -> int:
-        return len(self.actions)
-
-    def get_action_meanings(self) -> List[str]:
-        return self.actions
+        return self.cfg.num_topics * (2 if self.cfg.use_tutee else 1)
 
     def set_epsilon(self, epsilon: float) -> None:
         self.cfg.epsilon = max(0.0, float(epsilon))
 
-    def decode_action(self, action: int) -> Tuple[str, int]:
-        meaning = self.actions[action]
-        mode_str, _, topic_str = meaning.partition("_topic_")
-        topic_id = int(topic_str)
-        mode = "tutor" if mode_str == "tutor" else "tutee"
-        return mode, topic_id
-
-    def select_action(self, obs: List[float]) -> int:
-        self._ensure_networks(input_dim=len(obs))
-
-        if random.random() < self.cfg.epsilon:
-            return random.randrange(self.num_actions)
-
-        with torch.no_grad():
-            x = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
-            q = self.policy_net(x)  # [1, num_actions]
-            return int(torch.argmax(q, dim=1).item())
-
-    def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool) -> None:
-        self._ensure_networks(input_dim=len(obs))
-
-        # obs/next_obs are freshly created lists from env; do not copy (major speed win)
-        self.replay.push(
-            obs,
-            int(action),
-            float(reward),
-            next_obs,
-            bool(done),
-        )
-
-        self.total_steps += 1
-
-        # only train every N steps
-        if self.total_steps % self.cfg.train_every_steps != 0:
-            return
-
-        # wait until replay has enough diversity
-        if len(self.replay) < max(self.cfg.min_replay_size, self.cfg.batch_size):
-            return
-
-        s, a, r, s2, d = self.replay.sample(self.cfg.batch_size)
-
-        s_t = torch.as_tensor(s, dtype=torch.float32, device=self.device)
-        a_t = torch.as_tensor(a, dtype=torch.int64, device=self.device).unsqueeze(1)
-        r_t = torch.as_tensor(r, dtype=torch.float32, device=self.device)
-        s2_t = torch.as_tensor(s2, dtype=torch.float32, device=self.device)
-        d_t = torch.as_tensor(d, dtype=torch.float32, device=self.device)
-
-        # Q(s,a)
-        q_sa = self.policy_net(s_t).gather(1, a_t).squeeze(1)
-
-        # Double DQN:
-        # a* = argmax_a Q_policy(s', a)
-        with torch.no_grad():
-            next_actions = torch.argmax(self.policy_net(s2_t), dim=1, keepdim=True)
-            next_q = self.target_net(s2_t).gather(1, next_actions).squeeze(1)
-            target = r_t + self.cfg.gamma * (1.0 - d_t) * next_q
-
-        loss = nn.functional.mse_loss(q_sa, target)
-
-        self.optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.cfg.max_grad_norm)
-        self.optimizer.step()
-
-        # target network update
-        if self.total_steps % self.cfg.target_update_steps == 0:
-            self.target_net.load_state_dict(self.policy_net.state_dict())
-
-    # ----------------- internal helpers -----------------
-
-    def _build_action_space(self) -> None:
-        self.actions: List[str] = []
-
-        # tutor actions for each topic
-        for t in range(self.cfg.num_topics):
-            self.actions.append(f"tutor_topic_{t}")
-
-        # tutee actions for each topic (optional)
-        # TODO check if it's needed
-        if self.cfg.use_tutee:
-            for t in range(self.cfg.num_topics):
-                self.actions.append(f"tutee_topic_{t}")
+    def decode_actions_batch(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        actions: int64 [B] (device doesn't matter)
+        Returns:
+          modes: bool [B]  (False=tutor, True=tutee)
+          topics: int64 [B]
+        """
+        T = self.cfg.num_topics
+        topics = actions % T
+        modes = actions >= T
+        return modes, topics
 
     def _ensure_networks(self, input_dim: int) -> None:
         if self.policy_net is not None:
             return
-
-        self.policy_net = QNetwork(input_dim=input_dim, num_actions=self.num_actions).to(self.device)
-        self.target_net = QNetwork(input_dim=input_dim, num_actions=self.num_actions).to(self.device)
+        self.obs_dim = int(input_dim)
+        self.policy_net = QNetwork(input_dim=input_dim, num_actions=self.num_actions, hidden_dim=self.cfg.hidden_dim).to(self.device)
+        self.target_net = QNetwork(input_dim=input_dim, num_actions=self.num_actions, hidden_dim=self.cfg.hidden_dim).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
-
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.cfg.lr)
-    # def _encode_state(self, obs: List[float]) -> StateType:
-    #     """
-    #     Coarse, discrete state for high-level decisions.
-    #
-    #     We only use learner's mastery per topic, bucketed into 3 levels:
-    #       0 = low   (0.0 - 0.33)
-    #       1 = mid   (0.33 - 0.66)
-    #       2 = high  (0.66 - 1.0)
-    #     (3^num_topics).
-    #     """
-    #     num_topics = self.cfg.num_topics
-    #     bucket_count = self.cfg.num_buckets
-    #     learner_mastery = obs[:num_topics]  # first num_topics are learner mastery
-    #
-    #     buckets = []
-    #     for m in learner_mastery:
-    #         buckets.append(min(bucket_count - 1, int(m * bucket_count)))
-    #         # if m < 0.33:
-    #         #     buckets.append(0)
-    #         # elif m < 0.66:
-    #         #     buckets.append(1)
-    #         # else:
-    #         #     buckets.append(2)
-    #
-    #     return tuple(buckets)
+        self.replay = TorchReplayBuffer(self.cfg.buffer_size, obs_dim=input_dim, pin_memory=True)
+
+        # Optional compiler (works best once shapes are stable)
+        if hasattr(torch, "compile"):
+            try:
+                self.policy_net = torch.compile(self.policy_net)  # type: ignore
+                self.target_net = torch.compile(self.target_net)  # type: ignore
+            except Exception:
+                pass
+
+    @torch.no_grad()
+    def select_action_batch(self, obs_batch: torch.Tensor) -> torch.Tensor:
+        """
+        obs_batch: float32 [B, obs_dim] on self.device
+        Returns: int64 [B] on self.device
+        """
+        self._ensure_networks(input_dim=obs_batch.shape[1])
+
+        B = obs_batch.shape[0]
+        # epsilon-greedy mask
+        if self.cfg.epsilon > 0.0:
+            rand_mask = (torch.rand((B,), device=obs_batch.device) < self.cfg.epsilon)
+        else:
+            rand_mask = torch.zeros((B,), dtype=torch.bool, device=obs_batch.device)
+
+        # greedy
+        q = self.policy_net(obs_batch)  # [B, A]
+        greedy = torch.argmax(q, dim=1)
+
+        if rand_mask.any():
+            random_actions = torch.randint(0, self.num_actions, (B,), device=obs_batch.device)
+            actions = torch.where(rand_mask, random_actions, greedy)
+            return actions
+        return greedy
+
+    def update_batch(
+        self,
+        obs: torch.Tensor,        # CPU float32 [B, obs_dim]
+        actions: torch.Tensor,    # CPU int64   [B]
+        rewards: torch.Tensor,    # CPU float32 [B]
+        next_obs: torch.Tensor,   # CPU float32 [B, obs_dim]
+        dones: torch.Tensor,      # CPU float32 [B] (0/1)
+    ) -> None:
+        self._ensure_networks(input_dim=obs.shape[1])
+        assert self.replay is not None and self.policy_net is not None and self.target_net is not None and self.optimizer is not None
+
+        # store
+        self.replay.push_batch(obs, actions, rewards, next_obs, dones)
+
+        self.total_steps += int(obs.shape[0])
+        if (self.total_steps % self.cfg.train_every_steps) != 0:
+            return
+        if len(self.replay) < max(self.cfg.min_replay_size, self.cfg.batch_size):
+            return
+
+        for _ in range(int(self.cfg.grad_steps_per_update)):
+            s_t, a_t, r_t, s2_t, d_t = self.replay.sample(self.cfg.batch_size, device=self.device)
+
+            # Q(s,a)
+            q_sa = self.policy_net(s_t).gather(1, a_t.unsqueeze(1)).squeeze(1)
+
+            with torch.no_grad():
+                # Double DQN
+                next_actions = torch.argmax(self.policy_net(s2_t), dim=1, keepdim=True)
+                next_q = self.target_net(s2_t).gather(1, next_actions).squeeze(1)
+                target = r_t + self.cfg.gamma * (1.0 - d_t) * next_q
+
+            loss = nn.functional.mse_loss(q_sa, target)
+
+            self.optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.cfg.max_grad_norm)
+            self.optimizer.step()
+
+        if (self.total_steps % self.cfg.target_update_steps) == 0:
+            # For compiled models, load_state_dict still works.
+            self.target_net.load_state_dict(self.policy_net.state_dict())
