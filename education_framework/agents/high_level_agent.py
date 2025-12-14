@@ -33,7 +33,7 @@ class HighLevelAgentConfig:
 
     # for numerical stability
     max_grad_norm: float = 10.0
-    device: str = "cuda"  # change to "cuda" if you want
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"  # change to "cuda" if you want
 
 
 class ReplayBuffer:
@@ -116,18 +116,19 @@ class HighLevelAgent:
             return random.randrange(self.num_actions)
 
         with torch.no_grad():
-            x = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+            x = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             q = self.policy_net(x)  # [1, num_actions]
             return int(torch.argmax(q, dim=1).item())
 
     def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool) -> None:
         self._ensure_networks(input_dim=len(obs))
 
+        # obs/next_obs are freshly created lists from env; do not copy (major speed win)
         self.replay.push(
-            list(obs),
+            obs,
             int(action),
             float(reward),
-            list(next_obs),
+            next_obs,
             bool(done),
         )
 
@@ -143,11 +144,11 @@ class HighLevelAgent:
 
         s, a, r, s2, d = self.replay.sample(self.cfg.batch_size)
 
-        s_t = torch.tensor(s, dtype=torch.float32, device=self.device)
-        a_t = torch.tensor(a, dtype=torch.int64, device=self.device).unsqueeze(1)
-        r_t = torch.tensor(r, dtype=torch.float32, device=self.device)
-        s2_t = torch.tensor(s2, dtype=torch.float32, device=self.device)
-        d_t = torch.tensor(d, dtype=torch.float32, device=self.device)
+        s_t = torch.as_tensor(s, dtype=torch.float32, device=self.device)
+        a_t = torch.as_tensor(a, dtype=torch.int64, device=self.device).unsqueeze(1)
+        r_t = torch.as_tensor(r, dtype=torch.float32, device=self.device)
+        s2_t = torch.as_tensor(s2, dtype=torch.float32, device=self.device)
+        d_t = torch.as_tensor(d, dtype=torch.float32, device=self.device)
 
         # Q(s,a)
         q_sa = self.policy_net(s_t).gather(1, a_t).squeeze(1)

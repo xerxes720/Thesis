@@ -96,17 +96,28 @@ class LearnerTuteeState:
         self.topic_done = [False for _ in range(self.num_topics)]
 
     def clone(self) -> "LearnerTuteeState":
-        c = LearnerTuteeState(num_topics=self.num_topics)
+        """
+        Fast clone.
+
+        IMPORTANT: Do NOT call LearnerTuteeState(...) here, because __post_init__ would
+        re-randomize arrays and create massive overhead in the main training loop.
+        """
+        c = object.__new__(LearnerTuteeState)
+        c.num_topics = self.num_topics
+
         c.mastery_learner = self.mastery_learner[:]
         c.mastery_tutee = self.mastery_tutee[:]
+
         c.score = self.score[:]
         c.test_speed = self.test_speed[:]
         c.segment_speed = self.segment_speed[:]
         c.emotion = self.emotion[:]
         c.input_quality = self.input_quality[:]
+
         c.motivation = self.motivation
         c.retention = self.retention
         c.accuracy = self.accuracy
+
         c.topic_done = self.topic_done[:]
         c.step_count = self.step_count
         c.assist_count = self.assist_count
@@ -120,9 +131,9 @@ class TopicDynamics:
     """
     Topic-specific parameters to emulate different environment dynamics (φ) per topic.
     """
-    difficulty: float          # >1 = harder, <1 = easier
-    noise_std: float           # stochasticity of learner response
-    impatience: float          # how quickly motivation/emotion drop under poor help
+    difficulty: float  # >1 = harder, <1 = easier
+    noise_std: float  # stochasticity of learner response
+    impatience: float  # how quickly motivation/emotion drop under poor help
 
 
 # -------------------- main environment --------------------
@@ -138,10 +149,10 @@ class LearnerModel:
     """
 
     def __init__(
-        self,
-        num_topics: int,
-        prereqs: Optional[Dict[int, List[int]]] = None,
-        seed: Optional[int] = 123,
+            self,
+            num_topics: int,
+            prereqs: Optional[Dict[int, List[int]]] = None,
+            seed: Optional[int] = 123,
     ):
         self.num_topics = num_topics
         self.prereqs = prereqs or {}
@@ -156,7 +167,7 @@ class LearnerModel:
         # reward parameters
         self.completion_bonus = 0.5  # analogous to r_c
         self.reward_clip = (-2.0, 3.0)  # safe default; you can widen if needed
-        self.diminishing_k = 0.02       # per-learner diminishing returns strength
+        self.diminishing_k = 0.02  # per-learner diminishing returns strength
 
         # build topic-specific dynamics
         self.topic_dyn: List[TopicDynamics] = []
@@ -204,24 +215,43 @@ class LearnerModel:
         return obs
 
     def step_tutor(self, topic_id: int, tutor_action: str) -> Tuple[List[float], float, bool, Dict]:
-        prev = self.state.clone()
+        prev_snapshot = self._snapshot_for_reward(topic_id)
         self._apply_action(topic_id, mode="tutor", action=tutor_action)
         self.state.step_count += 1
         self.state.assist_count += 1
 
-        reward = self._compute_reward(prev, self.state, topic_id)
+        reward = self._compute_reward(prev_snapshot, self.state, topic_id)
         done = self._check_done()
         return self.get_observation(), reward, done, {"mode": "tutor"}
 
     def step_tutee(self, topic_id: int, tutee_action: str) -> Tuple[List[float], float, bool, Dict]:
-        prev = self.state.clone()
+        prev_snapshot = self._snapshot_for_reward(topic_id)
         self._apply_action(topic_id, mode="tutee", action=tutee_action)
         self.state.step_count += 1
         self.state.assist_count += 1
 
-        reward = self._compute_reward(prev, self.state, topic_id)
+        reward = self._compute_reward(prev_snapshot, self.state, topic_id)
         done = self._check_done()
         return self.get_observation(), reward, done, {"mode": "tutee"}
+
+    def _snapshot_for_reward(self, topic_id: int) -> dict:
+        """
+        Capture only what is needed to compute reward efficiently.
+
+        This avoids LearnerTuteeState.clone() per step, which is a major runtime cost.
+        """
+        return {
+            "topic_done": bool(self.state.topic_done[topic_id]),
+            "mastery_learner": self.state.mastery_learner[:],
+            "score": self.state.score[:],
+            "test_speed": self.state.test_speed[:],
+            "segment_speed": self.state.segment_speed[:],
+            "emotion": self.state.emotion[:],
+            "input_quality": self.state.input_quality[:],
+            "motivation": float(self.state.motivation),
+            "retention": float(self.state.retention),
+            "accuracy": float(self.state.accuracy),
+        }
 
     # --------------- internal dynamics ----------------
 
@@ -243,9 +273,9 @@ class LearnerModel:
         Multi-criteria completion for a topic.
         """
         return (
-            self.state.mastery_learner[topic_id] >= self.mastery_target
-            and self.state.score[topic_id] >= self.score_target
-            and self.state.accuracy >= self.accuracy_target
+                self.state.mastery_learner[topic_id] >= self.mastery_target
+                and self.state.score[topic_id] >= self.score_target
+                and self.state.accuracy >= self.accuracy_target
         )
 
     def _apply_action(self, topic_id: int, mode: str, action: str) -> None:
@@ -578,50 +608,49 @@ class LearnerModel:
 
     # --------------- reward & termination ----------------
 
-    def _compute_reward(self, prev: LearnerTuteeState, cur: LearnerTuteeState, topic_id: int) -> float:
+    def _compute_reward(self, prev: dict, cur: LearnerTuteeState, topic_id: int) -> float:
         """
         Reward = average percentage change across learner performance variables + completion bonus.
         Applies diminishing returns per learner (assist_count).
+
+        prev is a snapshot dict produced by _snapshot_for_reward().
         """
-        # Build variable lists (exclude tutee mastery from reward by default)
-        prev_vars: List[float] = []
-        cur_vars: List[float] = []
+        # Efficiently accumulate mean % change without building large temporary lists
+        total = 0.0
+        count = 0
 
-        # per-topic learner variables
-        prev_vars.extend(prev.mastery_learner)
-        cur_vars.extend(cur.mastery_learner)
-
-        prev_vars.extend(prev.score)
-        cur_vars.extend(cur.score)
-
-        prev_vars.extend(prev.test_speed)
-        cur_vars.extend(cur.test_speed)
-
-        prev_vars.extend(prev.segment_speed)
-        cur_vars.extend(cur.segment_speed)
-
-        prev_vars.extend(prev.emotion)
-        cur_vars.extend(cur.emotion)
-
-        prev_vars.extend(prev.input_quality)
-        cur_vars.extend(cur.input_quality)
+        # per-topic learner variables (exclude tutee mastery from reward by default)
+        for c, p in zip(cur.mastery_learner, prev["mastery_learner"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.score, prev["score"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.test_speed, prev["test_speed"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.segment_speed, prev["segment_speed"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.emotion, prev["emotion"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.input_quality, prev["input_quality"]):
+            total += _pct_change(c, p);
+            count += 1
 
         # global learner variables
-        prev_vars.append(prev.motivation)
-        cur_vars.append(cur.motivation)
+        total += _pct_change(cur.motivation, prev["motivation"]);
+        count += 1
+        total += _pct_change(cur.retention, prev["retention"]);
+        count += 1
+        total += _pct_change(cur.accuracy, prev["accuracy"]);
+        count += 1
 
-        prev_vars.append(prev.retention)
-        cur_vars.append(cur.retention)
-
-        prev_vars.append(prev.accuracy)
-        cur_vars.append(cur.accuracy)
-
-        # average % change
-        changes = [_pct_change(c, p) for c, p in zip(cur_vars, prev_vars)]
-        reward = sum(changes) / max(1, len(changes))
+        reward = total / max(1, count)
 
         # completion bonus if this step completed the topic
-        if (not prev.topic_done[topic_id]) and cur.topic_done[topic_id]:
+        if (not prev["topic_done"]) and cur.topic_done[topic_id]:
             reward += self.completion_bonus
 
         # diminishing returns per learner (discourage excessive assistance)
@@ -630,8 +659,7 @@ class LearnerModel:
 
         # clip reward
         lo, hi = self.reward_clip
-        reward = max(lo, min(hi, reward))
-        return reward
+        return max(lo, min(hi, reward))
 
     def _check_done(self) -> bool:
         # end when all topics are complete

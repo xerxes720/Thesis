@@ -11,6 +11,7 @@ from agents.low_level_agents import (
 from environment.learner_model import LearnerModel
 
 import sys, torch
+
 print("PYTHON EXE:", sys.executable)
 print("torch:", torch.__version__)
 print("torch cuda build:", torch.version.cuda)
@@ -54,6 +55,9 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
       - hl_trace: ordered list of high-level decisions as strings
                   e.g. ["tutor_topic_1", "tutee_topic_1", "tutor_topic_2", ...]
     """
+
+
+
     obs = env.reset()
     done = False
     total_reward = 0.0
@@ -83,6 +87,8 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             tutee_action_counts[a] = 0
 
     while not done:
+        # import time
+        # start_time = time.time()
         # === High-level decision ===
         hl_action_idx = high_level_agent.select_action(obs)
         mode, topic_id = high_level_agent.decode_action(hl_action_idx)
@@ -90,6 +96,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 
         # record this high-level step, e.g. "tutor_topic_1" or "tutee_topic_2"
         hl_trace.append(f"{mode}_topic_{topic_id}")
+
 
         # === Low-level + env step ===
         if mode == "tutor":
@@ -145,6 +152,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         total_reward += reward
         steps += 1
         obs = next_obs
+        # print("time elapsed: {:.4f}s".format(time.time() - start_time))
 
     return (
         total_reward,
@@ -203,7 +211,9 @@ def main():
     else:
         window_tutee_action_counts = {}
 
+
     for episode in range(1, num_episodes + 1):
+
         (
             total_reward,
             steps,

@@ -28,7 +28,7 @@ class LowLevelAgentConfig:
     train_every_steps: int = 500
 
     max_grad_norm: float = 10.0
-    device: str = "cuda"
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     # --- Experience sharing ---
     experience_sharing: bool = True
@@ -179,7 +179,7 @@ class DQNLowLevelAgent:
             return random.randrange(self.num_actions)
 
         with torch.no_grad():
-            x = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+            x = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             q = self.policy_net(x)
             return int(torch.argmax(q, dim=1).item())
 
@@ -187,7 +187,8 @@ class DQNLowLevelAgent:
         self._ensure_networks(input_dim=len(obs))
 
         # store own transition
-        self.replay.push(list(obs), int(action), float(reward), list(next_obs), bool(done))
+        # obs/next_obs are freshly created lists from env; do not copy (major speed win)
+        self.replay.push(obs, int(action), float(reward), next_obs, bool(done))
         self.total_steps += 1
 
         if self.total_steps % self.cfg.train_every_steps != 0:
@@ -199,12 +200,12 @@ class DQNLowLevelAgent:
         # -------- Build training batch: own + shared --------
         batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w = self._build_shared_batch()
 
-        s_t = torch.tensor(batch_s, dtype=torch.float32, device=self.device)
-        a_t = torch.tensor(batch_a, dtype=torch.int64, device=self.device).unsqueeze(1)
-        r_t = torch.tensor(batch_r, dtype=torch.float32, device=self.device)
-        s2_t = torch.tensor(batch_s2, dtype=torch.float32, device=self.device)
-        d_t = torch.tensor(batch_d, dtype=torch.float32, device=self.device)
-        w_t = torch.tensor(batch_w, dtype=torch.float32, device=self.device)
+        s_t = torch.as_tensor(batch_s, dtype=torch.float32, device=self.device)
+        a_t = torch.as_tensor(batch_a, dtype=torch.int64, device=self.device).unsqueeze(1)
+        r_t = torch.as_tensor(batch_r, dtype=torch.float32, device=self.device)
+        s2_t = torch.as_tensor(batch_s2, dtype=torch.float32, device=self.device)
+        d_t = torch.as_tensor(batch_d, dtype=torch.float32, device=self.device)
+        w_t = torch.as_tensor(batch_w, dtype=torch.float32, device=self.device)
 
         # Q(s,a)
         q_sa = self.policy_net(s_t).gather(1, a_t).squeeze(1)
@@ -263,7 +264,7 @@ class DQNLowLevelAgent:
                 weight = 1.0
             elif self.cfg.share_mode == "weighted_cka":
                 # compute CKA between representations on the SAME states
-                states_t = torch.tensor(ps, dtype=torch.float32, device=self.device)
+                states_t = torch.as_tensor(ps, dtype=torch.float32, device=self.device)
                 # Note: networks live on potentially different devices; move peer net to our device temporarily not advised.
                 # Best practice: enforce same device in config.
                 weight = avg_layer_cka(self.policy_net, p.policy_net, states_t, self.cfg.cka_layers)
