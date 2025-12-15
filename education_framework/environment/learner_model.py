@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 import random
+import numpy as np
 import math
 
 
@@ -65,64 +66,48 @@ class LearnerTuteeState:
       - assist_count
     """
     num_topics: int
-    mastery_learner: List[float] = field(init=False)
-    mastery_tutee: List[float] = field(init=False)
-
-    score: List[float] = field(init=False)
-    test_speed: List[float] = field(init=False)
-    segment_speed: List[float] = field(init=False)
-    emotion: List[float] = field(init=False)
-    input_quality: List[float] = field(init=False)
-
+    mastery_learner: np.ndarray = field(init=False)
+    mastery_tutee: np.ndarray = field(init=False)
+    score: np.ndarray = field(init=False)
+    test_speed: np.ndarray = field(init=False)
+    segment_speed: np.ndarray = field(init=False)
+    emotion: np.ndarray = field(init=False)
+    input_quality: np.ndarray = field(init=False)
     motivation: float = 0.7
     retention: float = 0.5
     accuracy: float = 0.6
-
-    topic_done: List[bool] = field(init=False)
+    topic_done: np.ndarray = field(init=False)  # bool array
     step_count: int = 0
     assist_count: int = 0
 
     def __post_init__(self):
-        self.mastery_learner = [random.uniform(0.10, 0.20) for _ in range(self.num_topics)]
-        self.mastery_tutee = [random.uniform(0.00, 0.10) for _ in range(self.num_topics)]
+        nt = self.num_topics
+        self.mastery_learner = np.random.uniform(0.10, 0.20, nt)
+        self.mastery_tutee = np.random.uniform(0.00, 0.10, nt)
+        self.score = np.clip(self.mastery_learner + np.random.normal(0.0, 0.05, nt), 0, 1)
+        self.test_speed = np.random.uniform(0.35, 0.55, nt)
+        self.segment_speed = np.random.uniform(0.35, 0.55, nt)
+        self.emotion = np.random.uniform(0.50, 0.70, nt)
+        self.input_quality = np.random.uniform(0.40, 0.60, nt)
+        self.topic_done = np.zeros(nt, dtype=bool)
 
-        # initialize performance variables with weak-to-moderate values correlated with mastery
-        self.score = [_clip01(m + random.gauss(0.0, 0.05)) for m in self.mastery_learner]
-        self.test_speed = [random.uniform(0.35, 0.55) for _ in range(self.num_topics)]
-        self.segment_speed = [random.uniform(0.35, 0.55) for _ in range(self.num_topics)]
-        self.emotion = [random.uniform(0.50, 0.70) for _ in range(self.num_topics)]
-        self.input_quality = [random.uniform(0.40, 0.60) for _ in range(self.num_topics)]
-
-        self.topic_done = [False for _ in range(self.num_topics)]
-
-    def clone(self) -> "LearnerTuteeState":
-        """
-        Fast clone.
-
-        IMPORTANT: Do NOT call LearnerTuteeState(...) here, because __post_init__ would
-        re-randomize arrays and create massive overhead in the main training loop.
-        """
+    def clone(self) -> "LearnerTuteeState":  # Now faster with np.copy
         c = object.__new__(LearnerTuteeState)
         c.num_topics = self.num_topics
-
-        c.mastery_learner = self.mastery_learner[:]
-        c.mastery_tutee = self.mastery_tutee[:]
-
-        c.score = self.score[:]
-        c.test_speed = self.test_speed[:]
-        c.segment_speed = self.segment_speed[:]
-        c.emotion = self.emotion[:]
-        c.input_quality = self.input_quality[:]
-
+        c.mastery_learner = self.mastery_learner.copy()
+        c.mastery_tutee = self.mastery_tutee.copy()
+        c.score = self.score.copy()
+        c.test_speed = self.test_speed.copy()
+        c.segment_speed = self.segment_speed.copy()
+        c.emotion = self.emotion.copy()
+        c.input_quality = self.input_quality.copy()
         c.motivation = self.motivation
         c.retention = self.retention
         c.accuracy = self.accuracy
-
-        c.topic_done = self.topic_done[:]
+        c.topic_done = self.topic_done.copy()
         c.step_count = self.step_count
         c.assist_count = self.assist_count
         return c
-
 
 # -------------------- per-topic dynamics --------------------
 
@@ -162,7 +147,7 @@ class LearnerModel:
         self.mastery_target = 0.90
         self.score_target = 0.85
         self.accuracy_target = 0.60
-        self.max_steps = 200
+        self.max_steps = 500
 
         # reward parameters
         self.completion_bonus = 0.5  # analogous to r_c
@@ -201,18 +186,24 @@ class LearnerModel:
           - input_quality[0..T-1]
           - motivation, retention, accuracy
         """
-        obs = []
-        obs.extend(self.state.mastery_learner)
-        obs.extend(self.state.mastery_tutee)
-        obs.extend(self.state.score)
-        obs.extend(self.state.test_speed)
-        obs.extend(self.state.segment_speed)
-        obs.extend(self.state.emotion)
-        obs.extend(self.state.input_quality)
-        obs.append(self.state.motivation)
-        obs.append(self.state.retention)
-        obs.append(self.state.accuracy)
-        return obs
+        # obs = []
+        # obs.extend(self.state.mastery_learner)
+        # obs.extend(self.state.mastery_tutee)
+        # obs.extend(self.state.score)
+        # obs.extend(self.state.test_speed)
+        # obs.extend(self.state.segment_speed)
+        # obs.extend(self.state.emotion)
+        # obs.extend(self.state.input_quality)
+        # obs.append(self.state.motivation)
+        # obs.append(self.state.retention)
+        # obs.append(self.state.accuracy)
+        # return obs
+        arr = np.concatenate((
+            self.state.mastery_learner, self.state.mastery_tutee, self.state.score, self.state.test_speed,
+            self.state.segment_speed, self.state.emotion, self.state.input_quality,
+            np.array([self.state.motivation, self.state.retention, self.state.accuracy])
+        ))
+        return arr  # Convert to list for agents (or change agents to accept np)
 
     def step_tutor(self, topic_id: int, tutor_action: str) -> Tuple[List[float], float, bool, Dict]:
         prev_snapshot = self._snapshot_for_reward(topic_id)
@@ -242,12 +233,12 @@ class LearnerModel:
         """
         return {
             "topic_done": bool(self.state.topic_done[topic_id]),
-            "mastery_learner": self.state.mastery_learner[:],
-            "score": self.state.score[:],
-            "test_speed": self.state.test_speed[:],
-            "segment_speed": self.state.segment_speed[:],
-            "emotion": self.state.emotion[:],
-            "input_quality": self.state.input_quality[:],
+            "mastery_learner": self.state.mastery_learner.copy(),
+            "score": self.state.score.copy(),
+            "test_speed": self.state.test_speed.copy(),
+            "segment_speed": self.state.segment_speed.copy(),
+            "emotion": self.state.emotion.copy(),
+            "input_quality": self.state.input_quality.copy(),
             "motivation": float(self.state.motivation),
             "retention": float(self.state.retention),
             "accuracy": float(self.state.accuracy),

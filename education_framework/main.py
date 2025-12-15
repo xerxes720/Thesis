@@ -2,6 +2,8 @@
 
 from collections import defaultdict
 
+import numpy as np
+
 from agents.high_level_agent import HighLevelAgent, HighLevelAgentConfig
 from agents.low_level_agents import (
     TutorLowLevelAgent,
@@ -11,6 +13,7 @@ from agents.low_level_agents import (
 from environment.learner_model import LearnerModel
 
 import sys, torch
+from tqdm import tqdm
 
 print("PYTHON EXE:", sys.executable)
 print("torch:", torch.__version__)
@@ -26,9 +29,11 @@ def create_agents(num_topics: int, use_tutee: bool = True):
       - one low-level tutee agent (or None if use_tutee=False)
     """
     hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
+    hl_cfg.device = "cpu"
     high_level_agent = HighLevelAgent(hl_cfg)
 
     ll_cfg = LowLevelAgentConfig(num_topics=num_topics)
+    ll_cfg.device = "cpu"
     tutor_agents = [TutorLowLevelAgent(ll_cfg) for _ in range(num_topics)]
     tutee_agent = TuteeLowLevelAgent(ll_cfg) if use_tutee else None
 
@@ -104,13 +109,15 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             tutor_agent = tutor_agents[topic_id]
 
             # augment observation with topic_id so tutor knows which topic
-            tutor_obs = obs + [float(topic_id)]
+            # tutor_obs = obs + [float(topic_id)]
+            tutor_obs = add_topic(obs, topic_id)
 
             ll_action_idx = tutor_agent.select_action(tutor_obs)
             ll_action_str = tutor_agent.get_action_meanings()[ll_action_idx]
             tutor_action_counts[ll_action_str] += 1
 
             next_obs, reward, done, _ = env.step_tutor(topic_id, ll_action_str)
+            next_tutor_obs = add_topic(next_obs, topic_id)
 
             if train:
                 high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
@@ -118,7 +125,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
                     tutor_obs,
                     ll_action_idx,
                     reward,
-                    next_obs + [float(topic_id)],
+                    next_tutor_obs,
                     done,
                 )
 
@@ -126,12 +133,14 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             tutee_hl_count += 1
 
             # tutee also sees which topic we're in
-            tutee_obs = obs + [float(topic_id)]
+            # tutee_obs = obs + [float(topic_id)]
+            tutee_obs = np.append(obs, np.float32(topic_id))
             ll_action_idx = tutee_agent.select_action(tutee_obs)
             ll_action_str = tutee_agent.get_action_meanings()[ll_action_idx]
             tutee_action_counts[ll_action_str] += 1
 
             next_obs, reward, done, _ = env.step_tutee(topic_id, ll_action_str)
+            next_tutee_obs = add_topic(next_obs, topic_id)
 
             if train:
                 high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
@@ -139,15 +148,17 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
                     tutee_obs,
                     ll_action_idx,
                     reward,
-                    next_obs + [float(topic_id)],
+                    next_tutee_obs,
                     done,
                 )
 
         else:
             # Safety fallback
             next_obs, reward, done, _ = env.step_tutor(topic_id, "no_help")
+            next_tutor_obs = add_topic(next_obs, topic_id)
+
             if train:
-                high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
+                high_level_agent.update(obs, hl_action_idx, reward, next_tutor_obs, done)
 
         total_reward += reward
         steps += 1
@@ -165,6 +176,9 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         hl_trace,
     )
 
+def add_topic(obs, topic_id: int) -> np.ndarray:
+    obs_np = np.asarray(obs, dtype=np.float32)
+    return np.concatenate([obs_np, np.array([topic_id], dtype=np.float32)])
 
 def main():
     # ---------------- config ----------------
@@ -212,7 +226,7 @@ def main():
         window_tutee_action_counts = {}
 
 
-    for episode in range(1, num_episodes + 1):
+    for episode in tqdm(range(1, num_episodes + 1), desc="Training"):
 
         (
             total_reward,

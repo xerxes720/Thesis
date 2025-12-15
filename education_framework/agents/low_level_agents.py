@@ -6,11 +6,26 @@ from typing import List, Optional, Sequence, Tuple
 import random
 from collections import deque
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+def _to_f32_batch(x) -> np.ndarray:
+    """
+    Converts x (list of np arrays / list of lists / np array) to a contiguous float32 ndarray.
+    Handles the slow 'list of numpy arrays' case via np.stack.
+    """
+    arr = np.asarray(x)
+    if arr.dtype == object:
+        arr = np.stack(x, axis=0)
+    return np.ascontiguousarray(arr, dtype=np.float32)
 
+def _to_i64_batch(x) -> np.ndarray:
+    arr = np.asarray(x)
+    if arr.dtype == object:
+        arr = np.stack(x, axis=0)
+    return np.ascontiguousarray(arr, dtype=np.int64)
 @dataclass
 class LowLevelAgentConfig:
     num_topics: int
@@ -25,7 +40,7 @@ class LowLevelAgentConfig:
     min_replay_size: int = 1_000
 
     target_update_steps: int = 1_000
-    train_every_steps: int = 500
+    train_every_steps: int = 100
 
     max_grad_norm: float = 10.0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -179,9 +194,10 @@ class DQNLowLevelAgent:
             return random.randrange(self.num_actions)
 
         with torch.no_grad():
-            x = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+            obs_np = np.asarray(obs, dtype=np.float32)
+            x = torch.from_numpy(obs_np).unsqueeze(0)  # CPU
             q = self.policy_net(x)
-            return int(torch.argmax(q, dim=1).item())
+            return int(q.argmax(dim=1).item())
 
     def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool) -> None:
         self._ensure_networks(input_dim=len(obs))
@@ -200,12 +216,40 @@ class DQNLowLevelAgent:
         # -------- Build training batch: own + shared --------
         batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w = self._build_shared_batch()
 
-        s_t = torch.as_tensor(batch_s, dtype=torch.float32, device=self.device)
-        a_t = torch.as_tensor(batch_a, dtype=torch.int64, device=self.device).unsqueeze(1)
-        r_t = torch.as_tensor(batch_r, dtype=torch.float32, device=self.device)
-        s2_t = torch.as_tensor(batch_s2, dtype=torch.float32, device=self.device)
-        d_t = torch.as_tensor(batch_d, dtype=torch.float32, device=self.device)
-        w_t = torch.as_tensor(batch_w, dtype=torch.float32, device=self.device)
+        # s_t = torch.as_tensor(batch_s, dtype=torch.float32, device=self.device)
+        # a_t = torch.as_tensor(batch_a, dtype=torch.int64, device=self.device).unsqueeze(1)
+        # r_t = torch.as_tensor(batch_r, dtype=torch.float32, device=self.device)
+        # s2_t = torch.as_tensor(batch_s2, dtype=torch.float32, device=self.device)
+        # d_t = torch.as_tensor(batch_d, dtype=torch.float32, device=self.device)
+        # w_t = torch.as_tensor(batch_w, dtype=torch.float32, device=self.device)
+        # s_np = np.asarray(batch_s, dtype=np.float32)
+        # s2_np = np.asarray(batch_s2, dtype=np.float32)
+        # a_np = np.asarray(batch_a, dtype=np.int64)
+        # r_np = np.asarray(batch_r, dtype=np.float32)
+        # d_np = np.asarray(batch_d, dtype=np.float32)
+        # w_np = np.asarray(batch_w, dtype=np.float32)
+        #
+        #
+        # s_t = torch.from_numpy(s_np)
+        # s2_t = torch.from_numpy(s2_np)
+        # a_t = torch.from_numpy(a_np).unsqueeze(1)
+        # r_t = torch.from_numpy(r_np)
+        # d_t = torch.from_numpy(d_np)
+        # w_t = torch.from_numpy(w_np)
+
+        s_np = _to_f32_batch(batch_s)
+        s2_np = _to_f32_batch(batch_s2)
+        a_np = _to_i64_batch(batch_a)
+        r_np = np.ascontiguousarray(np.asarray(batch_r, dtype=np.float32))
+        d_np = np.ascontiguousarray(np.asarray(batch_d, dtype=np.float32))
+        w_np = np.ascontiguousarray(np.asarray(batch_w, dtype=np.float32))
+
+        s_t = torch.from_numpy(s_np)
+        s2_t = torch.from_numpy(s2_np)
+        a_t = torch.from_numpy(a_np).unsqueeze(1)
+        r_t = torch.from_numpy(r_np)
+        d_t = torch.from_numpy(d_np)
+        w_t = torch.from_numpy(w_np)
 
         # Q(s,a)
         q_sa = self.policy_net(s_t).gather(1, a_t).squeeze(1)
