@@ -1,31 +1,100 @@
+# main.py  (SIMPLE BATCHED, NO ASYNC/VECTOR_ENV, GPU-FRIENDLY)
+from __future__ import annotations
 
-# main_async_batched.py
+import os
+import random
+from dataclasses import dataclass
+from typing import List, Dict, Optional, Tuple
+
 import numpy as np
 import torch
-import multiprocessing as mp
 
 from agents.high_level_agent import HighLevelAgent, HighLevelAgentConfig
 from agents.low_level_agents import TutorLowLevelAgent, TuteeLowLevelAgent, LowLevelAgentConfig
-from environment.async_vector_env import AsyncVectorLearnerModel, AsyncVecConfig
+from environment.learner_model import LearnerModel
 
 
-def create_agents(num_topics: int, use_tutee: bool = True):
+# -----------------------------
+# Config
+# -----------------------------
+@dataclass
+class TrainConfig:
+    num_topics: int = 8
+    use_tutee: bool = True
+
+    # parallelism (GPU utilization lever)
+    num_envs: int = 128
+
+    # episode settings
+    episodes: int = 500
+    max_steps: int = 200
+
+    # epsilon schedule
+    eps_start: float = 0.2
+    eps_end: float = 0.0
+
+    # logging
+    log_every: int = 1
+
+    # reproducibility
+    seed: int = 123
+
+    # performance toggles
+    use_tf32: bool = True
+    matmul_precision: str = "high"  # "high" | "medium" | (torch may ignore on older versions)
+
+
+TUTOR_ACTIONS = ["hint", "worked_example", "reflection_question", "no_help"]
+TUTEE_ACTIONS = ["ask_explanation", "ask_worked_example", "ask_summary", "show_mistake_and_ask_fix"]
+
+
+def set_global_seeds(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def make_envs(num_envs: int, num_topics: int, prereqs: Optional[Dict[int, List[int]]], seed: int) -> List[LearnerModel]:
+    envs: List[LearnerModel] = []
+    for i in range(num_envs):
+        envs.append(LearnerModel(num_topics=num_topics, prereqs=prereqs, seed=seed + i * 997))
+    return envs
+
+
+def create_agents(num_topics: int, use_tutee: bool) -> Tuple[HighLevelAgent, List[TutorLowLevelAgent], Optional[TuteeLowLevelAgent]]:
     hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
     ll_cfg = LowLevelAgentConfig(num_topics=num_topics)
+
     hl = HighLevelAgent(hl_cfg)
     tutors = [TutorLowLevelAgent(ll_cfg) for _ in range(num_topics)]
     tutee = TuteeLowLevelAgent(ll_cfg) if use_tutee else None
     return hl, tutors, tutee
 
 
-def train_async(
-    num_topics: int = 8,
-    use_tutee: bool = True,
-    num_workers: int = 8,
-    envs_per_worker: int = 32,  # total envs = workers * envs_per_worker
-    learner_batches: int = 24,   # your previous run had 24 batches; keep comparable
-    log_every_batches: int = 1,
-):
+def _to_2d_long(x: torch.Tensor) -> torch.Tensor:
+    # ensure shape [B, 1] and dtype long
+    if x.dim() == 1:
+        x = x.unsqueeze(1)
+    return x.long()
+
+
+def train(cfg: TrainConfig) -> None:
+    set_global_seeds(cfg.seed)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if device.type == "cuda":
+        if cfg.use_tf32:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        try:
+            torch.set_float32_matmul_precision(cfg.matmul_precision)
+        except Exception:
+            pass
+
+    # Simple prereq chain (edit to match your curriculum graph)
     prereqs = {
         1: [0],
         2: [1],
@@ -36,178 +105,185 @@ def train_async(
         7: [6],
     }
 
-    tutor_actions = ["hint", "worked_example", "reflection_question", "no_help"]
-    tutee_actions = ["ask_explanation", "ask_worked_example", "ask_summary", "show_mistake_and_ask_fix"]
+    envs = make_envs(cfg.num_envs, cfg.num_topics, prereqs=prereqs, seed=cfg.seed)
 
-    env = AsyncVectorLearnerModel(
-        num_topics=num_topics,
-        prereqs=prereqs,
-        cfg=AsyncVecConfig(num_workers=num_workers, envs_per_worker=envs_per_worker, seed=123),
-        tutor_actions=tutor_actions,
-        tutee_actions=tutee_actions,
-    )
+    hl, tutors, tutee = create_agents(cfg.num_topics, cfg.use_tutee)
 
-    hl, tutors, tutee = create_agents(num_topics=num_topics, use_tutee=use_tutee)
+    # If your agent constructors do not auto-move models to GPU, do it here
+    # (Only if those attributes exist in your implementation.)
+    for a in [hl] + tutors + ([tutee] if tutee is not None else []):
+        if a is None:
+            continue
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.backends.cudnn.benchmark = True
-    if hasattr(torch, "set_float32_matmul_precision"):
-        torch.set_float32_matmul_precision("high")
+        policy = getattr(a, "policy_net", None)
+        if policy is not None:
+            policy.to(device)
 
-    print("device:", device)
-    print("num_envs:", env.num_envs, "obs_dim:", env.obs_dim)
+        target = getattr(a, "target_net", None)
+        if target is not None:
+            target.to(device)
 
-    # Force-initialize networks so you can verify device placement
-    hl._ensure_networks(input_dim=env.obs_dim)
-    for t in range(num_topics):
-        tutors[t]._ensure_networks(input_dim=env.obs_dim + 1)  # + topic feature
-    if use_tutee and tutee is not None:
-        tutee._ensure_networks(input_dim=env.obs_dim + 1)
+    # Determine observation size by one reset
+    obs0 = envs[0].reset()
+    obs_dim = len(obs0)
 
-    print("HL policy device:", next(hl.policy_net.parameters()).device)
-    print("LL policy device:", next(tutors[0].policy_net.parameters()).device)
+    # Main training loop
+    for ep in range(1, cfg.episodes + 1):
+        # reset all envs
+        obs = np.zeros((cfg.num_envs, obs_dim), dtype=np.float32)
+        done = np.zeros((cfg.num_envs,), dtype=np.bool_)
 
-    # Epsilon schedule
-    eps_start, eps_end = 0.2, 0.0
-    total_batches = int(learner_batches)
+        for i, e in enumerate(envs):
+            obs[i] = np.asarray(e.reset(), dtype=np.float32)
 
-    try:
-        for batch_idx in range(1, total_batches + 1):
-            progress = min(1.0, batch_idx / total_batches)
-            eps = eps_start + (eps_end - eps_start) * progress
+        ep_return = np.zeros((cfg.num_envs,), dtype=np.float32)
 
-            hl.set_epsilon(eps)
-            for a in tutors:
-                a.set_epsilon(eps)
-            if use_tutee and tutee is not None:
-                tutee.set_epsilon(eps)
+        # epsilon linear schedule across episodes
+        progress = (ep - 1) / max(1, (cfg.episodes - 1))
+        eps = cfg.eps_start + (cfg.eps_end - cfg.eps_start) * progress
 
-            obs = env.reset()  # [N, obs_dim]
-            done = np.zeros((env.num_envs,), dtype=bool)
+        hl.set_epsilon(eps)
+        for a in tutors:
+            a.set_epsilon(eps)
+        if tutee is not None:
+            tutee.set_epsilon(eps)
 
-            total_reward = np.zeros((env.num_envs,), dtype=np.float32)
-            steps = 0
+        for step in range(cfg.max_steps):
+            active_mask = ~done
+            if not active_mask.any():
+                break
 
-            topic_counts = np.zeros((num_topics,), dtype=np.int64)
-            tutor_action_counts = {a: 0 for a in tutor_actions}
-            tutee_action_counts = {a: 0 for a in tutee_actions}
+            # obs tensor on GPU for batched inference
+            obs_t = torch.as_tensor(obs, device=device, dtype=torch.float32)
 
-            while not done.all():
-                obs_t = torch.from_numpy(obs).to(device=device, non_blocking=True)
+            # 1) High-level batched action selection
+            with torch.no_grad():
+                hl_actions = hl.select_action_batch(obs_t)
+            hl_actions_cpu = _to_2d_long(hl_actions).detach().cpu()
 
-                # High-level batched (GPU)
-                hl_actions = hl.select_action_batch(obs_t)  # [N]
-                hl_modes_t, hl_topics_t = hl.decode_actions_batch(hl_actions)
-                hl_modes = hl_modes_t.detach().cpu().numpy().astype(bool)
-                hl_topics = hl_topics_t.detach().cpu().numpy().astype(np.int64)
+            # decode HL into (mode, topic)
+            # expected: hl_modes is boolean array (True=tutee, False=tutor), hl_topics is int array [0..T-1]
+            hl_modes, hl_topics = hl.decode_actions_batch(hl_actions_cpu)
+            hl_modes = np.asarray(hl_modes, dtype=np.bool_).reshape(-1)
+            hl_topics = np.asarray(hl_topics, dtype=np.int64).reshape(-1)
 
-                # Low-level action index per env (single int array)
-                ll_action_idx = np.zeros((env.num_envs,), dtype=np.int64)
+            # 2) Low-level batched action selection
+            ll_action_idx = np.zeros((cfg.num_envs,), dtype=np.int64)
 
-                # Tutors grouped by topic
-                for t in range(num_topics):
-                    idx = np.where((~hl_modes) & (hl_topics == t) & (~done))[0]
-                    if idx.size == 0:
-                        continue
-                    topic_col = torch.full((idx.size, 1), float(t), device=device)
-                    ll_obs = torch.cat([obs_t[idx], topic_col], dim=1)
+            # Tutor groups: per topic, batch on GPU
+            tutor_indices_by_topic: List[np.ndarray] = []
+            for t in range(cfg.num_topics):
+                idx = np.where(active_mask & (~hl_modes) & (hl_topics == t))[0]
+                tutor_indices_by_topic.append(idx)
 
-                    a_idx = tutors[t].select_action_batch(ll_obs).detach().cpu().numpy().astype(np.int64)
-                    ll_action_idx[idx] = a_idx
+                if idx.size == 0:
+                    continue
 
-                    # logging
-                    topic_counts[t] += idx.size
-                    for k in a_idx.tolist():
-                        tutor_action_counts[tutor_actions[int(k)]] += 1
+                topic_col = torch.full((idx.size, 1), float(t), device=device, dtype=torch.float32)
+                ll_obs = torch.cat([obs_t[idx], topic_col], dim=1)
 
-                # Tutee group (all topics mixed)
-                if use_tutee and tutee is not None:
-                    idx = np.where((hl_modes) & (~done))[0]
-                    if idx.size > 0:
-                        topic_col = torch.from_numpy(hl_topics[idx]).to(device=device).float().unsqueeze(1)
-                        ll_obs = torch.cat([obs_t[idx], topic_col], dim=1)
-                        a_idx = tutee.select_action_batch(ll_obs).detach().cpu().numpy().astype(np.int64)
-                        ll_action_idx[idx] = a_idx
+                with torch.no_grad():
+                    a_idx = tutors[t].select_action_batch(ll_obs)
 
-                        for k in a_idx.tolist():
-                            tutee_action_counts[tutee_actions[int(k)]] += 1
-                        for t in hl_topics[idx]:
-                            topic_counts[int(t)] += 1
+                a_idx = a_idx.detach().cpu().numpy().astype(np.int64).reshape(-1)
+                ll_action_idx[idx] = a_idx
 
-                # Step envs in parallel (CPU across workers)
-                next_obs, rewards, done2 = env.step(hl_modes, hl_topics, ll_action_idx, done)
+            # Tutee group: all topics mixed, batch once on GPU
+            tutee_idx = np.where(active_mask & hl_modes)[0]
+            if (tutee is not None) and (tutee_idx.size > 0):
+                topic_col = torch.as_tensor(hl_topics[tutee_idx], device=device, dtype=torch.float32).view(-1, 1)
+                ll_obs = torch.cat([obs_t[tutee_idx], topic_col], dim=1)
 
-                # Batched updates (CPU->replay, replay->GPU inside agents)
-                active = np.where(~done)[0]
-                if active.size > 0:
-                    actions_cpu = hl_actions.detach().cpu()
+                with torch.no_grad():
+                    a_idx = tutee.select_action_batch(ll_obs)
 
-                    hl.update_batch(
-                        obs_cpu=torch.from_numpy(obs[active]),
-                        actions_cpu=actions_cpu[active],
-                        rewards_cpu=torch.from_numpy(rewards[active]),
-                        next_obs_cpu=torch.from_numpy(next_obs[active]),
-                        dones_cpu=torch.from_numpy(done2[active].astype(np.float32)),
-                    )
+                a_idx = a_idx.detach().cpu().numpy().astype(np.int64).reshape(-1)
+                ll_action_idx[tutee_idx] = a_idx
 
-                    # Tutor updates by topic
-                    for t in range(num_topics):
-                        idx = np.where((~hl_modes) & (hl_topics == t) & (~done))[0]
-                        if idx.size == 0:
-                            continue
-                        ll_obs = np.concatenate([obs[idx], np.full((idx.size, 1), float(t), dtype=np.float32)], axis=1)
-                        ll_next = np.concatenate([next_obs[idx], np.full((idx.size, 1), float(t), dtype=np.float32)], axis=1)
-                        tutors[t].update_batch(
-                            obs_cpu=torch.from_numpy(ll_obs),
-                            actions_cpu=torch.from_numpy(ll_action_idx[idx]),
-                            rewards_cpu=torch.from_numpy(rewards[idx]),
-                            next_obs_cpu=torch.from_numpy(ll_next),
-                            dones_cpu=torch.from_numpy(done2[idx].astype(np.float32)),
-                        )
+            # 3) Step environments (simple loop; policies/training are batched)
+            next_obs = obs.copy()
+            rewards = np.zeros((cfg.num_envs,), dtype=np.float32)
+            done2 = done.copy()
 
-                    # Tutee updates
-                    if use_tutee and tutee is not None:
-                        idx = np.where((hl_modes) & (~done))[0]
-                        if idx.size > 0:
-                            ll_obs = np.concatenate([obs[idx], hl_topics[idx].astype(np.float32).reshape(-1, 1)], axis=1)
-                            ll_next = np.concatenate([next_obs[idx], hl_topics[idx].astype(np.float32).reshape(-1, 1)], axis=1)
-                            tutee.update_batch(
-                                obs_cpu=torch.from_numpy(ll_obs),
-                                actions_cpu=torch.from_numpy(ll_action_idx[idx]),
-                                rewards_cpu=torch.from_numpy(rewards[idx]),
-                                next_obs_cpu=torch.from_numpy(ll_next),
-                                dones_cpu=torch.from_numpy(done2[idx].astype(np.float32)),
-                            )
+            active_idx = np.where(active_mask)[0]
+            for i in active_idx:
+                topic = int(hl_topics[i])
+                if hl_modes[i] and (tutee is not None):
+                    action = TUTEE_ACTIONS[int(ll_action_idx[i])]
+                    o2, r, d, _info = envs[i].step_tutee(topic_id=topic, tutee_action=action)
+                else:
+                    action = TUTOR_ACTIONS[int(ll_action_idx[i])]
+                    o2, r, d, _info = envs[i].step_tutor(topic_id=topic, tutor_action=action)
 
-                total_reward[~done] += rewards[~done]
-                obs = next_obs
-                done = done2
-                steps += 1
+                next_obs[i] = np.asarray(o2, dtype=np.float32)
+                rewards[i] = float(r)
+                done2[i] = bool(d)
 
-            # Logging
-            if (batch_idx % log_every_batches) == 0:
-                mean_reward = float(np.mean(total_reward))
-                print(f"[Batch {batch_idx:3d}/{total_batches}] eps={eps:.3f} steps={steps} mean_reward={mean_reward:.4f}")
-                total_topic = int(topic_counts.sum()) or 1
-                print("  Topic choice frequencies:")
-                for t in range(num_topics):
-                    print(f"    - Topic {t}: {topic_counts[t] / total_topic * 100:5.1f}%")
-                total_tutor = sum(tutor_action_counts.values()) or 1
-                print("  Tutor action frequencies:")
-                for a in tutor_actions:
-                    print(f"    - {a:20s}: {tutor_action_counts[a] / total_tutor * 100:5.1f}%")
-                if use_tutee and tutee is not None:
-                    total_tutee = sum(tutee_action_counts.values()) or 1
-                    print("  Tutee action frequencies:")
-                    for a in tutee_actions:
-                        print(f"    - {a:20s}: {tutee_action_counts[a] / total_tutee * 100:5.1f}%")
-                print()
+            ep_return += rewards
+            done = done2
 
-        print("Training finished.")
-    finally:
-        env.close()
+            # 4) Batched updates (CPU tensors; agent can move/sample internally)
+            # High-level update over active transitions
+            obs_cpu = torch.from_numpy(obs[active_idx])
+            next_obs_cpu = torch.from_numpy(next_obs[active_idx])
+            r_cpu = torch.from_numpy(rewards[active_idx])
+            d_cpu = torch.from_numpy(done[active_idx].astype(np.float32))
+            a_hl_cpu = hl_actions_cpu[active_idx].view(-1).long()  # already [B,1] long
+
+            hl.update_batch(obs_cpu, a_hl_cpu, r_cpu, next_obs_cpu, d_cpu)
+
+            # Low-level updates: per tutor topic
+            for t in range(cfg.num_topics):
+                idx = tutor_indices_by_topic[t]
+                if idx.size == 0:
+                    continue
+
+                # low-level state includes topic column
+                topic_col_cpu = torch.full((idx.size, 1), float(t), dtype=torch.float32)
+                ll_obs_cpu = torch.cat([torch.from_numpy(obs[idx]), topic_col_cpu], dim=1)
+                ll_next_obs_cpu = torch.cat([torch.from_numpy(next_obs[idx]), topic_col_cpu], dim=1)
+
+                a_ll_cpu = torch.from_numpy(ll_action_idx[idx]).long()
+                r_ll_cpu = torch.from_numpy(rewards[idx])
+                d_ll_cpu = torch.from_numpy(done[idx].astype(np.float32))
+
+                tutors[t].update_batch(ll_obs_cpu, a_ll_cpu, r_ll_cpu, ll_next_obs_cpu, d_ll_cpu)
+
+            # Low-level update: tutee
+            if (tutee is not None) and (tutee_idx.size > 0):
+                topic_col_cpu = torch.as_tensor(hl_topics[tutee_idx], dtype=torch.float32).view(-1, 1)
+                ll_obs_cpu = torch.cat([torch.from_numpy(obs[tutee_idx]), topic_col_cpu], dim=1)
+                ll_next_obs_cpu = torch.cat([torch.from_numpy(next_obs[tutee_idx]), topic_col_cpu], dim=1)
+
+                a_ll_cpu = torch.from_numpy(ll_action_idx[tutee_idx]).long()
+                r_ll_cpu = torch.from_numpy(rewards[tutee_idx])
+                d_ll_cpu = torch.from_numpy(done[tutee_idx].astype(np.float32))
+
+                tutee.update_batch(ll_obs_cpu, a_ll_cpu, r_ll_cpu, ll_next_obs_cpu, d_ll_cpu)
+
+            # advance
+            obs = next_obs
+
+        # Logging (use observation slices; avoids touching env internals)
+        # obs layout: mastery_learner[0..T-1], mastery_tutee[0..T-1], ...
+        mL = float(obs[:, 0:cfg.num_topics].mean())
+        mT = float(obs[:, cfg.num_topics:2 * cfg.num_topics].mean())
+        mean_ret = float(ep_return.mean())
+
+        if (ep % cfg.log_every) == 0:
+            print(f"[Episode {ep:4d}] eps={eps:.3f}  mean_return={mean_ret:+.4f}  mean_mastery(L)={mL:.3f}  mean_mastery(T)={mT:.3f}")
+
+    print("Training finished.")
 
 
 if __name__ == "__main__":
-    mp.freeze_support()
-    train_async()
+    cfg = TrainConfig(
+        num_topics=8,
+        use_tutee=True,
+        num_envs=128,     # increase to 256/512 if GPU is underutilized and you have RAM
+        episodes=500,
+        max_steps=200,
+        log_every=1,
+        seed=123,
+    )
+    train(cfg)
