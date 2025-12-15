@@ -12,8 +12,8 @@ class TorchReplayBuffer:
     Stores on CPU (optionally pinned) and samples with torch.randint,
     then transfers batches to the desired device with non_blocking=True.
 
-    This removes Python deque/random.sample overhead and avoids repeatedly
-    building tensors from Python lists.
+    Removes Python deque/random.sample overhead and avoids repeatedly building
+    tensors from Python lists.
     """
 
     def __init__(self, capacity: int, obs_dim: int, pin_memory: bool = True):
@@ -23,7 +23,6 @@ class TorchReplayBuffer:
         self.size = 0
 
         kwargs = {}
-        # Pinning helps host->GPU transfer if CUDA is used.
         if pin_memory and torch.cuda.is_available():
             kwargs["pin_memory"] = True
 
@@ -45,18 +44,12 @@ class TorchReplayBuffer:
         s2: torch.Tensor,
         d: torch.Tensor,
     ) -> None:
-        """
-        s, s2: float32 [B, obs_dim] on CPU
-        a: int64 [B] on CPU
-        r, d: float32 [B] on CPU
-        """
         if s.ndim != 2:
             raise ValueError("s must be [B, obs_dim]")
         B = int(s.shape[0])
         if B == 0:
             return
 
-        # If batch is larger than capacity, keep the most recent tail.
         if B > self.capacity:
             s = s[-self.capacity:]
             a = a[-self.capacity:]
@@ -78,6 +71,7 @@ class TorchReplayBuffer:
             k2 = B - k1
             sl1 = slice(self.ptr, self.capacity)
             sl2 = slice(0, k2)
+
             self.s[sl1].copy_(s[:k1])
             self.a[sl1].copy_(a[:k1])
             self.r[sl1].copy_(r[:k1])
@@ -90,14 +84,13 @@ class TorchReplayBuffer:
             self.s2[sl2].copy_(s2[k1:])
             self.d[sl2].copy_(d[k1:])
 
-        self.ptr = (end) % self.capacity
+        self.ptr = end % self.capacity
         self.size = min(self.size + B, self.capacity)
 
     def sample(self, batch_size: int, device: torch.device) -> Tuple[torch.Tensor, ...]:
         if self.size < batch_size:
-            raise ValueError("Not enough samples in replay to sample batch_size.")
+            raise ValueError("Not enough samples in replay.")
         idx = torch.randint(0, self.size, (batch_size,), device="cpu")
-        # Transfer once per field; pinned memory enables async H2D
         s = self.s[idx].to(device, non_blocking=True)
         a = self.a[idx].to(device, non_blocking=True)
         r = self.r[idx].to(device, non_blocking=True)
