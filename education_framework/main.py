@@ -215,6 +215,9 @@ def main():
     window_mastery_tutee = []
     window_steps = []
     window_topic_counts = [0 for _ in range(num_topics)]
+
+    window_tutor_hl = 0
+    window_tutee_hl = 0
     # get tutor action names to keep order stable
     tutor_action_names = tutor_agents[0].get_action_meanings()
     window_tutor_action_counts = {a: 0 for a in tutor_action_names}
@@ -249,8 +252,7 @@ def main():
         avg_mastery_tutee = sum(env.state.mastery_tutee) / env.num_topics
 
         # accumulate
-        window_tutor_hl = 0
-        window_tutee_hl = 0
+
         window_rewards.append(total_reward)
         window_mastery_learner.append(avg_mastery_learner)
         window_mastery_tutee.append(avg_mastery_tutee)
@@ -269,13 +271,13 @@ def main():
             w = log_window
             mean_reward = sum(window_rewards) / w
             # mean_reward = window_rewards[-1]
-            # mean_mastery_learner = sum(window_mastery_learner) / w
-            mean_mastery_learner = window_mastery_learner[-1]
+            mean_mastery_learner = sum(window_mastery_learner) / w
+            # mean_mastery_learner = window_mastery_learner[-1]
             mean_mastery_tutee = sum(window_mastery_tutee) / w
             # TODO check
             #
-            # mean_steps = sum(window_steps) / w
-            mean_steps = window_steps[-1]
+            mean_steps = sum(window_steps) / w
+            # mean_steps = window_steps[-1]
             total_topic_choices = sum(window_topic_counts) or 1
             topic_freqs = [c / total_topic_choices for c in window_topic_counts]
 
@@ -323,6 +325,8 @@ def main():
             window_steps.clear()
             window_topic_counts = [0 for _ in range(num_topics)]
             window_tutor_action_counts = {a: 0 for a in tutor_action_names}
+            window_tutor_hl = 0
+            window_tutee_hl = 0
             if use_tutee and tutee_agent is not None:
                 window_tutee_action_counts = {a: 0 for a in tutee_action_names}
 
