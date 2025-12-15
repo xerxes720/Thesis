@@ -150,17 +150,21 @@ class LearnerModel:
         self.max_steps = 500
 
         # reward parameters
-        # self.completion_bonus = 0.5  # analogous to r_c
-        # self.reward_clip = (-2.0, 3.0)  # safe default; you can widen if needed
-        # self.diminishing_k = 0.02  # per-learner diminishing returns strength
-        # self.reward_decay = 0.98
 
-        self.completion_bonus = 1.5  # stronger incentive to complete a topic
-        self.episode_success_bonus = 2.0  # reward when ALL topics are done (early termination)
-        self.step_cost = 0.01  # per-step penalty to push fewer steps
-        self.timeout_penalty = 1.0  # penalty when you hit max_steps
-        self.reward_clip = (-2.0, 3.0)  # keep same range as your current setup
-        self.diminishing_k = 0.08  # stronger diminishing returns than 0.02
+
+        # reward parameters
+        # Stronger completion pressure (paper-like shorter episodes)
+        self.completion_bonus = 1.5        # bonus when a topic completes
+        self.episode_success_bonus = 2.0   # bonus when ALL topics are complete (episode finishes early)
+        self.step_cost = 0.01              # per-step penalty to encourage fewer actions
+        self.timeout_penalty = 1.0         # penalty when hitting max_steps (on terminal step)
+        self.reward_clip = (-2.0, 3.0)     # keep same cap as your current setup
+        self.diminishing_k = 0.08          # stronger diminishing returns than 0.02
+
+        # Paper-like: allow 'very_good' tutor actions to jump close to mastery when learner is ready
+        self.instant_mastery_on_very_good = True
+        self.instant_mastery_prereq_min = 0.80
+        self.instant_mastery_margin = 0.05  # pushes above thresholds but still < 1.0 after clipping
 
         # build topic-specific dynamics
         self.topic_dyn: List[TopicDynamics] = []
@@ -578,6 +582,18 @@ class LearnerModel:
         self.state.score[topic_id] = _clip01(S + dS)
         self.state.test_speed[topic_id] = _clip01(ts + dts)
         self.state.segment_speed[topic_id] = _clip01(ss + dss)
+        # Paper-like 'one step to mastery' effect:
+        # if the tutor delivers a VERY_GOOD action and prerequisites are satisfied,
+        # jump the key completion variables near/over the thresholds.
+        if self.instant_mastery_on_very_good and mode == "tutor" and q == "very_good" and prereq >= self.instant_mastery_prereq_min:
+            mt = min(1.0, self.mastery_target + self.instant_mastery_margin)
+            st = min(1.0, self.score_target + self.instant_mastery_margin)
+            at = min(1.0, self.accuracy_target + self.instant_mastery_margin)
+            self.state.mastery_learner[topic_id] = max(self.state.mastery_learner[topic_id], mt)
+            self.state.score[topic_id] = max(self.state.score[topic_id], st)
+            # accuracy is global; only raise it toward the minimum needed for completion
+            self.state.accuracy = max(self.state.accuracy, at)
+
         self.state.input_quality[topic_id] = _clip01(iq + diq)
 
         # emotion and motivation/global accuracy
@@ -609,57 +625,61 @@ class LearnerModel:
 
     def _compute_reward(self, prev: dict, cur: LearnerTuteeState, topic_id: int) -> float:
         """
-        Mastery-aligned reward.
+        Reward = average percentage change across learner performance variables + completion bonus.
+        Applies diminishing returns per learner (assist_count).
 
-        Key changes vs the previous version:
-        - Reward is computed primarily from *selected topic* learning progress (mastery/score),
-          rather than averaging percent changes across all topics and all variables.
-        - Small shaping terms keep your multi-variable state meaningful (motivation/retention/accuracy),
-          but they cannot dominate mastery gains.
-        - Includes a small per-step penalty to discourage 500-step episodes without completion.
+        prev is a snapshot dict produced by _snapshot_for_reward().
         """
-        tid = int(topic_id)
+        # Efficiently accumulate mean % change without building large temporary lists
+        total = 0.0
+        count = 0
 
-        # --- primary learning signal (selected topic) ---
-        d_mastery = float(cur.mastery_learner[tid] - prev["mastery_learner"][tid])
-        d_score = float(cur.score[tid] - prev["score"][tid])
+        # per-topic learner variables (exclude tutee mastery from reward by default)
+        for c, p in zip(cur.mastery_learner, prev["mastery_learner"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.score, prev["score"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.test_speed, prev["test_speed"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.segment_speed, prev["segment_speed"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.emotion, prev["emotion"]):
+            total += _pct_change(c, p);
+            count += 1
+        for c, p in zip(cur.input_quality, prev["input_quality"]):
+            total += _pct_change(c, p);
+            count += 1
 
-        # --- lightweight shaping (global) ---
-        d_acc = float(cur.accuracy - prev["accuracy"])
-        d_mot = float(cur.motivation - prev["motivation"])
-        d_ret = float(cur.retention - prev["retention"])
+        # global learner variables
+        total += _pct_change(cur.motivation, prev["motivation"]);
+        count += 1
+        total += _pct_change(cur.retention, prev["retention"]);
+        count += 1
+        total += _pct_change(cur.accuracy, prev["accuracy"]);
+        count += 1
 
-        # optional: very small shaping from per-topic process variables
-        # (kept small so they cannot "farm" reward without learning)
-        d_emotion = _pct_change(float(cur.emotion[tid]), float(prev["emotion"][tid]))
-        d_inputq = _pct_change(float(cur.input_quality[tid]), float(prev["input_quality"][tid]))
+        reward = total / max(1, count)
 
-        # Weighted sum: mastery dominates
-        reward = (
-            2.0 * d_mastery
-            + 0.6 * d_score
-            + 0.2 * d_acc
-            + 0.10 * d_mot
-            + 0.10 * d_ret
-            + 0.02 * d_emotion
-            + 0.02 * d_inputq
-        )
+        # completion bonus if this step completed the topic
+        if (not prev["topic_done"]) and cur.topic_done[topic_id]:
+            reward += self.completion_bonus
 
-        # completion bonus (only when this topic flips to done)
-        # if (not prev["topic_done"]) and bool(self.state.topic_done[tid]):
-        #     reward += self.completion_bonus
-
+        # bonus for completing the whole curriculum (ends episode early)
         if all(cur.topic_done):
             reward += self.episode_success_bonus
 
-        # discourage long episodes that never finish
-        reward -= self.step_cost  # per environment step
+        # explicit pressure to use fewer steps
+        reward -= self.step_cost
 
-
+        # penalize terminal step if we hit the time cap
         if cur.step_count >= self.max_steps:
             reward -= self.timeout_penalty
 
-        # diminishing returns: too much assistance should reduce reward
+        # diminishing returns per learner (discourage excessive assistance)
         decay = 1.0 / (1.0 + self.diminishing_k * max(0, cur.assist_count))
         reward *= decay
 
