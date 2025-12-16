@@ -1,6 +1,8 @@
 # environment/learner_model.py
 
 from __future__ import annotations
+
+import os
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 import random
@@ -149,7 +151,9 @@ class LearnerModel:
         self.accuracy_target = 0.60
         self.max_steps = 500
 
-        # reward parameters
+        from scripts.build_decision_tree import QualityTreeBank
+        self.quality_bank = QualityTreeBank.load("models/quality_trees_assistments.joblib") \
+            if os.path.exists("models/quality_trees_assistments.joblib") else None
 
 
         # reward parameters
@@ -322,6 +326,25 @@ class LearnerModel:
 
         Returns one of: very_bad, bad, neutral, good, very_good
         """
+        if self.quality_bank is not None:
+            # Build the same 5-feature vector used at training time.
+            # Simplest approach: store these EMAs in your LearnerModel state, or compute
+            # approximate proxies from your existing variables.
+            x = np.array([
+                float(self.mastery_learner[topic_id]),  # mastery proxy
+                float(1.0 - self.test_speed[topic_id]),  # "rt_good" proxy (adjust if needed)
+                float(self.input_quality[topic_id]),  # hint/input proxy
+                float(1.0 - self.accuracy),  # attempt/error proxy (rough)
+                float(np.mean(self.mastery_learner)),  # global mastery proxy
+            ], dtype=np.float32)
+
+            # Map your internal action names to the learned action names if needed
+            # e.g., "practice" -> "quiz"
+            action_map = {"practice": "quiz"}
+            a = action_map.get(action, action)
+
+            return self.quality_bank.predict_quality(topic_id, a, x)
+
         M = self.state.mastery_learner[topic_id]
         S = self.state.score[topic_id]
         ts = self.state.test_speed[topic_id]

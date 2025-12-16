@@ -61,8 +61,6 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
                   e.g. ["tutor_topic_1", "tutee_topic_1", "tutor_topic_2", ...]
     """
 
-
-
     obs = env.reset()
     done = False
     total_reward = 0.0
@@ -101,7 +99,6 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 
         # record this high-level step, e.g. "tutor_topic_1" or "tutee_topic_2"
         hl_trace.append(f"{mode}_topic_{topic_id}")
-
 
         # === Low-level + env step ===
         if mode == "tutor":
@@ -176,9 +173,11 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         hl_trace,
     )
 
+
 def add_topic(obs, topic_id: int) -> np.ndarray:
     obs_np = np.asarray(obs, dtype=np.float32)
     return np.concatenate([obs_np, np.array([topic_id], dtype=np.float32)])
+
 
 def main():
     # ---------------- config ----------------
@@ -227,7 +226,6 @@ def main():
         window_tutee_action_counts = {a: 0 for a in tutee_action_names}
     else:
         window_tutee_action_counts = {}
-
 
     for episode in tqdm(range(1, num_episodes + 1), desc="Training"):
 
