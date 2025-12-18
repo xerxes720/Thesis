@@ -155,7 +155,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             next_tutor_obs = add_topic(next_obs, topic_id)
 
             if train:
-                high_level_agent.update(obs, hl_action_idx, reward, next_tutor_obs, done)
+                high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
 
         total_reward += reward
         steps += 1
@@ -182,7 +182,7 @@ def add_topic(obs, topic_id: int) -> np.ndarray:
 def main():
     # ---------------- config ----------------
     num_topics = 8
-    use_tutee = True
+    use_tutee = False #TODO for now
     num_episodes = 6000
     log_window = 100
     eps_start = 0.2
@@ -265,7 +265,7 @@ def main():
         window_tutor_hl += tutor_hl_count
         window_tutee_hl += tutee_hl_count
         # log every log_window episodes
-        if episode % log_window == 0 or episode == 1:
+        if episode % log_window == 0:
             w = log_window
             mean_reward = sum(window_rewards) / w
             # mean_reward = window_rewards[-1]

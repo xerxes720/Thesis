@@ -393,10 +393,21 @@ def fit_quality_trees(
             action_to_mean = {a: action_to_mean[a] for a in action_to_mean if a in actions}
             leaf_to_action_quality[int(lid)] = map_means_to_quality(action_to_mean)
 
+        leaf_to_action_delta_mean = {}
+        leaf_to_action_delta_std = {}
+        for lid, av in leaf_action_deltas.items():
+            leaf_to_action_delta_mean[lid] = {}
+            leaf_to_action_delta_std[lid] = {}
+            for a, v in av.items():
+                arr = np.stack(v).astype(np.float32)  # [n, 5]
+                leaf_to_action_delta_mean[lid][a] = arr.mean(axis=0)
+                leaf_to_action_delta_std[lid][a] = arr.std(axis=0)  # ddof=0 is fine
+
         bank.bank[topic_id] = LeafQualityModel(
             tree=tree,
             leaf_to_action_quality=leaf_to_action_quality,
-            leaf_to_action_delta=leaf_to_action_delta,
+            leaf_to_action_delta_mean=leaf_to_action_delta_mean,
+            leaf_to_action_delta_std=leaf_to_action_delta_std,
             default_quality="neutral",
         )
 

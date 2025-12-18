@@ -160,11 +160,7 @@ class HighLevelAgent:
 
         s, a, r, s2, d = self.replay.sample(self.cfg.batch_size)
 
-        # s_t = torch.as_tensor(s, dtype=torch.float32, device=self.device)
-        # a_t = torch.as_tensor(a, dtype=torch.int64, device=self.device).unsqueeze(1)
-        # r_t = torch.as_tensor(r, dtype=torch.float32, device=self.device)
-        # s2_t = torch.as_tensor(s2, dtype=torch.float32, device=self.device)
-        # d_t = torch.as_tensor(d, dtype=torch.float32, device=self.device)
+
         s_np = _to_f32_batch(s)
         s2_np = _to_f32_batch(s2)
         a_np = _to_i64_batch(a)
@@ -223,28 +219,3 @@ class HighLevelAgent:
         self.target_net.eval()
 
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.cfg.lr)
-    # def _encode_state(self, obs: List[float]) -> StateType:
-    #     """
-    #     Coarse, discrete state for high-level decisions.
-    #
-    #     We only use learner's mastery per topic, bucketed into 3 levels:
-    #       0 = low   (0.0 - 0.33)
-    #       1 = mid   (0.33 - 0.66)
-    #       2 = high  (0.66 - 1.0)
-    #     (3^num_topics).
-    #     """
-    #     num_topics = self.cfg.num_topics
-    #     bucket_count = self.cfg.num_buckets
-    #     learner_mastery = obs[:num_topics]  # first num_topics are learner mastery
-    #
-    #     buckets = []
-    #     for m in learner_mastery:
-    #         buckets.append(min(bucket_count - 1, int(m * bucket_count)))
-    #         # if m < 0.33:
-    #         #     buckets.append(0)
-    #         # elif m < 0.66:
-    #         #     buckets.append(1)
-    #         # else:
-    #         #     buckets.append(2)
-    #
-    #     return tuple(buckets)

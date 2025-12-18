@@ -16,9 +16,12 @@ from sklearn.tree import DecisionTreeRegressor
 class LeafQualityModel:
     tree: DecisionTreeRegressor
     leaf_to_action_quality: Dict[int, Dict[str, str]]
-    leaf_to_action_delta: Dict[int, Dict[str, np.ndarray]]   # NEW
+    leaf_to_action_delta_mean: Dict[int, Dict[str, np.ndarray]]
+    leaf_to_action_delta_std: Dict[int, Dict[str, np.ndarray]]
     default_quality: str = "neutral"
-    default_delta: np.ndarray = field(default_factory=lambda: np.zeros(5, dtype=np.float32))
+    default_delta_mean: np.ndarray = field(default_factory=lambda: np.zeros(5, dtype=np.float32))
+    default_delta_std:  np.ndarray = field(default_factory=lambda: np.zeros(5, dtype=np.float32))
+
 
 
 class QualityTreeBank:
@@ -62,3 +65,16 @@ class QualityTreeBank:
         if d is None:
             return np.zeros(5, dtype=np.float32)
         return d
+
+    def predict_delta_stats(self, topic_id: int, action: str, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        m = self.bank.get(topic_id)
+        if m is None:
+            return np.zeros(5, np.float32), np.zeros(5, np.float32)
+        leaf = int(m.tree.apply(x.reshape(1, -1))[0])
+        mean = (m.leaf_to_action_delta_mean.get(leaf) or {}).get(action, m.default_delta_mean)
+        std = (m.leaf_to_action_delta_std.get(leaf) or {}).get(action, m.default_delta_std)
+        return mean.astype(np.float32), std.astype(np.float32)
+
+    def sample_delta(self, topic_id: int, action: str, x: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        mean, std = self.predict_delta_stats(topic_id, action, x)
+        return rng.normal(loc=mean, scale=std).astype(np.float32)

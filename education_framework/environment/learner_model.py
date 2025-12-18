@@ -9,9 +9,11 @@ import random
 import numpy as np
 import math
 from education_framework.models.quality_tree_bank import QualityTreeBank
+from pathlib import Path
 
 
-
+BASE = Path(__file__).resolve().parents[1]  # .../education_framework
+MODEL_PATH = BASE / "models" / "quality_trees_assistments.joblib"
 # -------------------- helpers --------------------
 
 def _clip01(x: float) -> float:
@@ -44,6 +46,7 @@ def _pct_change(cur: float, prev: float, eps: float = 1e-3) -> float:
 
 
 # -------------------- state --------------------
+
 
 @dataclass
 class LearnerTuteeState:
@@ -153,9 +156,9 @@ class LearnerModel:
         self.accuracy_target = 0.60
         self.max_steps = 500
 
-        from scripts.build_decision_tree import QualityTreeBank
-        self.quality_bank = QualityTreeBank.load("education_framework/models/quality_trees_assistments.joblib") \
-            if os.path.exists("education_framework/models/quality_trees_assistments.joblib") else None
+        self.quality_bank = QualityTreeBank.load(str(MODEL_PATH))
+            # if MODEL_PATH.exists() else None
+            # if os.path.exists("education_framework/models/quality_trees_assistments.joblib") else None
 
 
         # reward parameters
@@ -264,6 +267,27 @@ class LearnerModel:
 
     # --------------- internal dynamics ----------------
 
+    def _map_action_for_tree(self, mode: str, action: str) -> str:
+        # Align simulator actions to the action labels used in the ASSISTments-derived trees.
+        tutor_map = {
+            "hint": "hint",
+            "worked_example": "worked_example",
+            "reflection_question": "hint",
+            "no_help": "quiz",
+        }
+        tutee_map = {
+            "ask_worked_example": "worked_example",
+            "ask_explanation": "quiz",
+            "ask_summary": "quiz",
+            "show_mistake_and_ask_fix": "quiz",
+        }
+
+        if mode == "tutor":
+            return tutor_map.get(action, action)
+        if mode == "tutee":
+            return tutee_map.get(action, action)
+        return action
+
     def _apply_learned_delta(self, topic_id: int, mode: str, action: str, prereq: float) -> bool:
         if self.quality_bank is None:
             return False
@@ -277,11 +301,13 @@ class LearnerModel:
             float(np.mean(self.state.mastery_learner)),
         ], dtype=np.float32)
 
-        action_map = {"practice": "quiz"}
-        a = action_map.get(action, action)
+        # action_map = {"practice": "quiz"}
+        # a = action_map.get(action, action)
+        #
+        # d = self.quality_bank.predict_delta(topic_id, a, x)  # [dM, dRTgood, dHintRate, dAttempt, dGlobalM]
 
-        d = self.quality_bank.predict_delta(topic_id, a, x)  # [dM, dRTgood, dHintRate, dAttempt, dGlobalM]
-
+        a = self._map_action_for_tree(mode, action)
+        d = self.quality_bank.predict_delta(topic_id, a, x)
         # If delta is all zeros, treat as missing
         if float(np.abs(d).sum()) < 1e-8:
             return False
@@ -417,10 +443,12 @@ class LearnerModel:
 
             # Map your internal action names to the learned action names if needed
             # e.g., "practice" -> "quiz"
-            action_map = {"practice": "quiz"}
-            a = action_map.get(action, action)
-
+            a = self._map_action_for_tree(mode, action)
             return self.quality_bank.predict_quality(topic_id, a, x)
+            # action_map = {"practice": "quiz"}
+            # a = action_map.get(action, action)
+            #
+            # return self.quality_bank.predict_quality(topic_id, a, x)
 
         M = self.state.mastery_learner[topic_id]
         S = self.state.score[topic_id]
