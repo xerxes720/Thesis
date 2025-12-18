@@ -8,6 +8,8 @@ from typing import List, Dict, Tuple, Optional
 import random
 import numpy as np
 import math
+from education_framework.models.quality_tree_bank import QualityTreeBank
+
 
 
 # -------------------- helpers --------------------
@@ -152,8 +154,8 @@ class LearnerModel:
         self.max_steps = 500
 
         from scripts.build_decision_tree import QualityTreeBank
-        self.quality_bank = QualityTreeBank.load("models/quality_trees_assistments.joblib") \
-            if os.path.exists("models/quality_trees_assistments.joblib") else None
+        self.quality_bank = QualityTreeBank.load("education_framework/models/quality_trees_assistments.joblib") \
+            if os.path.exists("education_framework/models/quality_trees_assistments.joblib") else None
 
 
         # reward parameters
@@ -219,7 +221,7 @@ class LearnerModel:
             self.state.segment_speed, self.state.emotion, self.state.input_quality,
             np.array([self.state.motivation, self.state.retention, self.state.accuracy])
         ))
-        return arr  # Convert to list for agents (or change agents to accept np)
+        return arr.astype(np.float32).tolist()  # Convert to list for agents (or change agents to accept np)
 
     def step_tutor(self, topic_id: int, tutor_action: str) -> Tuple[List[float], float, bool, Dict]:
         prev_snapshot = self._snapshot_for_reward(topic_id)
@@ -262,6 +264,79 @@ class LearnerModel:
 
     # --------------- internal dynamics ----------------
 
+    def _apply_learned_delta(self, topic_id: int, mode: str, action: str, prereq: float) -> bool:
+        if self.quality_bank is None:
+            return False
+
+        # same x as in _action_quality() (must match training feature meanings)
+        x = np.array([
+            float(self.state.mastery_learner[topic_id]),
+            float(self.state.test_speed[topic_id]),
+            float(1.0 - self.state.input_quality[topic_id]),
+            float(1.0 - self.state.accuracy),
+            float(np.mean(self.state.mastery_learner)),
+        ], dtype=np.float32)
+
+        action_map = {"practice": "quiz"}
+        a = action_map.get(action, action)
+
+        d = self.quality_bank.predict_delta(topic_id, a, x)  # [dM, dRTgood, dHintRate, dAttempt, dGlobalM]
+
+        # If delta is all zeros, treat as missing
+        if float(np.abs(d).sum()) < 1e-8:
+            return False
+
+        dyn = self.topic_dyn[topic_id]
+        scale = (0.40 + 0.60 * prereq) / max(0.75, dyn.difficulty)
+
+        # Add small noise like your existing dynamics
+        n = dyn.noise_std
+        noise = lambda: self.rng.gauss(0.0, n)
+
+        dM, dRT, dHR, dAT, dGM = [float(v) for v in d]
+
+        # score improves with mastery proxy
+        self.state.score[topic_id] = _clip01(
+            self.state.score[topic_id] + scale * (0.9 * dM) + noise()
+        )
+
+        # global accuracy worsens if attempt proxy increases (and improves if it decreases)
+        self.state.accuracy = _clip01(
+            self.state.accuracy - scale * (0.6 * dAT) + noise() * 0.3
+        )
+        # if hint_rate rises (dHR > 0), treat it as lower accuracy too:
+        self.state.accuracy = _clip01(self.state.accuracy - scale * (0.2 * dHR) + noise() * 0.2)
+
+        # Map dataset-proxy deltas into your simulator state:
+        # - mastery_ema -> mastery_learner
+        # - rt_good_ema -> test_speed (and lightly segment_speed)
+        # - hint_rate/attempt go "bad" when they increase, so they reduce input_quality / emotion
+        self.state.mastery_learner[topic_id] = _clip01(self.state.mastery_learner[topic_id] + scale * dM + noise())
+
+        self.state.test_speed[topic_id] = _clip01(self.state.test_speed[topic_id] + scale * dRT + noise())
+        self.state.segment_speed[topic_id] = _clip01(self.state.segment_speed[topic_id] + scale * 0.5 * dRT + noise())
+
+        # input_quality is "good"; rising hint/attempt implies lower quality
+        self.state.input_quality[topic_id] = _clip01(
+            self.state.input_quality[topic_id] - scale * 0.5 * (dHR + dAT) + noise()
+        )
+
+        # affect / motivation (keep simple, tied to fluency + struggle)
+        self.state.emotion[topic_id] = _clip01(
+            self.state.emotion[topic_id] + scale * (0.3 * dRT - 0.2 * (dHR + dAT)) + noise()
+        )
+        self.state.motivation = _clip01(self.state.motivation + scale * 0.15 * dGM + noise() * 0.5)
+
+        # retention grows when mastery improves
+        if dM > 0:
+            self.state.retention = _clip01(self.state.retention + 0.25 * scale * dM)
+
+        # optional protégé bonus (keep small)
+        if mode == "tutee" and dM > 0:
+            self.state.mastery_learner[topic_id] = _clip01(self.state.mastery_learner[topic_id] + 0.01)
+
+        return True
+
     def _prereq_factor(self, topic_id: int) -> float:
         """
         Readiness factor based on prereqs (paper uses different dynamics; this is a defensible proxy).
@@ -286,25 +361,27 @@ class LearnerModel:
         )
 
     def _apply_action(self, topic_id: int, mode: str, action: str) -> None:
-        """
-        Convert the selected action into a quality category, then apply category-based variable shifts.
-        """
         dyn = self.topic_dyn[topic_id]
         prereq = self._prereq_factor(topic_id)
 
-        # Determine action "quality category" based on current learner variables
+        # Prefer learned transition if available
+        if self._apply_learned_delta(topic_id, mode, action, prereq):
+            # Update completion flag
+            if (not self.state.topic_done[topic_id]) and self._topic_complete_now(topic_id):
+                self.state.topic_done[topic_id] = True
+            return
+
+        # Otherwise use quality-category transition (paper-like fallback)
         q = self._action_quality(topic_id, mode, action)
 
-        # If prereq readiness is low, degrade quality (harder to learn out-of-order)
+        # prereq readiness affects effectiveness BEFORE applying shifts
         if prereq < 0.35:
             q = _degrade_quality(q, 2)
         elif prereq < 0.60:
             q = _degrade_quality(q, 1)
 
-        # Apply category-based shifts
         self._apply_quality_shifts(topic_id, mode, q, dyn, prereq)
 
-        # Update completion flag
         if (not self.state.topic_done[topic_id]) and self._topic_complete_now(topic_id):
             self.state.topic_done[topic_id] = True
 
@@ -331,11 +408,11 @@ class LearnerModel:
             # Simplest approach: store these EMAs in your LearnerModel state, or compute
             # approximate proxies from your existing variables.
             x = np.array([
-                float(self.mastery_learner[topic_id]),  # mastery proxy
-                float(1.0 - self.test_speed[topic_id]),  # "rt_good" proxy (adjust if needed)
-                float(self.input_quality[topic_id]),  # hint/input proxy
-                float(1.0 - self.accuracy),  # attempt/error proxy (rough)
-                float(np.mean(self.mastery_learner)),  # global mastery proxy
+                float(self.state.mastery_learner[topic_id]),  # mastery proxy
+                float(self.state.test_speed[topic_id]),  # rt_good proxy (higher=better)
+                float(1.0 - self.state.input_quality[topic_id]),  # hint_rate proxy (higher=worse)
+                float(1.0 - self.state.accuracy),  # attempt proxy (higher=worse)
+                float(np.mean(self.state.mastery_learner)),  # global mastery
             ], dtype=np.float32)
 
             # Map your internal action names to the learned action names if needed

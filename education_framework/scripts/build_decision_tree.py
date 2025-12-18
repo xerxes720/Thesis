@@ -29,18 +29,15 @@ Notes:
 
 from __future__ import annotations
 
-import os
 import json
+import os
 import sqlite3
-from dataclasses import dataclass
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List
 
 import numpy as np
 import pandas as pd
 from sklearn.tree import DecisionTreeRegressor
-import joblib
-
-
+from education_framework.models.quality_tree_bank import LeafQualityModel, QualityTreeBank
 QUALITY_LEVELS = ["very_bad", "bad", "neutral", "good", "very_good"]
 
 
@@ -75,49 +72,6 @@ def map_means_to_quality(action_to_mean: Dict[str, float], eps: float = 1e-6) ->
         else:
             out[a] = "very_bad"
     return out
-
-
-# -----------------------------
-# Model container (saved to disk)
-# -----------------------------
-
-@dataclass
-class LeafQualityModel:
-    tree: DecisionTreeRegressor
-    leaf_to_action_quality: Dict[int, Dict[str, str]]
-    default_quality: str = "neutral"
-
-
-class QualityTreeBank:
-    def __init__(self, num_topics: int, feature_names: List[str]):
-        self.num_topics = num_topics
-        self.feature_names = feature_names
-        self.bank: Dict[int, LeafQualityModel] = {}  # topic_id -> model
-
-    def save(self, path: str) -> None:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        payload = {
-            "num_topics": self.num_topics,
-            "feature_names": self.feature_names,
-            "bank": self.bank,
-            "version": 1,
-        }
-        joblib.dump(payload, path)
-
-    @staticmethod
-    def load(path: str) -> "QualityTreeBank":
-        payload = joblib.load(path)
-        qt = QualityTreeBank(payload["num_topics"], payload["feature_names"])
-        qt.bank = payload["bank"]
-        return qt
-
-    def predict_quality(self, topic_id: int, action: str, x: np.ndarray) -> str:
-        m = self.bank.get(topic_id)
-        if m is None:
-            return "neutral"
-        leaf = int(m.tree.apply(x.reshape(1, -1))[0])
-        leaf_map = m.leaf_to_action_quality.get(leaf) or {}
-        return leaf_map.get(action, m.default_quality)
 
 
 # -----------------------------
@@ -268,11 +222,11 @@ def derive_action(row: pd.Series) -> str:
 
 
 def build_transitions_from_df(
-    df: pd.DataFrame,
-    skill_to_topic: Dict[str, int],
-    num_topics: int,
-    ema_alpha: float = 0.15,
-    rt_clip_ms: float = 300_000.0,  # 5 min
+        df: pd.DataFrame,
+        skill_to_topic: Dict[str, int],
+        num_topics: int,
+        ema_alpha: float = 0.15,
+        rt_clip_ms: float = 300_000.0,  # 5 min
 ) -> List[Dict[str, Any]]:
     """
     Build per-interaction transitions with a compact state vector x and an outcome y.
@@ -304,10 +258,10 @@ def build_transitions_from_df(
     df["ms_first_response"] = df["ms_first_response"].clip(lower=0.0, upper=rt_clip_ms)
 
     # Per-user, per-topic EMA trackers
-    mastery = {}   # (user, topic) -> ema
-    rt = {}        # (user, topic) -> ema
-    hint_rate = {} # (user, topic) -> ema
-    attempt = {}   # (user, topic) -> ema
+    mastery = {}  # (user, topic) -> ema
+    rt = {}  # (user, topic) -> ema
+    hint_rate = {}  # (user, topic) -> ema
+    attempt = {}  # (user, topic) -> ema
     global_mastery = {}  # user -> ema
 
     transitions: List[Dict[str, Any]] = []
@@ -366,11 +320,14 @@ def build_transitions_from_df(
 
         x = np.array([m0, rt0, hr0, at0, gm0], dtype=np.float32)
 
+        dx = np.array([m1 - m0, rt1 - rt0, hr1 - hr0, at1 - at0, gm1 - gm0], dtype=np.float32)
+
         transitions.append({
             "topic_id": topic,
             "action": action,
             "x": x,
             "y": y,
+            "dx": dx,
         })
 
     return transitions
@@ -381,12 +338,12 @@ def build_transitions_from_df(
 # -----------------------------
 
 def fit_quality_trees(
-    transitions: List[Dict[str, Any]],
-    num_topics: int,
-    actions: List[str],
-    max_depth: int = 5,
-    min_leaf: int = 200,
-    seed: int = 0,
+        transitions: List[Dict[str, Any]],
+        num_topics: int,
+        actions: List[str],
+        max_depth: int = 5,
+        min_leaf: int = 200,
+        seed: int = 0,
 ) -> QualityTreeBank:
     feature_names = ["mastery_ema", "rt_good_ema", "hint_rate_ema", "attempt_ema", "global_mastery_ema"]
     bank = QualityTreeBank(num_topics=num_topics, feature_names=feature_names)
@@ -415,9 +372,19 @@ def fit_quality_trees(
 
         # leaf -> action -> list[y]
         leaf_action_values: Dict[int, Dict[str, List[float]]] = {}
+        leaf_action_deltas: Dict[int, Dict[str, List[np.ndarray]]] = {}
+
         for lid, r in zip(leaf_ids, rows):
             a = str(r["action"])
             leaf_action_values.setdefault(int(lid), {}).setdefault(a, []).append(float(r["y"]))
+            leaf_action_deltas.setdefault(int(lid), {}).setdefault(a, []).append(r["dx"])
+
+        leaf_to_action_delta: Dict[int, Dict[str, np.ndarray]] = {}
+        for lid, av in leaf_action_deltas.items():
+            leaf_to_action_delta[int(lid)] = {
+                a: np.mean(np.stack(v), axis=0).astype(np.float32)
+                for a, v in av.items()
+            }
 
         leaf_to_action_quality: Dict[int, Dict[str, str]] = {}
         for lid, av in leaf_action_values.items():
@@ -429,6 +396,7 @@ def fit_quality_trees(
         bank.bank[topic_id] = LeafQualityModel(
             tree=tree,
             leaf_to_action_quality=leaf_to_action_quality,
+            leaf_to_action_delta=leaf_to_action_delta,
             default_quality="neutral",
         )
 
