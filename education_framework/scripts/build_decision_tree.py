@@ -1,475 +1,435 @@
+# build_decision_tree.py
 """
-Build per-topic, per-leaf action quality trees from ASSISTments logs and cache to disk.
+Train KDD-based response + transition decision-tree models and save a KDDModelBundle.
 
-Pipeline:
-1) Read ASSISTments CSV (2009-2010 Combined or Skill Builder).
-2) Store minimal columns into SQLite (data/edm.db).
-3) Create per-interaction "state" features using rolling / EMA proxies:
-     - mastery proxy (EMA of correctness)
-     - avg response time proxy
-     - hint-rate proxy
-     - attempt-rate proxy
-4) Derive an "action" label from the log (practice vs hint vs worked_example proxy).
-5) Fit per-topic DecisionTreeRegressor that partitions state space.
-6) For each leaf, map actions into 5 quality bins based on mean outcome in that leaf.
-7) Save trees + leaf maps to models/quality_trees_assistments.joblib
+This script produces:
+- schema (quantile thresholds) for action labeling + generation_mode proxy
+- kc_to_topic mapping (8 macro-topics)
+- per-topic response model: DecisionTreeClassifier(max_depth=7)
+- per-topic transition model: DecisionTreeRegressor(max_depth=7) predicting delta vector (dim=5)
+- optional per-topic auxiliary models for hints, incorrects, duration (regressors)
 
-Why this is defensible:
-- ASSISTments provides correctness, attempt counts, response-time fields like ms_first_response,
-  and hint-related fields like hint_count/hint_total (dataset-dependent). :contentReference[oaicite:1]{index=1}
-- This mirrors the paper’s pattern: state partitions + leaf-level action quality categories.
+Output:
+- joblib file containing KDDModelBundle (see learner_model.py)
 
-Usage:
-  python scripts/build_quality_trees_from_assistments.py --csv path/to/assistments.csv
+Usage (example):
+  python build_decision_tree.py --csv path/to/kdd.csv --out kdd_bundle.joblib \
+      --kc_col "KC(Default)" --student_col "Anon Student Id"
 
 Notes:
-- You must download the dataset yourself and point --csv to it.
-- Install dependencies: pip install pandas scikit-learn joblib
+- If you already have an 8-topic mapping, pass --kc_map_json.
+- Otherwise, the script clusters KCs into 8 macro-topics using co-occurrence + KMeans.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
-import sqlite3
-from typing import Dict, Any, List
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.tree import DecisionTreeRegressor
-from education_framework.models.quality_tree_bank import LeafQualityModel, QualityTreeBank
-QUALITY_LEVELS = ["very_bad", "bad", "neutral", "good", "very_good"]
+from sklearn.cluster import KMeans
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from education_framework.utils.kdd_utils import group_rows_by_student_ordered
+from education_framework.utils.kdd_utils import read_kdd_table
 
 
-# -----------------------------
-# Helpers: action quality bins
-# -----------------------------
 
-def map_means_to_quality(action_to_mean: Dict[str, float], eps: float = 1e-6) -> Dict[str, str]:
-    """
-    Convert per-action mean outcome within a leaf into 5 discrete bins.
-    Normalize means in [0,1] within the leaf, then threshold into bins.
-    """
-    if not action_to_mean:
-        return {}
+import joblib
 
-    means = np.array(list(action_to_mean.values()), dtype=np.float32)
-    mn, mx = float(np.min(means)), float(np.max(means))
-    if (mx - mn) < eps:
-        return {a: "neutral" for a in action_to_mean.keys()}
+from education_framework.environment.learner_model import (
+    KDDActionSchema,
+    KDDModelBundle,
+    KDDTrajectoryBuilder,
+    group_rows_by_student,
+)
 
-    out: Dict[str, str] = {}
-    for a, m in action_to_mean.items():
-        s = (float(m) - mn) / (mx - mn)
-        if s >= 0.85:
-            out[a] = "very_good"
-        elif s >= 0.65:
-            out[a] = "good"
-        elif s >= 0.35:
-            out[a] = "neutral"
-        elif s >= 0.15:
-            out[a] = "bad"
-        else:
-            out[a] = "very_bad"
+
+# ----------------------------
+# KC -> Topic mapping
+# ----------------------------
+def filter_finite_xy(X: np.ndarray, Y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    X = np.asarray(X, dtype=np.float32)
+    Y = np.asarray(Y, dtype=np.float32)
+    mask = np.isfinite(X).all(axis=1) & np.isfinite(Y).all(axis=1)
+    return X[mask], Y[mask]
+
+def _extract_primary_kc(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if "~~" in s:
+        s = s.split("~~")[0].strip()
+    return s if s else None
+
+
+def build_kc_to_topic_from_json(path: str, n_topics: int) -> Dict[str, int]:
+    with open(path, "r", encoding="utf-8") as f:
+        obj = json.load(f)
+    if not isinstance(obj, dict):
+        raise ValueError("kc_map_json must contain a JSON object mapping KC string -> topic_id.")
+    out: Dict[str, int] = {}
+    for k, v in obj.items():
+        if not isinstance(k, str):
+            continue
+        tid = int(v)
+        if tid < 0 or tid >= n_topics:
+            raise ValueError(f"Topic id out of range for KC={k}: {tid}")
+        out[k.strip()] = tid
     return out
 
 
-# -----------------------------
-# Step 1: Load ASSISTments CSV
-# -----------------------------
+def build_kc_to_topic_by_clustering(
+    df: pd.DataFrame,
+    n_topics: int,
+    kc_col: str,
+    problem_col_candidates: Sequence[str] = ("Problem Name", "problem_id", "Problem Id", "Problem"),
+    max_kcs: int = 250,
+    min_kc_freq: int = 50,
+    seed: int = 0,
+) -> Dict[str, int]:
+    """
+    Data-driven mapping: KCs clustered into n_topics using co-occurrence across problems.
 
-def load_assistments_csv(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path, encoding="cp1252", low_memory=False)
-    df.columns = [c.strip().lower() for c in df.columns]
+    Steps:
+    1) Extract primary KC for each row.
+    2) Keep top KCs by frequency.
+    3) Build KC-by-problem incidence matrix (binary).
+    4) Cluster KCs with KMeans(n_clusters=n_topics) on normalized incidence vectors.
 
-    # Common columns across 2009-2010 Combined/SkillBuilder:
-    # user_id, skill_id (or skill), correct, attempt_count, ms_first_response,
-    # hint_count, hint_total, overlap_time, (sometimes) bottom_hint, start_time/end_time.
-    required = ["user_id", "correct"]
-    for r in required:
-        if r not in df.columns:
-            raise ValueError(f"Missing required column: {r}")
+    This is transparent and reproducible.
+    """
+    if kc_col not in df.columns:
+        raise ValueError(f"KC column not found: {kc_col}")
 
-    # Normalize skill identifier
-    if "skill_id" not in df.columns:
-        if "skill" in df.columns:
-            df["skill_id"] = df["skill"].astype(str)
-        elif "skill name" in df.columns:
-            df["skill_id"] = df["skill name"].astype(str)
+    problem_col = None
+    for c in problem_col_candidates:
+        if c in df.columns:
+            problem_col = c
+            break
+    if problem_col is None:
+        # fallback: use "Step Name" if present, else row index bucket
+        if "Step Name" in df.columns:
+            problem_col = "Step Name"
         else:
-            raise ValueError("Could not find skill column: expected skill_id or skill")
+            problem_col = "__row_bucket__"
+            df = df.copy()
+            df[problem_col] = (np.arange(len(df)) // 10_000).astype(int)
 
-    # Normalize time proxy
-    if "ms_first_response" not in df.columns:
-        if "overlap_time" in df.columns:
-            df["ms_first_response"] = df["overlap_time"]
-        else:
-            # still runnable: fallback to NaN and fill later
-            df["ms_first_response"] = np.nan
+    kcs = df[kc_col].map(_extract_primary_kc)
+    df2 = df.copy()
+    df2["__kc__"] = kcs
+    df2 = df2.dropna(subset=["__kc__"])
+    kc_counts = df2["__kc__"].value_counts()
+    kc_keep = kc_counts[kc_counts >= min_kc_freq].head(max_kcs).index.tolist()
+    if len(kc_keep) < n_topics:
+        raise RuntimeError(f"Not enough KCs after filtering to form {n_topics} topics (kept={len(kc_keep)}).")
 
-    if "attempt_count" not in df.columns:
-        # Some releases have attempt_count; others may use "attempts"
-        if "attempts" in df.columns:
-            df["attempt_count"] = df["attempts"]
-        else:
-            df["attempt_count"] = 1
+    df2 = df2[df2["__kc__"].isin(kc_keep)]
 
-    # Hint columns are dataset-dependent
-    if "hint_count" not in df.columns:
-        df["hint_count"] = 0
-    if "hint_total" not in df.columns:
-        df["hint_total"] = 0
+    # Map problems to ids
+    problems = df2[problem_col].astype(str)
+    prob_ids, prob_uniques = pd.factorize(problems, sort=False)
+    kc_ids, kc_uniques = pd.factorize(df2["__kc__"].astype(str), sort=False)
 
-    # Optional "bottom_hint" for worked-solution proxy (present in some ASSISTments years)
-    if "bottom_hint" not in df.columns:
-        df["bottom_hint"] = 0
+    n_kc = len(kc_uniques)
+    n_prob = len(prob_uniques)
 
-    # Ensure numeric
-    df["correct"] = pd.to_numeric(df["correct"], errors="coerce").fillna(0).astype(int)
-    df["attempt_count"] = pd.to_numeric(df["attempt_count"], errors="coerce").fillna(1).astype(int)
-    df["ms_first_response"] = pd.to_numeric(df["ms_first_response"], errors="coerce")
-    df["hint_count"] = pd.to_numeric(df["hint_count"], errors="coerce").fillna(0).astype(int)
-    df["hint_total"] = pd.to_numeric(df["hint_total"], errors="coerce").fillna(0).astype(int)
-    df["bottom_hint"] = pd.to_numeric(df["bottom_hint"], errors="coerce").fillna(0).astype(int)
+    # Sparse build: incidence[kc, prob] = 1 if appeared
+    # We'll build as dense float32 for simplicity (n_kc <= 250)
+    incidence = np.zeros((n_kc, n_prob), dtype=np.float32)
+    incidence[kc_ids, prob_ids] = 1.0
 
-    # Basic cleanup
-    df = df.dropna(subset=["user_id", "skill_id"]).copy()
-    df["user_id"] = df["user_id"].astype(str)
-    df["skill_id"] = df["skill_id"].astype(str)
+    # Normalize rows (avoid bias toward frequent KCs)
+    row_norm = np.linalg.norm(incidence, axis=1, keepdims=True)
+    row_norm[row_norm == 0] = 1.0
+    X = incidence / row_norm
 
-    return df
+    km = KMeans(n_clusters=n_topics, random_state=seed, n_init=10)
+    labels = km.fit_predict(X)
 
-
-# -----------------------------
-# Step 2: Store to SQLite
-# -----------------------------
-
-def init_sqlite(db_path: str) -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-    con = sqlite3.connect(db_path)
-    cur = con.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS interactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        skill_id TEXT NOT NULL,
-        correct INTEGER NOT NULL,
-        attempt_count INTEGER NOT NULL,
-        ms_first_response REAL,
-        hint_count INTEGER NOT NULL,
-        hint_total INTEGER NOT NULL,
-        bottom_hint INTEGER NOT NULL
-    )
-    """)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_user_skill ON interactions(user_id, skill_id)")
-    con.commit()
-    return con
-
-
-def upsert_interactions(con: sqlite3.Connection, df: pd.DataFrame) -> None:
-    cur = con.cursor()
-    rows = df[[
-        "user_id", "skill_id", "correct", "attempt_count",
-        "ms_first_response", "hint_count", "hint_total", "bottom_hint"
-    ]].values.tolist()
-
-    cur.executemany("""
-    INSERT INTO interactions
-      (user_id, skill_id, correct, attempt_count, ms_first_response, hint_count, hint_total, bottom_hint)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, rows)
-    con.commit()
-
-
-# -----------------------------
-# Step 3: Skill -> topic mapping (to match your 8 topics)
-# -----------------------------
-
-def build_skill_to_topic(df: pd.DataFrame, num_topics: int, out_json: str) -> Dict[str, int]:
-    # Map the most frequent skills to topics [0..num_topics-1].
-    top_skills = df["skill_id"].value_counts().head(num_topics).index.tolist()
-    mapping = {s: i for i, s in enumerate(top_skills)}
-
-    os.makedirs(os.path.dirname(out_json) or ".", exist_ok=True)
-    with open(out_json, "w", encoding="utf-8") as f:
-        json.dump(mapping, f, indent=2)
+    mapping: Dict[str, int] = {}
+    for kc, lab in zip(kc_uniques.tolist(), labels.tolist()):
+        mapping[str(kc)] = int(lab)
 
     return mapping
 
 
-def load_skill_to_topic(path: str) -> Dict[str, int]:
-    with open(path, "r", encoding="utf-8") as f:
-        return {k: int(v) for k, v in json.load(f).items()}
+# ----------------------------
+# Training per-topic trees
+# ----------------------------
+
+@dataclass
+class TrainConfig:
+    n_topics: int = 8
+    max_depth: int = 7
+    min_samples_leaf: int = 50
+    ema_alpha: float = 0.2
+    one_hot_actions: bool = True
+    seed: int = 0
+
+    # for action schema fitting
+    schema_max_rows: int = 2_000_000
 
 
-# -----------------------------
-# Step 4: Build features + transitions
-# -----------------------------
+def train_bundle_from_kdd_csv(
+    csv_path: str,
+    out_path: str,
+    cfg: TrainConfig,
+    *,
+    kc_col: str,
+    student_col: str,
+    order_cols: Optional[List[str]],
+    cfa_col: str,
+    duration_col: str,
+    hints_col: str,
+    incorrects_col: str,
+    corrects_col: str,
+    kc_map_json: Optional[str] = None,
+    cluster_max_kcs: int = 250,
+    cluster_min_kc_freq: int = 50,
+    train_aux_models: bool = True,
+) -> None:
+    df = read_kdd_table(csv_path)
+    # --- fit action schema quantiles ---
+    # Use dict-record iteration to avoid copying large arrays.
+    schema = KDDActionSchema.fit_from_rows(
+        rows=df.to_dict(orient="records"),
+        duration_col=duration_col,
+        hints_col=hints_col,
+        incorrects_col=incorrects_col,
+        corrects_col=corrects_col,
+        max_rows=cfg.schema_max_rows,
+    )
 
-def derive_action(row: pd.Series) -> str:
-    """
-    Map log to your project’s action vocabulary (minimal set).
+    for col in [cfa_col, duration_col, hints_col, incorrects_col, corrects_col]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    # --- build KC->topic mapping ---
+    if kc_map_json:
+        kc_to_topic = build_kc_to_topic_from_json(kc_map_json, cfg.n_topics)
+    else:
+        kc_to_topic = build_kc_to_topic_by_clustering(
+            df=df,
+            n_topics=cfg.n_topics,
+            kc_col=kc_col,
+            max_kcs=cluster_max_kcs,
+            min_kc_freq=cluster_min_kc_freq,
+            seed=cfg.seed,
+        )
 
-    - bottom_hint == 1  -> worked_example (proxy: full solution / bottom-out hint)
-    - hint_count > 0    -> hint
-    - otherwise         -> quiz (practice)
-    """
-    if int(row.get("bottom_hint", 0)) == 1:
-        return "worked_example"
-    if int(row.get("hint_count", 0)) > 0:
-        return "hint"
-    return "quiz"
+    # --- group rows by student and order ---
+    records = df.to_dict(orient="records")
+    # Choose order cols that exist
+    if order_cols:
+        order_cols = [c for c in order_cols if c in df.columns]
+        if not order_cols:
+            order_cols = None
+    rows_by_student = group_rows_by_student_ordered(
+        df,
+        student_col=student_col,
+        order_cols=order_cols,
+    )
 
+    # --- build supervised rows ---
+    builder = KDDTrajectoryBuilder(
+        n_topics=cfg.n_topics,
+        kc_to_topic=kc_to_topic,
+        schema=schema,
+        ema_alpha=cfg.ema_alpha,
+        one_hot_actions=cfg.one_hot_actions,
+        seed=cfg.seed,
+    )
 
-def build_transitions_from_df(
-        df: pd.DataFrame,
-        skill_to_topic: Dict[str, int],
-        num_topics: int,
-        ema_alpha: float = 0.15,
-        rt_clip_ms: float = 300_000.0,  # 5 min
-) -> List[Dict[str, Any]]:
-    """
-    Build per-interaction transitions with a compact state vector x and an outcome y.
+    X_resp_by_topic: Dict[int, List[np.ndarray]] = {k: [] for k in range(cfg.n_topics)}
+    y_cfa_by_topic: Dict[int, List[int]] = {k: [] for k in range(cfg.n_topics)}
+    X_trans_by_topic: Dict[int, List[np.ndarray]] = {k: [] for k in range(cfg.n_topics)}
+    Y_delta_by_topic: Dict[int, List[np.ndarray]] = {k: [] for k in range(cfg.n_topics)}
 
-    State x (per topic interaction):
-      - mastery_ema (EMA of correctness for that user-topic)
-      - rt_ema (EMA of response time, normalized)
-      - hint_rate_ema
-      - attempt_ema (normalized)
-      - global mastery_ema (across topics)  [optional but cheap]
+    # Aux targets
+    aux_hints_by_topic: Dict[int, List[float]] = {k: [] for k in range(cfg.n_topics)}
+    aux_inc_by_topic: Dict[int, List[float]] = {k: [] for k in range(cfg.n_topics)}
+    aux_time_by_topic: Dict[int, List[float]] = {k: [] for k in range(cfg.n_topics)}
 
-    Outcome y:
-      - delta_mastery_ema (after - before)  [paper-like "improvement signal"]
-      - minus small time penalty (encourages efficiency but not dominant)
-    """
-    # Sort to approximate chronology: if there is no timestamp, order in file is used
-    # (good enough for a first pass).
-    df = df.copy()
+    for tr in builder.iter_training_rows(
+        rows_by_student,
+        kc_col=kc_col,
+        cfa_col=cfa_col,
+        duration_col=duration_col,
+        hints_col=hints_col,
+        incorrects_col=incorrects_col,
+    ):
+        k = int(tr.topic_id)
+        X_resp_by_topic[k].append(tr.x_resp)
+        y_cfa_by_topic[k].append(int(tr.cfa))
+        X_trans_by_topic[k].append(tr.x_trans)
+        Y_delta_by_topic[k].append(tr.delta)
 
-    # Keep only skills we mapped (others dropped to keep topic count stable)
-    df["topic_id"] = df["skill_id"].map(skill_to_topic)
-    df = df.dropna(subset=["topic_id"]).copy()
-    df["topic_id"] = df["topic_id"].astype(int)
+        # aux targets are embedded in x_trans outcome features; but for separate aux models,
+        # store raw values from those feature slots.
+        # x_trans layout ends with [cfa, hints_norm, incorrects_norm, duration_norm]
+        # We'll train aux on the same x_resp features (pre-outcome) so it can be predicted before sampling outcome.
+        if train_aux_models:
+            # Use normalized values times typical norms would require cfg; we just keep normalized targets.
+            hints_norm = float(tr.x_trans[-3])
+            inc_norm = float(tr.x_trans[-2])
+            time_norm = float(tr.x_trans[-1])
+            aux_hints_by_topic[k].append(float(tr.hints))
+            aux_inc_by_topic[k].append(float(tr.incorrects))
+            aux_time_by_topic[k].append(float(tr.duration))
 
-    # Fill response time if missing
-    df["ms_first_response"] = df["ms_first_response"].fillna(df["ms_first_response"].median())
+    response_models: Dict[int, Any] = {}
+    transition_models: Dict[int, Any] = {}
+    hints_models: Dict[int, Any] = {}
+    inc_models: Dict[int, Any] = {}
+    time_models: Dict[int, Any] = {}
 
-    # Clip RT to avoid extreme outliers dominating EMA
-    df["ms_first_response"] = df["ms_first_response"].clip(lower=0.0, upper=rt_clip_ms)
+    for k in range(cfg.n_topics):
+        if len(X_resp_by_topic[k]) < 1_000:
+            # Still build, but warn via simple print
+            print(f"[WARN] Topic {k}: low sample count for training ({len(X_resp_by_topic[k])}).")
 
-    # Per-user, per-topic EMA trackers
-    mastery = {}  # (user, topic) -> ema
-    rt = {}  # (user, topic) -> ema
-    hint_rate = {}  # (user, topic) -> ema
-    attempt = {}  # (user, topic) -> ema
-    global_mastery = {}  # user -> ema
+        Xr = np.vstack(X_resp_by_topic[k]).astype(np.float32)
+        yr = np.asarray(y_cfa_by_topic[k], dtype=np.int32)
 
-    transitions: List[Dict[str, Any]] = []
+        mask = np.isfinite(Xr).all(axis=1)
+        Xr = Xr[mask]
+        yr = yr[mask]
 
-    for _, row in df.iterrows():
-        user = str(row["user_id"])
-        topic = int(row["topic_id"])
-        correct = int(row["correct"])
-        a_count = int(row["attempt_count"])
-        h_count = int(row["hint_count"])
-        h_total = int(row["hint_total"])
-        rt_ms = float(row["ms_first_response"])
+        # If you train aux models, apply SAME mask to aux targets
+        if train_aux_models and k in hints_models:  # or just check list lengths
+            pass
 
-        key = (user, topic)
+        Xt = np.vstack(X_trans_by_topic[k]).astype(np.float32)
+        Yd = np.vstack(Y_delta_by_topic[k]).astype(np.float32)
 
-        # Before
-        m0 = mastery.get(key, 0.5)
-        rt0 = rt.get(key, 0.5)  # store normalized in [0,1]
-        hr0 = hint_rate.get(key, 0.0)
-        at0 = attempt.get(key, 0.0)
-        gm0 = global_mastery.get(user, 0.5)
+        Xt, Yd = filter_finite_xy(Xt, Yd)
 
-        # Normalize features into [0,1]
-        # - RT: map 0..300000ms -> 0..1, then invert so higher is "better" like paper normalization
-        rt_norm = max(0.0, min(1.0, rt_ms / rt_clip_ms))
-        rt_good = 1.0 - rt_norm
+        # Response: classifier
+        clf = DecisionTreeClassifier(
+            max_depth=cfg.max_depth,
+            min_samples_leaf=cfg.min_samples_leaf,
+            random_state=cfg.seed,
+        )
+        clf.fit(Xr, yr)
+        response_models[k] = clf
 
-        # - hint rate: fraction of possible hints used, or 0..1 if hint_total unavailable
-        if h_total > 0:
-            hr_val = max(0.0, min(1.0, h_count / float(h_total)))
+        print("[DEBUG] NaNs per delta-dim:", np.isnan(Yd).sum(axis=0).tolist())
+        if Xt.shape[0] < 200:  # pick a small floor so you don't fit garbage
+            print(f"[WARN] Topic {k}: too few finite transition samples after filtering ({Xt.shape[0]}). Skipping.")
         else:
-            hr_val = 1.0 if h_count > 0 else 0.0
+            reg = DecisionTreeRegressor(
+                max_depth=cfg.max_depth,
+                min_samples_leaf=cfg.min_samples_leaf,
+                random_state=cfg.seed,
+            )
+            reg.fit(Xt, Yd)
+            transition_models[k] = reg
 
-        # - attempts: cap at 5 for normalization
-        at_val = max(0.0, min(1.0, a_count / 5.0))
+        if train_aux_models and len(aux_hints_by_topic[k]) == len(X_resp_by_topic[k]):
+            # Train aux regressors to predict expected hints/inc/time_norm from x_resp
+            y_h = np.asarray(aux_hints_by_topic[k], dtype=np.float32)
+            y_i = np.asarray(aux_inc_by_topic[k], dtype=np.float32)
+            y_t = np.asarray(aux_time_by_topic[k], dtype=np.float32)
 
-        # Update EMAs
-        m1 = (1 - ema_alpha) * m0 + ema_alpha * float(correct)
-        rt1 = (1 - ema_alpha) * rt0 + ema_alpha * rt_good
-        hr1 = (1 - ema_alpha) * hr0 + ema_alpha * hr_val
-        at1 = (1 - ema_alpha) * at0 + ema_alpha * at_val
+            reg_h = DecisionTreeRegressor(
+                max_depth=cfg.max_depth,
+                min_samples_leaf=cfg.min_samples_leaf,
+                random_state=cfg.seed,
+            )
+            reg_i = DecisionTreeRegressor(
+                max_depth=cfg.max_depth,
+                min_samples_leaf=cfg.min_samples_leaf,
+                random_state=cfg.seed,
+            )
+            reg_t = DecisionTreeRegressor(
+                max_depth=cfg.max_depth,
+                min_samples_leaf=cfg.min_samples_leaf,
+                random_state=cfg.seed,
+            )
+            reg_h.fit(Xr, y_h)
+            reg_i.fit(Xr, y_i)
+            reg_t.fit(Xr, y_t)
 
-        gm1 = (1 - ema_alpha) * gm0 + ema_alpha * float(correct)
+            hints_models[k] = reg_h
+            inc_models[k] = reg_i
+            time_models[k] = reg_t
 
-        mastery[key] = m1
-        rt[key] = rt1
-        hint_rate[key] = hr1
-        attempt[key] = at1
-        global_mastery[user] = gm1
+    bundle = KDDModelBundle(
+        n_topics=cfg.n_topics,
+        schema=schema,
+        kc_to_topic=kc_to_topic,
+        response_models=response_models,
+        transition_models=transition_models,
+        hints_models=(hints_models if train_aux_models else None),
+        inc_models=(inc_models if train_aux_models else None),
+        time_models=(time_models if train_aux_models else None),
+        one_hot_actions=cfg.one_hot_actions,
+        ema_alpha=cfg.ema_alpha,
+    )
 
-        action = derive_action(row)
-
-        # Outcome: improvement in mastery proxy, with a small RT shaping term
-        delta_m = m1 - m0
-        y = float(delta_m + 0.05 * (rt1 - rt0))
-
-        x = np.array([m0, rt0, hr0, at0, gm0], dtype=np.float32)
-
-        dx = np.array([m1 - m0, rt1 - rt0, hr1 - hr0, at1 - at0, gm1 - gm0], dtype=np.float32)
-
-        transitions.append({
-            "topic_id": topic,
-            "action": action,
-            "x": x,
-            "y": y,
-            "dx": dx,
-        })
-
-    return transitions
-
-
-# -----------------------------
-# Step 5: Fit trees per topic
-# -----------------------------
-
-def fit_quality_trees(
-        transitions: List[Dict[str, Any]],
-        num_topics: int,
-        actions: List[str],
-        max_depth: int = 5,
-        min_leaf: int = 200,
-        seed: int = 0,
-) -> QualityTreeBank:
-    feature_names = ["mastery_ema", "rt_good_ema", "hint_rate_ema", "attempt_ema", "global_mastery_ema"]
-    bank = QualityTreeBank(num_topics=num_topics, feature_names=feature_names)
-
-    # group per topic
-    by_topic: Dict[int, List[Dict[str, Any]]] = {t: [] for t in range(num_topics)}
-    for tr in transitions:
-        by_topic[int(tr["topic_id"])].append(tr)
-
-    for topic_id in range(num_topics):
-        rows = by_topic.get(topic_id, [])
-        if len(rows) < max(500, min_leaf * 2):
-            continue
-
-        X = np.stack([r["x"] for r in rows]).astype(np.float32)
-        y = np.array([r["y"] for r in rows], dtype=np.float32)
-
-        tree = DecisionTreeRegressor(
-            max_depth=max_depth,
-            min_samples_leaf=min_leaf,
-            random_state=seed,
-        )
-        tree.fit(X, y)
-
-        leaf_ids = tree.apply(X).astype(int)
-
-        # leaf -> action -> list[y]
-        leaf_action_values: Dict[int, Dict[str, List[float]]] = {}
-        leaf_action_deltas: Dict[int, Dict[str, List[np.ndarray]]] = {}
-
-        for lid, r in zip(leaf_ids, rows):
-            a = str(r["action"])
-            leaf_action_values.setdefault(int(lid), {}).setdefault(a, []).append(float(r["y"]))
-            leaf_action_deltas.setdefault(int(lid), {}).setdefault(a, []).append(r["dx"])
-
-        leaf_to_action_delta: Dict[int, Dict[str, np.ndarray]] = {}
-        for lid, av in leaf_action_deltas.items():
-            leaf_to_action_delta[int(lid)] = {
-                a: np.mean(np.stack(v), axis=0).astype(np.float32)
-                for a, v in av.items()
-            }
-
-        leaf_to_action_quality: Dict[int, Dict[str, str]] = {}
-        for lid, av in leaf_action_values.items():
-            action_to_mean = {a: float(np.mean(vals)) for a, vals in av.items()}
-            # Keep only actions we care about; missing actions will default at runtime
-            action_to_mean = {a: action_to_mean[a] for a in action_to_mean if a in actions}
-            leaf_to_action_quality[int(lid)] = map_means_to_quality(action_to_mean)
-
-        leaf_to_action_delta_mean = {}
-        leaf_to_action_delta_std = {}
-        for lid, av in leaf_action_deltas.items():
-            leaf_to_action_delta_mean[lid] = {}
-            leaf_to_action_delta_std[lid] = {}
-            for a, v in av.items():
-                arr = np.stack(v).astype(np.float32)  # [n, 5]
-                leaf_to_action_delta_mean[lid][a] = arr.mean(axis=0)
-                leaf_to_action_delta_std[lid][a] = arr.std(axis=0)  # ddof=0 is fine
-
-        bank.bank[topic_id] = LeafQualityModel(
-            tree=tree,
-            leaf_to_action_quality=leaf_to_action_quality,
-            leaf_to_action_delta_mean=leaf_to_action_delta_mean,
-            leaf_to_action_delta_std=leaf_to_action_delta_std,
-            default_quality="neutral",
-        )
-
-    return bank
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    joblib.dump(bundle, out_path)
+    print(f"[OK] Saved KDDModelBundle to: {out_path}")
 
 
-# -----------------------------
-# Main
-# -----------------------------
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", required=True, help="Path to KDD Algebra CSV")
+    ap.add_argument("--out", required=True, help="Output .joblib bundle path")
+    ap.add_argument("--kc_col", default="KC(Default)")
+    ap.add_argument("--student_col", default="Anon Student Id")
+    ap.add_argument("--order_cols", default="", help="Comma-separated order columns (e.g., 'Row,Time')")
+    ap.add_argument("--cfa_col", default="Correct First Attempt")
+    ap.add_argument("--duration_col", default="Step Duration (sec)")
+    ap.add_argument("--hints_col", default="Hints")
+    ap.add_argument("--incorrects_col", default="Incorrects")
+    ap.add_argument("--corrects_col", default="Corrects")
+    ap.add_argument("--kc_map_json", default="", help="Optional KC->topic mapping JSON")
+    ap.add_argument("--n_topics", type=int, default=8)
+    ap.add_argument("--max_depth", type=int, default=7)
+    ap.add_argument("--min_samples_leaf", type=int, default=50)
+    ap.add_argument("--ema_alpha", type=float, default=0.2)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--cluster_max_kcs", type=int, default=250)
+    ap.add_argument("--cluster_min_kc_freq", type=int, default=50)
+    ap.add_argument("--no_aux", action="store_true", help="Disable auxiliary hint/time/inc models")
+    args = ap.parse_args()
 
-def main():
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--csv", type=str, required=True, help="Path to ASSISTments CSV file")
-    parser.add_argument("--db", type=str, default="data/edm.db")
-    parser.add_argument("--out", type=str, default="education_framework/models/quality_trees_assistments.joblib")
-    parser.add_argument("--map_out", type=str, default="data/skill_to_topic.json")
-    parser.add_argument("--num_topics", type=int, default=8)
-    parser.add_argument("--max_depth", type=int, default=5)
-    parser.add_argument("--min_leaf", type=int, default=200)
-    parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument("--overwrite", action="store_true")
-    args = parser.parse_args()
-
-    if os.path.exists(args.out) and not args.overwrite:
-        print(f"[SKIP] {args.out} exists. Use --overwrite to refit.")
-        return
-
-    print("[1/5] Loading CSV...")
-    df = load_assistments_csv(args.csv)
-    print(f"  rows: {len(df):,}")
-
-    print("[2/5] Writing to SQLite...")
-    con = init_sqlite(args.db)
-    upsert_interactions(con, df)
-    con.close()
-    print(f"  db: {args.db}")
-
-    print("[3/5] Building skill->topic mapping...")
-    mapping = build_skill_to_topic(df, args.num_topics, args.map_out)
-    print(f"  mapping saved: {args.map_out}")
-    print(f"  mapped skills: {len(mapping)}")
-
-    print("[4/5] Building transitions/features...")
-    transitions = build_transitions_from_df(df, mapping, num_topics=args.num_topics)
-    print(f"  transitions: {len(transitions):,}")
-
-    print("[5/5] Fitting per-topic trees and saving...")
-    # Actions aligned with your project’s low-level action meaning set (minimum overlap)
-    # You can expand this later.
-    actions = ["quiz", "hint", "worked_example"]
-    bank = fit_quality_trees(
-        transitions=transitions,
-        num_topics=args.num_topics,
-        actions=actions,
+    cfg = TrainConfig(
+        n_topics=args.n_topics,
         max_depth=args.max_depth,
-        min_leaf=args.min_leaf,
+        min_samples_leaf=args.min_samples_leaf,
+        ema_alpha=args.ema_alpha,
+        one_hot_actions=True,
         seed=args.seed,
     )
-    bank.save(args.out)
-    print(f"[OK] Saved: {args.out}")
+    order_cols = [c.strip() for c in args.order_cols.split(",") if c.strip()] or None
+    kc_map_json = args.kc_map_json.strip() or None
+
+    train_bundle_from_kdd_csv(
+        csv_path=args.csv,
+        out_path=args.out,
+        cfg=cfg,
+        kc_col=args.kc_col,
+        student_col=args.student_col,
+        order_cols=order_cols,
+        cfa_col=args.cfa_col,
+        duration_col=args.duration_col,
+        hints_col=args.hints_col,
+        incorrects_col=args.incorrects_col,
+        corrects_col=args.corrects_col,
+        kc_map_json=kc_map_json,
+        cluster_max_kcs=args.cluster_max_kcs,
+        cluster_min_kc_freq=args.cluster_min_kc_freq,
+        train_aux_models=(not args.no_aux),
+    )
+
 
 
 if __name__ == "__main__":

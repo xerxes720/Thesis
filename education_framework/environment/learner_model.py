@@ -1,825 +1,985 @@
-# environment/learner_model.py
+# learner_model.py
+"""
+KDD Algebra learner simulator (case-study implementation)
+
+Design goals
+------------
+1) Dataset-native state:
+   - Built only from signals available in KDD/Bridge-to-Algebra style logs:
+     CFA (correct first attempt), hints/incorrects/corrects counts, step duration, KC tags, opportunity counts.
+
+2) Decision-tree-compatible:
+   - Provides a feature schema and trajectory builder that can be used by a build_decision_tree script
+     to train (a) response model(s) and (b) transition/update model(s).
+   - Trees can be constrained to max_depth=7 to mirror the paper's simulator complexity.
+
+3) No arbitrary "protégé bonus constant":
+   - Tutee effects are implemented through a "generative interaction" mechanism (generation_mode)
+     that can be estimated from data (via quantiles / propensity model) and passed as a feature into the
+     transition model. The simulator then uses the learned transition model, not a hand-picked additive term.
+
+What this module provides
+-------------------------
+- KDDActionSchema: data-driven thresholds for action labeling and for "generation_mode" proxies.
+- LearnerState: per-topic state arrays (mastery, EMAs, opportunity).
+- KDDLearnerModel: a simulator that steps using learned per-topic models:
+    * response_model(topic): predicts probability(CFA=1)
+    * transition_model(topic): predicts delta-state vector given features and observed outcome
+    * optional auxiliary models for hint/time/incorrect counts if you train them (not required).
+- KDDTrajectoryBuilder: converts KDD logs to supervised training rows for the above models.
+
+Assumptions you can keep stable for the committee
+-------------------------------------------------
+- 8 macro-topics (subtasks) are derived from KCs by a fixed mapping you report (clustering or domain mapping).
+- State is an estimator of recent performance and behavior (EMA-based); alpha can be cross-validated in training.
+- Actions are abstract instructional "modes" aligned with observable patterns (hints/time/errors) in KDD.
+
+"""
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple, Optional
-import random
-import numpy as np
+from enum import IntEnum
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+
 import math
-from education_framework.models.quality_tree_bank import QualityTreeBank
-from pathlib import Path
+import random
+
+import numpy as np
+
+try:
+    import joblib  # type: ignore
+except Exception:  # pragma: no cover
+    joblib = None
 
 
-BASE = Path(__file__).resolve().parents[1]  # .../education_framework
-MODEL_PATH = BASE / "models" / "quality_trees_assistments.joblib"
-# -------------------- helpers --------------------
+# ----------------------------
+# Utilities
+# ----------------------------
 
 def _clip01(x: float) -> float:
-    return max(0.0, min(1.0, x))
+    return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
 
 
-QUALITY_LEVELS = ["very_bad", "bad", "neutral", "good", "very_good"]
-Q2I = {q: i for i, q in enumerate(QUALITY_LEVELS)}
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        if isinstance(x, str) and x.strip() == "":
+            return default
+        return float(x)
+    except Exception:
+        return default
 
 
-def _degrade_quality(q: str, k: int = 1) -> str:
-    """Move quality down by k steps (bounded)."""
-    i = max(0, Q2I.get(q, 2) - k)
-    return QUALITY_LEVELS[i]
+def _safe_int(x: Any, default: int = 0) -> int:
+    try:
+        if x is None:
+            return default
+        if isinstance(x, str) and x.strip() == "":
+            return default
+        return int(float(x))
+    except Exception:
+        return default
 
 
-def _upgrade_quality(q: str, k: int = 1) -> str:
-    """Move quality up by k steps (bounded)."""
-    i = min(len(QUALITY_LEVELS) - 1, Q2I.get(q, 2) + k)
-    return QUALITY_LEVELS[i]
+def _sigmoid(z: float) -> float:
+    # stable sigmoid
+    if z >= 0:
+        ez = math.exp(-z)
+        return 1.0 / (1.0 + ez)
+    ez = math.exp(z)
+    return ez / (1.0 + ez)
 
 
-def _pct_change(cur: float, prev: float, eps: float = 1e-3) -> float:
+# ----------------------------
+# Action space (|A_l| = 8)
+# ----------------------------
+
+class LowLevelAction(IntEnum):
     """
-    Percentage change term similar to "average % change" concept.
-    We clamp to avoid extreme blow-ups when prev is tiny.
+    8 low-level instructional modes.
+    Keep this fixed if you want paper-like comparability (|A_l| = 8).
+
+    You may later decide which two are "tutee" actions for the added contribution;
+    the simulator supports marking an action as "tutee-like" via ActionMeta (see below).
     """
-    val = (cur - prev) / (abs(prev) + eps)
-    return max(-1.0, min(1.0, val))
+    INDEPENDENT_PRACTICE = 0
+    SCAFFOLDED_PRACTICE = 1
+    WORKED_EXAMPLE_THEN_PRACTICE = 2
+    ERROR_FOCUSED_REMEDIATION = 3
+    SPACED_REVIEW = 4
+    FLUENCY_DRILL = 5
+    CHALLENGE_PROBLEM = 6
+    TEACH_BACK_OR_DIAGNOSE = 7  # reserved for your tutee contribution (generative interaction)
 
 
-# -------------------- state --------------------
+@dataclass(frozen=True)
+class ActionMeta:
+    """
+    Meta attributes for an action. These do NOT add any constant bonus.
+    They only provide context features that your transition model can learn from.
 
+    - is_tutee: marks whether the interaction is with a tutee (social teaching context).
+    - force_generation: if True, the interaction is definitionally generative (teach-back/diagnose).
+      This affects the generation_mode feature (see KDDActionSchema.generation_mode()).
+    """
+    action: LowLevelAction
+    is_tutee: bool = False
+    force_generation: bool = False
+
+
+# ----------------------------
+# Dataset-driven labeling schema
+# ----------------------------
 
 @dataclass
-class LearnerTuteeState:
+class KDDActionSchema:
     """
-    Multi-variable learner state in [0,1] to mimic the paper's 'performance variables'.
+    Data-driven thresholds for:
+    - labeling KDD rows into abstract action modes (for training the simulator models)
+    - defining a "generation_mode" proxy (for defendable tutee integration)
 
-    Per-topic:
-      - mastery_learner[i]
-      - mastery_tutee[i]
-      - score[i]         (proxy for test score / knowledge performance)
-      - test_speed[i]    (1 = fast, 0 = slow)  (proxy for test time)
-      - segment_speed[i] (1 = fast progress, 0 = slow) (proxy for time in game segment)
-      - emotion[i]       (1 = positive/engaged, 0 = negative)
-      - input_quality[i] (1 = good inputs / fewer mistakes, 0 = poor)
-
-    Global:
-      - motivation
-      - retention
-      - accuracy          (1 = low error rate, 0 = high error rate)
-
-    Control:
-      - topic_done[i]
-      - step_count
-      - assist_count
+    Fit this schema ONCE from the training split of KDD logs.
+    Store the quantiles and reuse for labeling and simulation.
     """
-    num_topics: int
-    mastery_learner: np.ndarray = field(init=False)
-    mastery_tutee: np.ndarray = field(init=False)
-    score: np.ndarray = field(init=False)
-    test_speed: np.ndarray = field(init=False)
-    segment_speed: np.ndarray = field(init=False)
-    emotion: np.ndarray = field(init=False)
-    input_quality: np.ndarray = field(init=False)
-    motivation: float = 0.7
-    retention: float = 0.5
-    accuracy: float = 0.6
-    topic_done: np.ndarray = field(init=False)  # bool array
-    step_count: int = 0
-    assist_count: int = 0
+    # duration quantiles in seconds
+    dur_q25: float = 5.0
+    dur_q50: float = 15.0
+    dur_q75: float = 35.0
+    dur_q90: float = 60.0
 
-    def __post_init__(self):
-        nt = self.num_topics
-        self.mastery_learner = np.random.uniform(0.10, 0.20, nt)
-        self.mastery_tutee = np.random.uniform(0.00, 0.10, nt)
-        self.score = np.clip(self.mastery_learner + np.random.normal(0.0, 0.05, nt), 0, 1)
-        self.test_speed = np.random.uniform(0.35, 0.55, nt)
-        self.segment_speed = np.random.uniform(0.35, 0.55, nt)
-        self.emotion = np.random.uniform(0.50, 0.70, nt)
-        self.input_quality = np.random.uniform(0.40, 0.60, nt)
-        self.topic_done = np.zeros(nt, dtype=bool)
+    # hints quantiles
+    hints_q50: float = 0.0
+    hints_q75: float = 1.0
 
-    def clone(self) -> "LearnerTuteeState":  # Now faster with np.copy
-        c = object.__new__(LearnerTuteeState)
-        c.num_topics = self.num_topics
-        c.mastery_learner = self.mastery_learner.copy()
-        c.mastery_tutee = self.mastery_tutee.copy()
-        c.score = self.score.copy()
-        c.test_speed = self.test_speed.copy()
-        c.segment_speed = self.segment_speed.copy()
-        c.emotion = self.emotion.copy()
-        c.input_quality = self.input_quality.copy()
-        c.motivation = self.motivation
-        c.retention = self.retention
-        c.accuracy = self.accuracy
-        c.topic_done = self.topic_done.copy()
-        c.step_count = self.step_count
-        c.assist_count = self.assist_count
-        return c
+    # incorrects quantiles
+    inc_q50: float = 0.0
+    inc_q75: float = 1.0
 
-# -------------------- per-topic dynamics --------------------
+    # corrects quantiles (often 0/1; still keep for completeness)
+    cor_q50: float = 1.0
+
+    @staticmethod
+    def _quantile(values: Sequence[float], q: float, default: float) -> float:
+        arr = np.asarray([v for v in values if np.isfinite(v)], dtype=np.float32)
+        if arr.size == 0:
+            return default
+        return float(np.quantile(arr, q))
+
+    @classmethod
+    def fit_from_rows(
+        cls,
+        rows: Iterable[Mapping[str, Any]],
+        duration_col: str = "Step Duration (sec)",
+        hints_col: str = "Hints",
+        incorrects_col: str = "Incorrects",
+        corrects_col: str = "Corrects",
+        max_rows: int = 2_000_000,
+    ) -> "KDDActionSchema":
+        durs: List[float] = []
+        hints: List[float] = []
+        incs: List[float] = []
+        cors: List[float] = []
+
+        for i, r in enumerate(rows):
+            if i >= max_rows:
+                break
+            durs.append(_safe_float(r.get(duration_col), 0.0))
+            hints.append(_safe_float(r.get(hints_col), 0.0))
+            incs.append(_safe_float(r.get(incorrects_col), 0.0))
+            cors.append(_safe_float(r.get(corrects_col), 0.0))
+
+        schema = cls()
+        schema.dur_q25 = cls._quantile(durs, 0.25, schema.dur_q25)
+        schema.dur_q50 = cls._quantile(durs, 0.50, schema.dur_q50)
+        schema.dur_q75 = cls._quantile(durs, 0.75, schema.dur_q75)
+        schema.dur_q90 = cls._quantile(durs, 0.90, schema.dur_q90)
+
+        schema.hints_q50 = cls._quantile(hints, 0.50, schema.hints_q50)
+        schema.hints_q75 = cls._quantile(hints, 0.75, schema.hints_q75)
+
+        schema.inc_q50 = cls._quantile(incs, 0.50, schema.inc_q50)
+        schema.inc_q75 = cls._quantile(incs, 0.75, schema.inc_q75)
+
+        schema.cor_q50 = cls._quantile(cors, 0.50, schema.cor_q50)
+        return schema
+
+    def label_action_from_row(
+        self,
+        row: Mapping[str, Any],
+        cfa_col: str = "Correct First Attempt",
+        duration_col: str = "Step Duration (sec)",
+        hints_col: str = "Hints",
+        incorrects_col: str = "Incorrects",
+    ) -> LowLevelAction:
+        """
+        Rule-based labeling that is:
+        - transparent
+        - uses only dataset-driven thresholds (quantiles)
+        - yields one of 8 abstract actions for training
+
+        You can later refine this mapping; keep it fixed for reproduction runs.
+        """
+        cfa = _safe_int(row.get(cfa_col), 0)
+        dur = _safe_float(row.get(duration_col), 0.0)
+        h = _safe_int(row.get(hints_col), 0)
+        inc = _safe_int(row.get(incorrects_col), 0)
+
+        # Strong struggle signal -> remediation
+        if inc > self.inc_q75:
+            return LowLevelAction.ERROR_FOCUSED_REMEDIATION
+
+        # Hint usage -> scaffolded practice
+        if h > self.hints_q50:
+            return LowLevelAction.SCAFFOLDED_PRACTICE
+
+        # Very short steps -> fluency drill (speed/automaticity)
+        if dur > 0 and dur <= self.dur_q25 and cfa == 1:
+            return LowLevelAction.FLUENCY_DRILL
+
+        # Very long steps (effortful) can be either challenge or worked-example; use CFA to separate
+        if dur >= self.dur_q75:
+            return LowLevelAction.CHALLENGE_PROBLEM if cfa == 1 else LowLevelAction.WORKED_EXAMPLE_THEN_PRACTICE
+
+        # Default: independent practice
+        return LowLevelAction.INDEPENDENT_PRACTICE
+
+    def generation_mode_from_row(
+        self,
+        row: Mapping[str, Any],
+        cfa_col: str = "Correct First Attempt",
+        duration_col: str = "Step Duration (sec)",
+        hints_col: str = "Hints",
+        incorrects_col: str = "Incorrects",
+    ) -> int:
+        """
+        A defensible proxy for "generative / explanation-like" engagement derived from KDD signals.
+
+        Logic:
+        - Must be correct on first attempt (CFA=1)
+        - Must be low-hint (hints <= median)
+        - Must not be instant-guessing (duration >= q25)
+        - Must not be extremely slow / off-task (duration <= q90)
+        - Must not have many incorrects (incorrects <= median)
+
+        This yields a binary feature that your transition model can learn from.
+        For tutee actions, you can force generation_mode=1 (definitionally teach-back).
+        """
+        cfa = _safe_int(row.get(cfa_col), 0)
+        dur = _safe_float(row.get(duration_col), 0.0)
+        h = _safe_int(row.get(hints_col), 0)
+        inc = _safe_int(row.get(incorrects_col), 0)
+
+        if cfa != 1:
+            return 0
+        if h > self.hints_q50:
+            return 0
+        if dur < self.dur_q25 or dur > self.dur_q90:
+            return 0
+        if inc > self.inc_q50:
+            return 0
+        return 1
+
+
+# ----------------------------
+# Learner state
+# ----------------------------
 
 @dataclass
-class TopicDynamics:
+class LearnerState:
     """
-    Topic-specific parameters to emulate different environment dynamics (φ) per topic.
+    Per-topic state for 8 subtasks.
+
+    mastery[k] is an *estimated probability of CFA correctness* for topic k (0..1).
+    The rest are behavior/fluency proxies derived from KDD signals.
     """
-    difficulty: float  # >1 = harder, <1 = easier
-    noise_std: float  # stochasticity of learner response
-    impatience: float  # how quickly motivation/emotion drop under poor help
+    n_topics: int = 8
+
+    mastery: np.ndarray = field(default_factory=lambda: np.zeros(8, dtype=np.float32))
+    opp: np.ndarray = field(default_factory=lambda: np.zeros(8, dtype=np.int32))  # opportunity count per topic
+    cfa_ema: np.ndarray = field(default_factory=lambda: np.zeros(8, dtype=np.float32))
+    hint_ema: np.ndarray = field(default_factory=lambda: np.zeros(8, dtype=np.float32))
+    time_ema: np.ndarray = field(default_factory=lambda: np.zeros(8, dtype=np.float32))
+    inc_ema: np.ndarray = field(default_factory=lambda: np.zeros(8, dtype=np.float32))
+
+    total_steps: int = 0
+
+    def copy(self) -> "LearnerState":
+        return LearnerState(
+            n_topics=self.n_topics,
+            mastery=self.mastery.copy(),
+            opp=self.opp.copy(),
+            cfa_ema=self.cfa_ema.copy(),
+            hint_ema=self.hint_ema.copy(),
+            time_ema=self.time_ema.copy(),
+            inc_ema=self.inc_ema.copy(),
+            total_steps=int(self.total_steps),
+        )
 
 
-# -------------------- main environment --------------------
+# ----------------------------
+# Model bundle (trained elsewhere)
+# ----------------------------
 
-class LearnerModel:
+@dataclass
+class KDDModelBundle:
     """
-    Simulator aligned with the paper's computational experiment approach:
-    - Multi-variable learner state in [0,1]
-    - Action quality categorized into 5 levels
-    - Category-based variable shifts (topic-specific dynamics)
-    - Reward = average % change of learner variables + completion bonus
-    - Diminishing returns per learner
+    Container you will save after build_decision_tree training.
+
+    Expected sklearn-like interface:
+    - response_models[k].predict_proba(X) -> [:, 1] for P(CFA=1)
+    - transition_models[k].predict(X) -> delta vector per sample (float array)
+
+    Optional:
+    - aux models for hints/time/incorrects if you train them.
+    """
+    n_topics: int
+    schema: KDDActionSchema
+
+    # maps raw KC string -> topic id 0..n_topics-1
+    kc_to_topic: Dict[str, int]
+
+    response_models: Dict[int, Any]
+    transition_models: Dict[int, Any]
+
+    # Optional auxiliary outcome models (predict expected hints/time/inc given X)
+    hints_models: Optional[Dict[int, Any]] = None
+    time_models: Optional[Dict[int, Any]] = None
+    inc_models: Optional[Dict[int, Any]] = None
+
+    # Feature options used in training; store so inference matches training
+    one_hot_actions: bool = True
+
+    # EMA smoothing used to define state from history; ideally chosen via CV in training
+    ema_alpha: float = 0.2
+
+
+# ----------------------------
+# Learner simulator
+# ----------------------------
+
+@dataclass
+class KDDLearnerConfig:
+    n_topics: int = 8
+
+    # Episode completion criteria (for your environment / training loop)
+    mastery_threshold: float = 0.65
+    opp_min: int = 3
+
+    # Reward shaping knobs (you can set these in your environment wrapper;
+    # included here for convenience if you simulate reward at this layer)
+    step_penalty: float = -0.01
+    correct_reward: float = 0.02
+    completion_reward: float = 3.0
+
+    # Normalization constants (derived from dataset or set conservatively)
+    opp_norm: float = 20.0
+    time_norm: float = 120.0
+    hints_norm: float = 5.0
+    inc_norm: float = 5.0
+
+
+class KDDLearnerModel:
+    """
+    KDD-based learner simulator.
+
+    This model is designed to be controlled by your hierarchical agents:
+    - HL chooses topic k in {0..7}
+    - LL chooses LowLevelAction in {0..7} (wrapped by ActionMeta)
     """
 
     def __init__(
-            self,
-            num_topics: int,
-            prereqs: Optional[Dict[int, List[int]]] = None,
-            seed: Optional[int] = 123,
-    ):
-        self.num_topics = num_topics
-        self.prereqs = prereqs or {}
+        self,
+        cfg: Optional[KDDLearnerConfig] = None,
+        bundle: Optional[KDDModelBundle] = None,
+        seed: int = 0,
+    ) -> None:
+        self.cfg = cfg or KDDLearnerConfig()
+        self.bundle = bundle
+        self.rng = random.Random(seed)
+        self.np_rng = np.random.default_rng(seed)
+        self.state = LearnerState(n_topics=self.cfg.n_topics)
+
+    # ---------- persistence ----------
+    def save(self, path: str) -> None:
+        if joblib is None:
+            raise RuntimeError("joblib not available; install joblib to save model bundles.")
+        joblib.dump({"cfg": self.cfg, "bundle": self.bundle}, path)
+
+    @classmethod
+    def load(cls, path: str, seed: int = 0) -> "KDDLearnerModel":
+        if joblib is None:
+            raise RuntimeError("joblib not available; install joblib to load model bundles.")
+        obj = joblib.load(path)
+        model = cls(cfg=obj["cfg"], bundle=obj["bundle"], seed=seed)
+        return model
+
+    # ---------- environment-like API ----------
+    def reset(self, initial_mastery: Union[float, Sequence[float]] = 0.2) -> LearnerState:
+        n = self.cfg.n_topics
+        if isinstance(initial_mastery, (list, tuple, np.ndarray)):
+            arr = np.asarray(initial_mastery, dtype=np.float32)
+            if arr.shape[0] != n:
+                raise ValueError(f"initial_mastery length must be {n}")
+            self.state.mastery = np.clip(arr, 0.0, 1.0)
+        else:
+            self.state.mastery = np.full(n, float(initial_mastery), dtype=np.float32)
+
+        self.state.opp = np.zeros(n, dtype=np.int32)
+        self.state.cfa_ema = self.state.mastery.copy()
+        self.state.hint_ema = np.zeros(n, dtype=np.float32)
+        self.state.time_ema = np.zeros(n, dtype=np.float32)
+        self.state.inc_ema = np.zeros(n, dtype=np.float32)
+        self.state.total_steps = 0
+        return self.state.copy()
+
+    def is_done(self) -> bool:
+        s = self.state
+        complete = (s.mastery >= self.cfg.mastery_threshold) & (s.opp >= self.cfg.opp_min)
+        return bool(np.all(complete))
+
+    def step(
+        self,
+        topic_id: int,
+        action_meta: ActionMeta,
+    ) -> Tuple[LearnerState, Dict[str, Any]]:
+        """
+        Perform one simulated interaction on a topic using learned models.
+
+        Returns:
+            next_state (copy),
+            info dict with:
+              - p_correct, cfa, hints, incorrects, duration, generation_mode
+              - reward (optional simple shaping; you can ignore if reward handled elsewhere)
+              - done
+        """
+        if self.bundle is None:
+            raise RuntimeError("KDDLearnerModel.bundle is None. Load or provide a trained KDDModelBundle first.")
+        if topic_id < 0 or topic_id >= self.cfg.n_topics:
+            raise ValueError(f"topic_id must be in [0, {self.cfg.n_topics-1}]")
+
+        s = self.state
+        x_base = self._build_features(
+            s=s,
+            topic_id=topic_id,
+            action_meta=action_meta,
+            generation_mode=0,  # unknown until we simulate; provided later to transition model
+            include_outcome=False,
+        )
+
+        # 1) Predict P(CFA=1) and sample outcome
+        resp_model = self.bundle.response_models.get(topic_id)
+        if resp_model is None:
+            # fallback: use mastery as probability (should not happen in final experiments)
+            p_correct = float(s.mastery[topic_id])
+        else:
+            p_correct = self._predict_proba_1(resp_model, x_base)
+
+        cfa = 1 if self.rng.random() < p_correct else 0
+
+        # 2) Simulate auxiliary outcomes if models exist; else heuristics
+        hints = self._predict_aux_int(topic_id, x_base, self.bundle.hints_models, default=0)
+        incorrects = self._predict_aux_int(topic_id, x_base, self.bundle.inc_models, default=(0 if cfa == 1 else 1))
+        duration = self._predict_aux_float(topic_id, x_base, self.bundle.time_models, default=self.bundle.schema.dur_q50)
+
+        # 3) Determine generation_mode (data-driven proxy)
+        if action_meta.force_generation:
+            generation_mode = 1
+        else:
+            # Use an interpretable proxy: generation is more likely when correct, low hints, and duration not extreme.
+            # Here we approximate using schema thresholds and simulated outcomes (still dataset-tethered).
+            generation_mode = int(
+                (cfa == 1)
+                and (hints <= self.bundle.schema.hints_q50)
+                and (duration >= self.bundle.schema.dur_q25)
+                and (duration <= self.bundle.schema.dur_q90)
+                and (incorrects <= self.bundle.schema.inc_q50)
+            )
+
+        # 4) Predict delta-state from transition model given outcome + generation_mode
+        x_trans = self._build_features(
+            s=s,
+            topic_id=topic_id,
+            action_meta=action_meta,
+            generation_mode=generation_mode,
+            include_outcome=True,
+            cfa=cfa,
+            hints=hints,
+            incorrects=incorrects,
+            duration=duration,
+        )
+
+        trans_model = self.bundle.transition_models.get(topic_id)
+        if trans_model is None:
+            # fallback: small mastery update based on CFA (should not happen in final experiments)
+            delta = np.zeros(self._delta_dim(), dtype=np.float32)
+            delta[0] = 0.02 * (1.0 - float(s.mastery[topic_id])) if cfa == 1 else -0.01 * float(s.mastery[topic_id])
+        else:
+            delta = np.asarray(trans_model.predict(x_trans.reshape(1, -1))[0], dtype=np.float32)
+            if delta.shape[0] != self._delta_dim():
+                raise RuntimeError(f"transition model returned delta dim {delta.shape[0]}, expected {self._delta_dim()}")
+
+        # 5) Apply delta + deterministic bookkeeping updates
+        self._apply_delta(topic_id, delta, cfa=cfa, hints=hints, incorrects=incorrects, duration=duration)
+
+        # 6) Optional shaping reward at this layer (you may override elsewhere)
+        done = self.is_done()
+        reward = float(self.cfg.step_penalty + (self.cfg.correct_reward if cfa == 1 else 0.0) + (self.cfg.completion_reward if done else 0.0))
+
+        info = {
+            "p_correct": p_correct,
+            "cfa": cfa,
+            "hints": hints,
+            "incorrects": incorrects,
+            "duration": duration,
+            "generation_mode": generation_mode,
+            "reward": reward,
+            "done": done,
+        }
+        return self.state.copy(), info
+
+    # ---------- feature engineering ----------
+    def feature_dim(self) -> int:
+        # base features + optional one-hot action
+        base = 10  # per-topic mastery, opp, EMAs + global mastery + total steps norm + is_tutee + generation_mode
+        if self.bundle is None:
+            one_hot = 8
+        else:
+            one_hot = 8 if self.bundle.one_hot_actions else 1
+        # outcome features appended in transition input: cfa, hints, incorrects, duration_norm
+        return base + one_hot + 4
+
+    def _delta_dim(self) -> int:
+        """
+        Transition model output dimension.
+
+        Keep this small and interpretable. Recommended:
+        - delta_mastery
+        - delta_cfa_ema
+        - delta_hint_ema
+        - delta_time_ema
+        - delta_inc_ema
+
+        Opportunity and total_steps are deterministic bookkeeping (not predicted).
+        """
+        return 5
+
+    def _build_features(
+        self,
+        s: LearnerState,
+        topic_id: int,
+        action_meta: ActionMeta,
+        generation_mode: int,
+        include_outcome: bool,
+        cfa: int = 0,
+        hints: int = 0,
+        incorrects: int = 0,
+        duration: float = 0.0,
+    ) -> np.ndarray:
+        cfg = self.cfg
+
+        mastery_k = float(s.mastery[topic_id])
+        opp_k = float(s.opp[topic_id]) / max(cfg.opp_norm, 1e-6)
+        cfa_ema_k = float(s.cfa_ema[topic_id])
+        hint_ema_k = float(s.hint_ema[topic_id])
+        time_ema_k = float(s.time_ema[topic_id])
+        inc_ema_k = float(s.inc_ema[topic_id])
+
+        global_mastery = float(np.mean(s.mastery))
+        total_steps_norm = float(s.total_steps) / (cfg.opp_norm * cfg.n_topics)
+
+        is_tutee = 1.0 if action_meta.is_tutee else 0.0
+        gen = float(generation_mode)
+
+        feats: List[float] = [
+            mastery_k,
+            opp_k,
+            cfa_ema_k,
+            hint_ema_k,
+            time_ema_k,
+            inc_ema_k,
+            global_mastery,
+            total_steps_norm,
+            is_tutee,
+            gen,
+        ]
+
+        # action encoding
+        if self.bundle is None or self.bundle.one_hot_actions:
+            a = int(action_meta.action)
+            one_hot = [0.0] * 8
+            one_hot[a] = 1.0
+            feats.extend(one_hot)
+        else:
+            feats.append(float(int(action_meta.action)) / 7.0)
+
+        # outcome features (only used for transition model input)
+        if include_outcome:
+            feats.extend([
+                float(cfa),
+                float(hints) / max(cfg.hints_norm, 1e-6),
+                float(incorrects) / max(cfg.inc_norm, 1e-6),
+                float(duration) / max(cfg.time_norm, 1e-6),
+            ])
+        else:
+            # keep shape consistent for response model input; append zeros
+            feats.extend([0.0, 0.0, 0.0, 0.0])
+
+        return np.asarray(feats, dtype=np.float32)
+
+    # ---------- model prediction helpers ----------
+    def _predict_proba_1(self, model: Any, x: np.ndarray) -> float:
+        # sklearn DecisionTreeClassifier / similar
+        if hasattr(model, "predict_proba"):
+            proba = model.predict_proba(x.reshape(1, -1))
+            # assume binary with classes [0,1]
+            return float(proba[0, 1])
+        # fallback: regressor producing probability
+        y = float(model.predict(x.reshape(1, -1))[0])
+        return _clip01(y)
+
+    def _predict_aux_int(
+        self,
+        topic_id: int,
+        x: np.ndarray,
+        models: Optional[Dict[int, Any]],
+        default: int,
+    ) -> int:
+        if models is None:
+            return int(default)
+        m = models.get(topic_id)
+        if m is None:
+            return int(default)
+        y = float(m.predict(x.reshape(1, -1))[0])
+        return max(0, int(round(y)))
+
+    def _predict_aux_float(
+        self,
+        topic_id: int,
+        x: np.ndarray,
+        models: Optional[Dict[int, Any]],
+        default: float,
+    ) -> float:
+        if models is None:
+            return float(default)
+        m = models.get(topic_id)
+        if m is None:
+            return float(default)
+        y = float(m.predict(x.reshape(1, -1))[0])
+        return max(0.0, y)
+
+    # ---------- state update ----------
+    def _apply_delta(
+        self,
+        topic_id: int,
+        delta: np.ndarray,
+        cfa: int,
+        hints: int,
+        incorrects: int,
+        duration: float,
+    ) -> None:
+        """
+        Apply learned delta to the per-topic latent state, then update observable EMAs from the realized outcomes.
+        This separates:
+        - latent learning effect (learned from KDD via transition model)
+        - immediate observations (deterministic EMA updates)
+        """
+        b = self.bundle
+        assert b is not None
+
+        alpha = float(b.ema_alpha)
+
+        # learned deltas
+        d_mastery, d_cfa_ema, d_hint_ema, d_time_ema, d_inc_ema = [float(x) for x in delta.tolist()]
+
+        s = self.state
+        s.mastery[topic_id] = _clip01(float(s.mastery[topic_id]) + d_mastery)
+        s.cfa_ema[topic_id] = _clip01(float(s.cfa_ema[topic_id]) + d_cfa_ema)
+        s.hint_ema[topic_id] = _clip01(float(s.hint_ema[topic_id]) + d_hint_ema)
+        s.time_ema[topic_id] = _clip01(float(s.time_ema[topic_id]) + d_time_ema)
+        s.inc_ema[topic_id] = _clip01(float(s.inc_ema[topic_id]) + d_inc_ema)
+
+        # deterministic bookkeeping updates from realized outcomes
+        s.opp[topic_id] += 1
+        s.total_steps += 1
+
+        # EMA updates (observational, not "bonus")
+        # These EMAs can also be used as targets/inputs in training; alpha should be selected via CV.
+        # s.cfa_ema[topic_id] = _clip01((1.0 - alpha) * float(s.cfa_ema[topic_id]) + alpha * float(cfa))
+        # s.hint_ema[topic_id] = _clip01((1.0 - alpha) * float(s.hint_ema[topic_id]) + alpha * (float(hints) / max(self.cfg.hints_norm, 1e-6)))
+        # s.time_ema[topic_id] = _clip01((1.0 - alpha) * float(s.time_ema[topic_id]) + alpha * (float(duration) / max(self.cfg.time_norm, 1e-6)))
+        # s.inc_ema[topic_id] = _clip01((1.0 - alpha) * float(s.inc_ema[topic_id]) + alpha * (float(incorrects) / max(self.cfg.inc_norm, 1e-6)))
+
+
+# ----------------------------
+# Trajectory builder for training trees
+# ----------------------------
+
+@dataclass
+class TrainingRow:
+    topic_id: int
+    action_id: int
+    x_resp: np.ndarray
+    cfa: int
+    x_trans: np.ndarray
+    delta: np.ndarray
+    hints: int
+    incorrects: int
+    duration: float
+
+
+
+class KDDTrajectoryBuilder:
+    """
+    Converts KDD logs into training rows for per-topic decision trees.
+
+    This builder:
+    - Maintains a deterministic state estimator (EMA-based)
+    - Labels each row with an abstract action (via KDDActionSchema)
+    - Computes generation_mode proxy from dataset
+    - Produces (x_resp, cfa) and (x_trans, delta) samples
+
+    Note: The delta target is defined in terms of how the state estimator changes after incorporating the row.
+          This is what makes the simulator "learned": transition trees learn those deltas from data.
+    """
+
+    def __init__(
+        self,
+        n_topics: int,
+        kc_to_topic: Mapping[str, int],
+        schema: KDDActionSchema,
+        ema_alpha: float = 0.2,
+        one_hot_actions: bool = True,
+        seed: int = 0,
+    ) -> None:
+        self.n_topics = n_topics
+        self.kc_to_topic = dict(kc_to_topic)
+        self.schema = schema
+        self.ema_alpha = float(ema_alpha)
+        self.one_hot_actions = bool(one_hot_actions)
         self.rng = random.Random(seed)
 
-        # termination / completion thresholds
-        self.mastery_target = 0.90
-        self.score_target = 0.85
-        self.accuracy_target = 0.60
-        self.max_steps = 500
-
-        self.quality_bank = QualityTreeBank.load(str(MODEL_PATH))
-            # if MODEL_PATH.exists() else None
-            # if os.path.exists("education_framework/models/quality_trees_assistments.joblib") else None
-
-
-        # reward parameters
-        # Stronger completion pressure (paper-like shorter episodes)
-        self.completion_bonus = 1.5        # bonus when a topic completes
-        self.episode_success_bonus = 2.0   # bonus when ALL topics are complete (episode finishes early)
-        self.step_cost = 0.01              # per-step penalty to encourage fewer actions
-        self.timeout_penalty = 1.0         # penalty when hitting max_steps (on terminal step)
-        self.reward_clip = (-2.0, 3.0)     # keep same cap as your current setup
-        self.diminishing_k = 0.08          # stronger diminishing returns than 0.02
-
-        # Paper-like: allow 'very_good' tutor actions to jump close to mastery when learner is ready
-        self.instant_mastery_on_very_good = True
-        self.instant_mastery_prereq_min = 0.80
-        self.instant_mastery_margin = 0.05  # pushes above thresholds but still < 1.0 after clipping
-
-        # build topic-specific dynamics
-        self.topic_dyn: List[TopicDynamics] = []
-        for t in range(num_topics):
-            # deterministic per-topic randomness (so runs are reproducible across resets)
-            self.rng.seed((seed or 0) * 10_000 + t * 97)
-            difficulty = self.rng.uniform(0.85, 1.25)
-            noise_std = self.rng.uniform(0.01, 0.03)
-            impatience = self.rng.uniform(0.015, 0.05)
-            self.topic_dyn.append(TopicDynamics(difficulty=difficulty, noise_std=noise_std, impatience=impatience))
-
-        self.state = LearnerTuteeState(num_topics=num_topics)
-
-    # --------------- core API ----------------
-
-    def reset(self) -> List[float]:
-        self.state = LearnerTuteeState(num_topics=self.num_topics)
-        return self.get_observation()
-
-    def get_observation(self) -> List[float]:
-        """
-        Observation vector in a fixed order.
-
-        Order:
-          - mastery_learner[0..T-1]
-          - mastery_tutee[0..T-1]
-          - score[0..T-1]
-          - test_speed[0..T-1]
-          - segment_speed[0..T-1]
-          - emotion[0..T-1]
-          - input_quality[0..T-1]
-          - motivation, retention, accuracy
-        """
-        # obs = []
-        # obs.extend(self.state.mastery_learner)
-        # obs.extend(self.state.mastery_tutee)
-        # obs.extend(self.state.score)
-        # obs.extend(self.state.test_speed)
-        # obs.extend(self.state.segment_speed)
-        # obs.extend(self.state.emotion)
-        # obs.extend(self.state.input_quality)
-        # obs.append(self.state.motivation)
-        # obs.append(self.state.retention)
-        # obs.append(self.state.accuracy)
-        # return obs
-        arr = np.concatenate((
-            self.state.mastery_learner, self.state.mastery_tutee, self.state.score, self.state.test_speed,
-            self.state.segment_speed, self.state.emotion, self.state.input_quality,
-            np.array([self.state.motivation, self.state.retention, self.state.accuracy])
-        ))
-        return arr.astype(np.float32).tolist()  # Convert to list for agents (or change agents to accept np)
-
-    def step_tutor(self, topic_id: int, tutor_action: str) -> Tuple[List[float], float, bool, Dict]:
-        prev_snapshot = self._snapshot_for_reward(topic_id)
-        self._apply_action(topic_id, mode="tutor", action=tutor_action)
-        self.state.step_count += 1
-        self.state.assist_count += 1
-
-        reward = self._compute_reward(prev_snapshot, self.state, topic_id)
-        done = self._check_done()
-        return self.get_observation(), reward, done, {"mode": "tutor"}
-
-    def step_tutee(self, topic_id: int, tutee_action: str) -> Tuple[List[float], float, bool, Dict]:
-        prev_snapshot = self._snapshot_for_reward(topic_id)
-        self._apply_action(topic_id, mode="tutee", action=tutee_action)
-        self.state.step_count += 1
-        self.state.assist_count += 1
-
-        reward = self._compute_reward(prev_snapshot, self.state, topic_id)
-        done = self._check_done()
-        return self.get_observation(), reward, done, {"mode": "tutee"}
-
-    def _snapshot_for_reward(self, topic_id: int) -> dict:
-        """
-        Capture only what is needed to compute reward efficiently.
-
-        This avoids LearnerTuteeState.clone() per step, which is a major runtime cost.
-        """
-        return {
-            "topic_done": bool(self.state.topic_done[topic_id]),
-            "mastery_learner": self.state.mastery_learner.copy(),
-            "score": self.state.score.copy(),
-            "test_speed": self.state.test_speed.copy(),
-            "segment_speed": self.state.segment_speed.copy(),
-            "emotion": self.state.emotion.copy(),
-            "input_quality": self.state.input_quality.copy(),
-            "motivation": float(self.state.motivation),
-            "retention": float(self.state.retention),
-            "accuracy": float(self.state.accuracy),
-        }
-
-    # --------------- internal dynamics ----------------
-
-    def _map_action_for_tree(self, mode: str, action: str) -> str:
-        # Align simulator actions to the action labels used in the ASSISTments-derived trees.
-        tutor_map = {
-            "hint": "hint",
-            "worked_example": "worked_example",
-            "reflection_question": "hint",
-            "no_help": "quiz",
-        }
-        tutee_map = {
-            "ask_worked_example": "worked_example",
-            "ask_explanation": "quiz",
-            "ask_summary": "quiz",
-            "show_mistake_and_ask_fix": "quiz",
-        }
-
-        if mode == "tutor":
-            return tutor_map.get(action, action)
-        if mode == "tutee":
-            return tutee_map.get(action, action)
-        return action
-
-    def _apply_learned_delta(self, topic_id: int, mode: str, action: str, prereq: float) -> bool:
-        if self.quality_bank is None:
-            return False
-
-        # same x as in _action_quality() (must match training feature meanings)
-        x = np.array([
-            float(self.state.mastery_learner[topic_id]),
-            float(self.state.test_speed[topic_id]),
-            float(1.0 - self.state.input_quality[topic_id]),
-            float(1.0 - self.state.accuracy),
-            float(np.mean(self.state.mastery_learner)),
-        ], dtype=np.float32)
-
-        # action_map = {"practice": "quiz"}
-        # a = action_map.get(action, action)
-        #
-        # d = self.quality_bank.predict_delta(topic_id, a, x)  # [dM, dRTgood, dHintRate, dAttempt, dGlobalM]
-
-        a = self._map_action_for_tree(mode, action)
-        d = self.quality_bank.predict_delta(topic_id, a, x)
-        # If delta is all zeros, treat as missing
-        if float(np.abs(d).sum()) < 1e-8:
-            return False
-
-        dyn = self.topic_dyn[topic_id]
-        scale = (0.40 + 0.60 * prereq) / max(0.75, dyn.difficulty)
-
-        # Add small noise like your existing dynamics
-        n = dyn.noise_std
-        noise = lambda: self.rng.gauss(0.0, n)
-
-        dM, dRT, dHR, dAT, dGM = [float(v) for v in d]
-
-        # score improves with mastery proxy
-        self.state.score[topic_id] = _clip01(
-            self.state.score[topic_id] + scale * (0.9 * dM) + noise()
+        # learner model used ONLY for feature construction and deterministic estimator updates in training extraction
+        self.sim = KDDLearnerModel(
+            cfg=KDDLearnerConfig(n_topics=n_topics),
+            bundle=KDDModelBundle(
+                n_topics=n_topics,
+                schema=schema,
+                kc_to_topic=dict(kc_to_topic),
+                response_models={},          # not needed for building training rows
+                transition_models={},        # not needed for building training rows
+                one_hot_actions=one_hot_actions,
+                ema_alpha=ema_alpha,
+            ),
+            seed=seed,
         )
+        self.sim.reset(initial_mastery=0.2)
 
-        # global accuracy worsens if attempt proxy increases (and improves if it decreases)
-        self.state.accuracy = _clip01(
-            self.state.accuracy - scale * (0.6 * dAT) + noise() * 0.3
-        )
-        # if hint_rate rises (dHR > 0), treat it as lower accuracy too:
-        self.state.accuracy = _clip01(self.state.accuracy - scale * (0.2 * dHR) + noise() * 0.2)
+    def _extract_kc(self, row: Mapping[str, Any], kc_col: str) -> Optional[str]:
+        raw = row.get(kc_col)
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if s == "":
+            return None
+        # KDD sometimes has multiple KCs separated by "~~"; choose primary KC for simplicity
+        if "~~" in s:
+            s = s.split("~~")[0].strip()
+        return s
 
-        # Map dataset-proxy deltas into your simulator state:
-        # - mastery_ema -> mastery_learner
-        # - rt_good_ema -> test_speed (and lightly segment_speed)
-        # - hint_rate/attempt go "bad" when they increase, so they reduce input_quality / emotion
-        self.state.mastery_learner[topic_id] = _clip01(self.state.mastery_learner[topic_id] + scale * dM + noise())
+    def iter_training_rows(
+        self,
+        rows_by_student: Iterable[Tuple[str, List[Mapping[str, Any]]]],
+        *,
+        kc_col: str = "KC(Default)",
+        cfa_col: str = "Correct First Attempt",
+        duration_col: str = "Step Duration (sec)",
+        hints_col: str = "Hints",
+        incorrects_col: str = "Incorrects",
+        # optional: if your dataset provides explicit opportunity per KC
+        opportunity_col: Optional[str] = None,
 
-        self.state.test_speed[topic_id] = _clip01(self.state.test_speed[topic_id] + scale * dRT + noise())
-        self.state.segment_speed[topic_id] = _clip01(self.state.segment_speed[topic_id] + scale * 0.5 * dRT + noise())
-
-        # input_quality is "good"; rising hint/attempt implies lower quality
-        self.state.input_quality[topic_id] = _clip01(
-            self.state.input_quality[topic_id] - scale * 0.5 * (dHR + dAT) + noise()
-        )
-
-        # affect / motivation (keep simple, tied to fluency + struggle)
-        self.state.emotion[topic_id] = _clip01(
-            self.state.emotion[topic_id] + scale * (0.3 * dRT - 0.2 * (dHR + dAT)) + noise()
-        )
-        self.state.motivation = _clip01(self.state.motivation + scale * 0.15 * dGM + noise() * 0.5)
-
-        # retention grows when mastery improves
-        if dM > 0:
-            self.state.retention = _clip01(self.state.retention + 0.25 * scale * dM)
-
-        # optional protégé bonus (keep small)
-        if mode == "tutee" and dM > 0:
-            self.state.mastery_learner[topic_id] = _clip01(self.state.mastery_learner[topic_id] + 0.01)
-
-        return True
-
-    def _prereq_factor(self, topic_id: int) -> float:
+    ) -> Iterable[TrainingRow]:
         """
-        Readiness factor based on prereqs (paper uses different dynamics; this is a defensible proxy).
-        Returns [0,1]. Low prereq mastery reduces the effectiveness of help.
+        rows_by_student must yield (student_id, rows_sorted_in_time).
+        Sorting should be done by your loader using columns like (row index, timestamp, problem view).
         """
-        if topic_id not in self.prereqs:
-            return 1.0
-        prereq_ids = self.prereqs[topic_id] or []
-        if not prereq_ids:
-            return 1.0
-        avg = sum(self.state.mastery_learner[i] for i in prereq_ids) / len(prereq_ids)
-        return _clip01(avg)
 
-    def _topic_complete_now(self, topic_id: int) -> bool:
+        for _sid, seq in rows_by_student:
+            # reset per student (common in simulators). If you prefer persistent students, remove this reset.
+            self.sim.reset(initial_mastery=0.2)
+            # If you want to initialize mastery from student pretest, you can inject it here.
+
+            for r in seq:
+                kc = self._extract_kc(r, kc_col=kc_col)
+                if kc is None:
+                    continue
+                topic_id = self.kc_to_topic.get(kc, None)
+                if topic_id is None:
+                    continue
+
+                # action label from dataset signals
+                action = self.schema.label_action_from_row(
+                    r,
+                    cfa_col=cfa_col,
+                    duration_col=duration_col,
+                    hints_col=hints_col,
+                    incorrects_col=incorrects_col,
+                )
+                action_meta = ActionMeta(action=action, is_tutee=False, force_generation=False)
+
+                # generation_mode proxy from dataset signals
+                gen = self.schema.generation_mode_from_row(
+                    r,
+                    cfa_col=cfa_col,
+                    duration_col=duration_col,
+                    hints_col=hints_col,
+                    incorrects_col=incorrects_col,
+                )
+
+                # current state (pre)
+                s_pre = self.sim.state.copy()
+
+                # build features
+                x_resp = self.sim._build_features(
+                    s=s_pre,
+                    topic_id=topic_id,
+                    action_meta=action_meta,
+                    generation_mode=0,  # not used in response stage
+                    include_outcome=False,
+                )
+
+                cfa = _safe_int(r.get(cfa_col), 0)
+                hints = _safe_int(r.get(hints_col), 0)
+                incorrects = _safe_int(r.get(incorrects_col), 0)
+                duration = _safe_float(r.get(duration_col), 0.0)
+
+                x_trans = self.sim._build_features(
+                    s=s_pre,
+                    topic_id=topic_id,
+                    action_meta=action_meta,
+                    generation_mode=gen,
+                    include_outcome=True,
+                    cfa=cfa,
+                    hints=hints,
+                    incorrects=incorrects,
+                    duration=duration,
+                )
+
+                # update deterministic estimator (used only to define delta target for training)
+                # Use zero learned delta; estimator update uses EMAs of observations
+                # and a minimal mastery update rule derived from observations (CFA).
+                # You can replace this with a more sophisticated estimator, but keep it fixed for reproducibility.
+                s_post = s_pre.copy()
+                self._deterministic_estimator_update(
+                    s_post, topic_id=topic_id, cfa=cfa, hints=hints, incorrects=incorrects, duration=duration
+                )
+
+                # define delta target as change in latent state fields (not including opp/total_steps bookkeeping)
+                delta = np.asarray([
+                    float(s_post.mastery[topic_id] - s_pre.mastery[topic_id]),
+                    float(s_post.cfa_ema[topic_id] - s_pre.cfa_ema[topic_id]),
+                    float(s_post.hint_ema[topic_id] - s_pre.hint_ema[topic_id]),
+                    float(s_post.time_ema[topic_id] - s_pre.time_ema[topic_id]),
+                    float(s_post.inc_ema[topic_id] - s_pre.inc_ema[topic_id]),
+                ], dtype=np.float32)
+
+                # commit post state to builder simulator
+                self.sim.state = s_post
+
+                yield TrainingRow(
+                    topic_id=topic_id,
+                    action_id=int(action),
+                    x_resp=x_resp,
+                    cfa=int(cfa),
+                    x_trans=x_trans,
+                    delta=delta,
+                    hints=int(hints),
+                    incorrects=int(incorrects),
+                    duration=float(duration),
+                )
+
+    def _deterministic_estimator_update(
+        self,
+        s: LearnerState,
+        *,
+        topic_id: int,
+        cfa: int,
+        hints: int,
+        incorrects: int,
+        duration: float,
+    ) -> None:
         """
-        Multi-criteria completion for a topic.
+        Defines how "state" is computed from KDD observations for training target deltas.
+
+        This is NOT your RL reward and NOT a protégé bonus.
+        It is simply the chosen state estimator whose dynamics you then learn with decision trees.
+
+        - mastery is updated as an EMA toward CFA with small dependence on hint/incorrect usage.
+          (This is an estimator choice; you can later CV-tune ema_alpha, or even replace with a fitted KT model.)
         """
-        return (
-                self.state.mastery_learner[topic_id] >= self.mastery_target
-                and self.state.score[topic_id] >= self.score_target
-                and self.state.accuracy >= self.accuracy_target
-        )
+        alpha = self.ema_alpha
 
-    def _apply_action(self, topic_id: int, mode: str, action: str) -> None:
-        dyn = self.topic_dyn[topic_id]
-        prereq = self._prereq_factor(topic_id)
+        # bookkeeping
+        s.opp[topic_id] += 1
+        s.total_steps += 1
 
-        # Prefer learned transition if available
-        if self._apply_learned_delta(topic_id, mode, action, prereq):
-            # Update completion flag
-            if (not self.state.topic_done[topic_id]) and self._topic_complete_now(topic_id):
-                self.state.topic_done[topic_id] = True
-            return
+        # observational EMAs
+        s.cfa_ema[topic_id] = _clip01((1 - alpha) * float(s.cfa_ema[topic_id]) + alpha * float(cfa))
+        s.hint_ema[topic_id] = _clip01((1 - alpha) * float(s.hint_ema[topic_id]) + alpha * (float(hints) / 5.0))
+        s.time_ema[topic_id] = _clip01((1 - alpha) * float(s.time_ema[topic_id]) + alpha * (float(duration) / 120.0))
+        s.inc_ema[topic_id] = _clip01((1 - alpha) * float(s.inc_ema[topic_id]) + alpha * (float(incorrects) / 5.0))
 
-        # Otherwise use quality-category transition (paper-like fallback)
-        q = self._action_quality(topic_id, mode, action)
+        # mastery estimator update (transparent, bounded, and tied to KDD observables)
+        # Interpretation: mastery rises with CFA success, but is moderated by reliance on hints and errors.
+        # This is only an estimator used to define learning targets; the trees will learn deltas from features.
+        raw_gain = (float(cfa) - 0.5)  # +0.5 if correct, -0.5 if incorrect
+        penalty = 0.15 * (float(hints) > 0) + 0.10 * (float(incorrects) > 0)
+        gain = raw_gain * (1.0 - penalty)
 
-        # prereq readiness affects effectiveness BEFORE applying shifts
-        if prereq < 0.35:
-            q = _degrade_quality(q, 2)
-        elif prereq < 0.60:
-            q = _degrade_quality(q, 1)
+        # scale by remaining room to improve; keeps bounded and produces diminishing returns
+        m = float(s.mastery[topic_id])
+        step = 0.08 * gain * (1.0 - m)  # estimator step-size; can be CV-tuned if needed
+        s.mastery[topic_id] = _clip01(m + step)
 
-        self._apply_quality_shifts(topic_id, mode, q, dyn, prereq)
 
-        if (not self.state.topic_done[topic_id]) and self._topic_complete_now(topic_id):
-            self.state.topic_done[topic_id] = True
+# ----------------------------
+# Helper for grouping rows by student (lightweight, no pandas dependency)
+# ----------------------------
 
-    def _action_quality(self, topic_id: int, mode: str, action: str) -> str:
-        """
-        Procedural 'decision-tree-like' mapping from MULTIPLE learner variables to a 5-level
-        action-quality category. This is a defensible surrogate for the paper's fitted trees.
+def group_rows_by_student(
+    rows: Iterable[Mapping[str, Any]],
+    student_col: str = "Anon Student Id",
+    order_key_cols: Optional[Sequence[str]] = None,
+) -> List[Tuple[str, List[Mapping[str, Any]]]]:
+    """
+    Groups rows by student id and sorts within each student by the provided order_key_cols.
 
-        Uses:
-          M  = mastery_learner[topic]
-          S  = score[topic]
-          ts = test_speed[topic]       (1 fast, 0 slow)
-          ss = segment_speed[topic]    (1 fast, 0 slow)
-          emo= emotion[topic]
-          iq = input_quality[topic]
-          mot= motivation (global)
-          acc= accuracy   (global)
-          ret= retention  (global)
+    If you load with pandas, you can ignore this and pass already-grouped sequences to KDDTrajectoryBuilder.
+    """
+    by: Dict[str, List[Mapping[str, Any]]] = {}
+    for r in rows:
+        sid = str(r.get(student_col, "")).strip()
+        if sid == "":
+            continue
+        by.setdefault(sid, []).append(r)
 
-        Returns one of: very_bad, bad, neutral, good, very_good
-        """
-        if self.quality_bank is not None:
-            # Build the same 5-feature vector used at training time.
-            # Simplest approach: store these EMAs in your LearnerModel state, or compute
-            # approximate proxies from your existing variables.
-            x = np.array([
-                float(self.state.mastery_learner[topic_id]),  # mastery proxy
-                float(self.state.test_speed[topic_id]),  # rt_good proxy (higher=better)
-                float(1.0 - self.state.input_quality[topic_id]),  # hint_rate proxy (higher=worse)
-                float(1.0 - self.state.accuracy),  # attempt proxy (higher=worse)
-                float(np.mean(self.state.mastery_learner)),  # global mastery
-            ], dtype=np.float32)
+    def _row_key(r: Mapping[str, Any]) -> Tuple:
+        if not order_key_cols:
+            return (0,)
+        key: List[Any] = []
+        for c in order_key_cols:
+            v = r.get(c)
+            # numeric if possible, else string
+            try:
+                key.append(float(v))
+            except Exception:
+                key.append(str(v))
+        return tuple(key)
 
-            # Map your internal action names to the learned action names if needed
-            # e.g., "practice" -> "quiz"
-            a = self._map_action_for_tree(mode, action)
-            return self.quality_bank.predict_quality(topic_id, a, x)
-            # action_map = {"practice": "quiz"}
-            # a = action_map.get(action, action)
-            #
-            # return self.quality_bank.predict_quality(topic_id, a, x)
-
-        M = self.state.mastery_learner[topic_id]
-        S = self.state.score[topic_id]
-        ts = self.state.test_speed[topic_id]
-        ss = self.state.segment_speed[topic_id]
-        emo = self.state.emotion[topic_id]
-        iq = self.state.input_quality[topic_id]
-        mot = self.state.motivation
-        acc = self.state.accuracy
-        ret = self.state.retention
-
-        # --- aggregate signals ---
-        # "Struggle" increases when: low score, slow, poor input quality, low accuracy,
-        # low emotion/motivation.
-        struggle = (
-                (1.0 - S) * 0.30 +
-                (1.0 - ts) * 0.15 +
-                (1.0 - ss) * 0.10 +
-                (1.0 - iq) * 0.20 +
-                (1.0 - acc) * 0.15 +
-                (1.0 - emo) * 0.05 +
-                (1.0 - mot) * 0.05
-        )
-        struggle = _clip01(struggle)
-
-        # "Teach readiness": learner benefits from teaching when mastery/score are decent,
-        # inputs/accuracy are decent, and motivation/emotion are not too low.
-        teach_ready = (
-                M * 0.35 +
-                S * 0.25 +
-                iq * 0.15 +
-                acc * 0.15 +
-                mot * 0.05 +
-                emo * 0.05
-        )
-        teach_ready = _clip01(teach_ready)
-
-        # If a topic is already done, extra instruction should be less valuable.
-        topic_done = self.state.topic_done[topic_id]
-
-        # ---------------- Tutor mode ----------------
-        if mode == "tutor":
-            # Completed topic: prefer practice/no_help, discourage worked examples.
-            if topic_done:
-                if action == "no_help":
-                    return "very_good"
-                if action == "reflection_question":
-                    return "good" if (mot > 0.45 and emo > 0.40) else "neutral"
-                if action == "hint":
-                    return "neutral"
-                if action == "worked_example":
-                    return "bad"
-                return "neutral"
-
-            # Phase by mastery, but modulated strongly by struggle/motivation/emotion/accuracy/input quality/speed.
-            if M < 0.35:
-                # Early stage: worked examples are often helpful if struggle is high.
-                if struggle > 0.60:
-                    if action == "worked_example":
-                        return "very_good"
-                    if action == "hint":
-                        return "good"
-                    if action == "reflection_question":
-                        return "neutral" if mot > 0.55 else "bad"
-                    if action == "no_help":
-                        return "very_bad"
-                else:
-                    # Learner not in severe struggle: hint + example are both good.
-                    if action == "worked_example":
-                        return "good"
-                    if action == "hint":
-                        return "very_good"
-                    if action == "reflection_question":
-                        return "neutral" if (mot > 0.55 and emo > 0.45) else "bad"
-                    if action == "no_help":
-                        return "bad"
-                return "neutral"
-
-            if 0.35 <= M < 0.70:
-                # Mid stage: prefer scaffolding (hint/reflection) unless struggle is high.
-                if struggle > 0.65:
-                    if action == "worked_example":
-                        return "very_good"
-                    if action == "hint":
-                        return "good"
-                    if action == "reflection_question":
-                        return "neutral" if (mot > 0.55 and acc > 0.55) else "bad"
-                    if action == "no_help":
-                        return "very_bad" if (mot < 0.5 or emo < 0.45) else "bad"
-                elif struggle > 0.35:
-                    if action == "hint":
-                        return "very_good"
-                    if action == "reflection_question":
-                        # reflection works if learner has enough affect + accuracy
-                        return "good" if (mot > 0.55 and emo > 0.45 and acc > 0.55) else "neutral"
-                    if action == "worked_example":
-                        return "good" if S < 0.60 else "neutral"
-                    if action == "no_help":
-                        return "neutral" if mot > 0.55 else "bad"
-                else:
-                    # Low struggle: push toward autonomy and reflection, minimize worked examples
-                    if action == "reflection_question":
-                        return "very_good" if (mot > 0.55 and emo > 0.45) else "good"
-                    if action == "no_help":
-                        return "good" if (mot > 0.50 and acc > 0.55) else "neutral"
-                    if action == "hint":
-                        return "neutral"
-                    if action == "worked_example":
-                        return "bad" if S > 0.75 else "neutral"
-                return "neutral"
-
-            # M >= 0.70
-            # Advanced: reflection/practice is best; worked example is usually wasteful; hint only if motivation/emotion low.
-            if struggle > 0.55:
-                # Even advanced learners can struggle (e.g., low accuracy/inputs). Use hints/targeted reflection.
-                if action == "hint":
-                    return "very_good"
-                if action == "reflection_question":
-                    return "good" if (mot > 0.50 and emo > 0.45) else "neutral"
-                if action == "no_help":
-                    return "neutral" if mot > 0.55 else "bad"
-                if action == "worked_example":
-                    return "neutral" if S < 0.70 else "bad"
-            else:
-                if action == "reflection_question":
-                    return "very_good" if (mot > 0.50 and emo > 0.45) else "good"
-                if action == "no_help":
-                    return "very_good" if (mot > 0.55 and acc > 0.60) else "good"
-                if action == "hint":
-                    return "good" if (mot < 0.45 or emo < 0.40) else "neutral"
-                if action == "worked_example":
-                    return "bad"
-            return "neutral"
-
-        # ---------------- Tutee mode ----------------
-        if mode == "tutee":
-            # If topic already done, teaching is generally good for consolidation if motivation not too low.
-            if topic_done and mot > 0.40:
-                if action == "show_mistake_and_ask_fix":
-                    return "very_good" if teach_ready > 0.70 else "good"
-                if action == "ask_explanation":
-                    return "good"
-                if action == "ask_summary":
-                    return "good" if ret > 0.45 else "neutral"
-                if action == "ask_worked_example":
-                    return "neutral"
-                return "neutral"
-
-            # Low teach readiness: forcing explanation/fix is risky; worked-example requests are safer.
-            if teach_ready < 0.45:
-                if action == "ask_worked_example":
-                    return "good" if struggle > 0.55 else "neutral"
-                if action == "ask_explanation":
-                    return "neutral" if mot > 0.55 else "bad"
-                if action == "ask_summary":
-                    return "neutral" if emo > 0.45 else "bad"
-                if action == "show_mistake_and_ask_fix":
-                    return "very_bad" if struggle > 0.55 else "bad"
-                return "neutral"
-
-            # Medium teach readiness: explanation/summary/fix can be good if affect/accuracy are reasonable.
-            if 0.45 <= teach_ready < 0.75:
-                if action == "ask_explanation":
-                    return "very_good" if (mot > 0.55 and acc > 0.55) else "good"
-                if action == "ask_summary":
-                    return "good" if (emo > 0.45 and ret > 0.40) else "neutral"
-                if action == "show_mistake_and_ask_fix":
-                    return "good" if (acc > 0.55 and iq > 0.50) else "neutral"
-                if action == "ask_worked_example":
-                    # at this stage, asking for worked example gives less learner-side benefit
-                    return "neutral"
-                return "neutral"
-
-            # High teach readiness: mistake-fixing is strongest protégé-style consolidation.
-            # But if motivation/emotion are low, explanation is safer.
-            if action == "show_mistake_and_ask_fix":
-                return "very_good" if (mot > 0.45 and emo > 0.40 and acc > 0.55) else "good"
-            if action == "ask_explanation":
-                return "very_good" if mot > 0.50 else "good"
-            if action == "ask_summary":
-                return "good" if ret > 0.45 else "neutral"
-            if action == "ask_worked_example":
-                return "neutral" if struggle > 0.65 else "bad"
-            return "neutral"
-
-        return "neutral"
-
-    def _apply_quality_shifts(self, topic_id: int, mode: str, q: str, dyn: TopicDynamics, prereq: float) -> None:
-        """
-        Category-based shifts of ALL learner variables (topic-specific dynamics).
-        This is the key structural alignment with the paper's simulation design.
-        """
-        # base magnitude by quality level
-        # positive gains reduce with difficulty; negative effects increase with difficulty
-        if q == "very_good":
-            base = 0.16 / dyn.difficulty
-            emo_delta = 0.04
-            mot_delta = 0.02
-            acc_delta = 0.02
-        elif q == "good":
-            base = 0.09 / dyn.difficulty
-            emo_delta = 0.02
-            mot_delta = 0.01
-            acc_delta = 0.01
-        elif q == "neutral":
-            base = 0.02 / dyn.difficulty
-            emo_delta = 0.00
-            mot_delta = 0.00
-            acc_delta = 0.00
-        elif q == "bad":
-            base = -0.05 * dyn.difficulty
-            emo_delta = -0.02 - dyn.impatience
-            mot_delta = -0.02 - dyn.impatience
-            acc_delta = -0.01
-        else:  # very_bad
-            base = -0.09 * dyn.difficulty
-            emo_delta = -0.04 - 2.0 * dyn.impatience
-            mot_delta = -0.04 - 2.0 * dyn.impatience
-            acc_delta = -0.02
-
-        # apply prereq scaling (readiness)
-        base *= (0.40 + 0.60 * prereq)
-
-        # stochastic noise
-        n = dyn.noise_std
-        noise = lambda: self.rng.gauss(0.0, n)
-
-        # shorthand
-        M = self.state.mastery_learner[topic_id]
-        S = self.state.score[topic_id]
-        ts = self.state.test_speed[topic_id]
-        ss = self.state.segment_speed[topic_id]
-        emo = self.state.emotion[topic_id]
-        iq = self.state.input_quality[topic_id]
-
-        # mastery and score improve with diminishing returns when near 1
-        if base >= 0:
-            dM = base * (1.0 - M) + noise()
-            dS = (base * 0.9) * (1.0 - S) + noise()
-            dts = (base * 0.6) * (1.0 - ts) + noise()
-            dss = (base * 0.6) * (1.0 - ss) + noise()
-            diq = (base * 0.7) * (1.0 - iq) + noise()
-        else:
-            # negative base: push down more when variables are already low (fragility)
-            dM = base * (0.30 + 0.70 * M) + noise()
-            dS = (base * 0.8) * (0.30 + 0.70 * S) + noise()
-            dts = (base * 0.4) * (0.30 + 0.70 * ts) + noise()
-            dss = (base * 0.4) * (0.30 + 0.70 * ss) + noise()
-            diq = (base * 0.6) * (0.30 + 0.70 * iq) + noise()
-
-        # protégé effect: when mode == tutee and quality is positive, learner gets extra mastery/retention boost
-        protege_bonus = 0.0
-        if mode == "tutee":
-            if q in ("good", "very_good"):
-                protege_bonus = 0.04 if q == "very_good" else 0.02
-
-        # update topic variables
-        self.state.mastery_learner[topic_id] = _clip01(M + dM + protege_bonus)
-        self.state.score[topic_id] = _clip01(S + dS)
-        self.state.test_speed[topic_id] = _clip01(ts + dts)
-        self.state.segment_speed[topic_id] = _clip01(ss + dss)
-        # Paper-like 'one step to mastery' effect:
-        # if the tutor delivers a VERY_GOOD action and prerequisites are satisfied,
-        # jump the key completion variables near/over the thresholds.
-        if self.instant_mastery_on_very_good and mode == "tutor" and q == "very_good" and prereq >= self.instant_mastery_prereq_min:
-            mt = min(1.0, self.mastery_target + self.instant_mastery_margin)
-            st = min(1.0, self.score_target + self.instant_mastery_margin)
-            at = min(1.0, self.accuracy_target + self.instant_mastery_margin)
-            self.state.mastery_learner[topic_id] = max(self.state.mastery_learner[topic_id], mt)
-            self.state.score[topic_id] = max(self.state.score[topic_id], st)
-            # accuracy is global; only raise it toward the minimum needed for completion
-            self.state.accuracy = max(self.state.accuracy, at)
-
-        self.state.input_quality[topic_id] = _clip01(iq + diq)
-
-        # emotion and motivation/global accuracy
-        self.state.emotion[topic_id] = _clip01(emo + emo_delta + noise())
-        self.state.motivation = _clip01(self.state.motivation + mot_delta + noise() * 0.5)
-        self.state.accuracy = _clip01(self.state.accuracy + acc_delta + noise() * 0.3)
-
-        # retention grows slowly with positive learning (and especially through teaching)
-        if dM + protege_bonus > 0:
-            self.state.retention = _clip01(self.state.retention + 0.03 * (dM + protege_bonus))
-        else:
-            # slight forgetting / instability under poor intervention
-            self.state.retention = _clip01(self.state.retention + 0.01 * dM)
-
-        # tutee mastery update: improves mainly when mode == tutee and learner performs well
-        if mode == "tutee":
-            MT = self.state.mastery_tutee[topic_id]
-            if q == "very_good":
-                dT = 0.10 * (1.0 - MT) + noise()
-            elif q == "good":
-                dT = 0.06 * (1.0 - MT) + noise()
-            elif q == "neutral":
-                dT = 0.02 * (1.0 - MT) + noise()
-            else:
-                dT = 0.01 * (1.0 - MT) + noise()  # still learns a bit
-            self.state.mastery_tutee[topic_id] = _clip01(MT + dT)
-
-    # --------------- reward & termination ----------------
-
-    def _compute_reward(self, prev: dict, cur: LearnerTuteeState, topic_id: int) -> float:
-        """
-        Reward = average percentage change across learner performance variables + completion bonus.
-        Applies diminishing returns per learner (assist_count).
-
-        prev is a snapshot dict produced by _snapshot_for_reward().
-        """
-        # Efficiently accumulate mean % change without building large temporary lists
-        total = 0.0
-        count = 0
-
-        # per-topic learner variables (exclude tutee mastery from reward by default)
-        for c, p in zip(cur.mastery_learner, prev["mastery_learner"]):
-            total += _pct_change(c, p);
-            count += 1
-        for c, p in zip(cur.score, prev["score"]):
-            total += _pct_change(c, p);
-            count += 1
-        for c, p in zip(cur.test_speed, prev["test_speed"]):
-            total += _pct_change(c, p);
-            count += 1
-        for c, p in zip(cur.segment_speed, prev["segment_speed"]):
-            total += _pct_change(c, p);
-            count += 1
-        for c, p in zip(cur.emotion, prev["emotion"]):
-            total += _pct_change(c, p);
-            count += 1
-        for c, p in zip(cur.input_quality, prev["input_quality"]):
-            total += _pct_change(c, p);
-            count += 1
-
-        # global learner variables
-        total += _pct_change(cur.motivation, prev["motivation"]);
-        count += 1
-        total += _pct_change(cur.retention, prev["retention"]);
-        count += 1
-        total += _pct_change(cur.accuracy, prev["accuracy"]);
-        count += 1
-
-        reward = total / max(1, count)
-
-        # completion bonus if this step completed the topic
-        if (not prev["topic_done"]) and cur.topic_done[topic_id]:
-            reward += self.completion_bonus
-
-        # bonus for completing the whole curriculum (ends episode early)
-        if all(cur.topic_done):
-            reward += self.episode_success_bonus
-
-        # explicit pressure to use fewer steps
-        reward -= self.step_cost
-
-        # penalize terminal step if we hit the time cap
-        if cur.step_count >= self.max_steps:
-            reward -= self.timeout_penalty
-
-        # diminishing returns per learner (discourage excessive assistance)
-        decay = 1.0 / (1.0 + self.diminishing_k * max(0, cur.assist_count))
-        reward *= decay
-
-        # clip reward
-        lo, hi = self.reward_clip
-        return max(lo, min(hi, reward))
-
-    def _check_done(self) -> bool:
-        # end when all topics are complete
-        if all(self.state.topic_done):
-            return True
-        # safety cap
-        if self.state.step_count >= self.max_steps:
-            return True
-        return False
+    out: List[Tuple[str, List[Mapping[str, Any]]]] = []
+    for sid, seq in by.items():
+        seq_sorted = sorted(seq, key=_row_key)
+        out.append((sid, seq_sorted))
+    return out
