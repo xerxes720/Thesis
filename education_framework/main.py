@@ -43,7 +43,7 @@ from education_framework.environment.learner_model import (
 
 @dataclass
 class KDDEnvConfig:
-    num_topics: int = 8
+    num_topics: int = 7
     max_steps: int = 500
     initial_mastery: float = 0.2
 
@@ -80,20 +80,21 @@ class KDDHierEnv:
 
         # String -> KDD action mapping (keep simple and stable)
         self._tutor_action_map: Dict[str, ActionMeta] = {
-            # tutor actions from build_tutor_actions() :contentReference[oaicite:2]{index=2}
-            "quiz": ActionMeta(action=LowLevelAction.INDEPENDENT_PRACTICE, is_tutee=False, force_generation=False),
-            "hint": ActionMeta(action=LowLevelAction.SCAFFOLDED_PRACTICE, is_tutee=False, force_generation=False),
-            "worked_example": ActionMeta(action=LowLevelAction.WORKED_EXAMPLE_THEN_PRACTICE, is_tutee=False, force_generation=False),
+            # tutor actions from build_tutor_actions()
+            'quiz': ActionMeta(action=LowLevelAction.TUTOR_QUIZ, is_tutee=False, force_generation=False),
+            'hint': ActionMeta(action=LowLevelAction.TUTOR_HINT, is_tutee=False, force_generation=False),
+            'worked_example': ActionMeta(action=LowLevelAction.TUTOR_WORKED_EXAMPLE, is_tutee=False, force_generation=False),
             # safety fallback used by old main
-            "no_help": ActionMeta(action=LowLevelAction.INDEPENDENT_PRACTICE, is_tutee=False, force_generation=False),
+            'no_help': ActionMeta(action=LowLevelAction.TUTOR_QUIZ, is_tutee=False, force_generation=False),
         }
 
         self._tutee_action_map: Dict[str, ActionMeta] = {
-            # tutee actions from build_tutee_actions() :contentReference[oaicite:3]{index=3}
-            "ask_explanation": ActionMeta(action=LowLevelAction.TEACH_BACK_OR_DIAGNOSE, is_tutee=True, force_generation=True),
-            "ask_summary": ActionMeta(action=LowLevelAction.TEACH_BACK_OR_DIAGNOSE, is_tutee=True, force_generation=True),
-            "ask_worked_example": ActionMeta(action=LowLevelAction.WORKED_EXAMPLE_THEN_PRACTICE, is_tutee=True, force_generation=True),
-            "show_mistake_and_ask_fix": ActionMeta(action=LowLevelAction.ERROR_FOCUSED_REMEDIATION, is_tutee=True, force_generation=True),
+            # tutee actions from build_tutee_actions()
+            # Map to *distinct* action ids (5..7) so the QualityTreeBank can assign separate effects.
+            'ask_worked_example': ActionMeta(action=LowLevelAction.TUTEE_QUIZ, is_tutee=True, force_generation=False),
+            'ask_explanation': ActionMeta(action=LowLevelAction.TUTEE_EXPLAIN, is_tutee=True, force_generation=False),
+            'ask_summary': ActionMeta(action=LowLevelAction.TUTEE_EXPLAIN, is_tutee=True, force_generation=False),
+            'show_mistake_and_ask_fix': ActionMeta(action=LowLevelAction.TUTEE_FIX, is_tutee=True, force_generation=False),
         }
 
     def reset(self) -> List[float]:
@@ -106,7 +107,7 @@ class KDDHierEnv:
         Observation for the RL agents.
 
         Keep it compact but informative:
-          [mastery(8), cfa_ema(8), hint_ema(8), time_ema(8), inc_ema(8), global_mastery, total_steps_norm]
+          [mastery(num_topics), cfa_ema(num_topics), hint_ema(num_topics), time_ema(num_topics), inc_ema(num_topics), global_mastery, total_steps_norm]
         """
         s = self.model.state
         global_mastery = float(np.mean(s.mastery))
@@ -292,19 +293,30 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bundle", type=str, default="education_framework/models/kdd_bundle.joblib")
+    ap.add_argument("--bundle", type=str, default="education_framework/data/kdd_bundle.joblib")
     ap.add_argument("--episodes", type=int, default=2000)
     ap.add_argument("--log_window", type=int, default=100)
-    ap.add_argument("--use_tutee", action="store_true")
+    ap.add_argument("--use_tutee", action="store_true", default=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max_steps", type=int, default=500)
     args = ap.parse_args()
 
-    bundle_path = Path(args.bundle)
+    bundle_path = Path(args.bundle).resolve()
     if not bundle_path.exists():
-        raise FileNotFoundError(f"Bundle not found: {bundle_path}")
+        # also try relative to project root (the folder containing education_framework)
+        root = Path(__file__).resolve().parents[1]
+        alt = (root / args.bundle).resolve()
+        if alt.exists():
+            bundle_path = alt
+        else:
+            raise FileNotFoundError(f"Bundle not found: {bundle_path} (also tried {alt})")
 
-    bundle: KDDModelBundle = joblib.load(str(bundle_path))
+    bundle = joblib.load(bundle_path)
+    # bundle_path = Path(args.bundle)
+    # if not bundle_path.exists():
+    #     raise FileNotFoundError(f"Bundle not found: {bundle_path}")
+
+    # bundle: KDDModelBundle = joblib.load(str(bundle_path))
 
     env = KDDHierEnv(
         bundle=bundle,
