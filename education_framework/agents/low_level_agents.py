@@ -326,9 +326,11 @@ def build_tutor_actions() -> List[str]:
     Discrete assistance types given by the Tutor to the learner.
     """
     return [
-        "quiz",  # small nudge
-        "worked_example",  # show full solution
-        "hint",  # ask the learner to think/explain
+        "quiz",
+        "hint",
+        "worked_example",
+        "remediation",
+        "review",
     ]
 
 

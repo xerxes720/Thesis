@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import argparse
+import csv
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-import argparse
-import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-import numpy as np
 import joblib
+import numpy as np
 from tqdm import tqdm
+import os
+import csv
+from collections import deque, Counter
+import math
 
 # --- Ensure imports work whether you run:
 #   python -m education_framework.main
@@ -36,6 +41,21 @@ from education_framework.environment.learner_model import (
     LowLevelAction,
 )
 
+
+
+def _safe_mean(x):
+    return float(sum(x) / max(1, len(x)))
+
+def topic_entropy(topic_ids):
+    """Normalized entropy in [0,1] for topic selection concentration."""
+    if not topic_ids:
+        return 0.0
+    c = Counter(topic_ids)
+    n = sum(c.values())
+    probs = [v / n for v in c.values()]
+    ent = -sum(p * math.log(p + 1e-12) for p in probs)
+    ent_max = math.log(len(c) + 1e-12)
+    return float(ent / (ent_max + 1e-12))
 
 # ----------------------------
 # Environment wrapper (KDD)
@@ -84,6 +104,9 @@ class KDDHierEnv:
             'quiz': ActionMeta(action=LowLevelAction.TUTOR_QUIZ, is_tutee=False, force_generation=False),
             'hint': ActionMeta(action=LowLevelAction.TUTOR_HINT, is_tutee=False, force_generation=False),
             'worked_example': ActionMeta(action=LowLevelAction.TUTOR_WORKED_EXAMPLE, is_tutee=False, force_generation=False),
+            'remediation': ActionMeta(action=LowLevelAction.TUTOR_REMEDIATION, is_tutee=False, force_generation=False),
+            'review': ActionMeta(action=LowLevelAction.TUTOR_REVIEW, is_tutee=False, force_generation=False),
+
             # safety fallback used by old main
             'no_help': ActionMeta(action=LowLevelAction.TUTOR_QUIZ, is_tutee=False, force_generation=False),
         }
@@ -145,8 +168,8 @@ class KDDHierEnv:
         done = self._done()
         # If time-out without completion, optionally damp reward (keeps training stable)
         reward = float(info.get("reward", 0.0))
-        if (self.step_count >= self.max_steps) and (not self.model.is_done()):
-            reward -= 0.25
+        # if (self.step_count >= self.max_steps) and (not self.model.is_done()):
+        #     reward -= 0.25
 
         return self.get_observation(), reward, done, {"mode": "tutor", **info}
 
@@ -160,8 +183,8 @@ class KDDHierEnv:
 
         done = self._done()
         reward = float(info.get("reward", 0.0))
-        if (self.step_count >= self.max_steps) and (not self.model.is_done()):
-            reward -= 0.25
+        # if (self.step_count >= self.max_steps) and (not self.model.is_done()):
+        #     reward -= 0.25
 
         return self.get_observation(), reward, done, {"mode": "tutee", **info}
 
@@ -296,9 +319,9 @@ def main():
     ap.add_argument("--bundle", type=str, default="education_framework/data/kdd_bundle.joblib")
     ap.add_argument("--episodes", type=int, default=2000)
     ap.add_argument("--log_window", type=int, default=100)
-    ap.add_argument("--use_tutee", action="store_true", default=True)
+    ap.add_argument("--use_tutee", action="store_true", default=False)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--max_steps", type=int, default=500)
+    ap.add_argument("--max_steps", type=int, default=300)
     args = ap.parse_args()
 
     bundle_path = Path(args.bundle).resolve()
@@ -352,6 +375,13 @@ def main():
     eps_start = 0.2
     eps_end = 0.0
     eps_decay_episodes = max(1, args.episodes)
+    rows = []
+
+    os.makedirs("runs", exist_ok=True)
+
+    train_rows = []  # for reward/steps/mastery
+    diag_rows = []  # for deeper debugging
+    last100_done = deque(maxlen=100)
 
     for episode in tqdm(range(1, args.episodes + 1), desc="Training"):
         (
@@ -364,6 +394,8 @@ def main():
             tutee_hl_count,
             hl_trace,
         ) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
+
+        rows.append([episode, float(total_reward), int(steps), env.model.state.mastery])
 
         window_rewards.append(float(total_reward))
         window_steps.append(int(steps))
@@ -422,6 +454,7 @@ def main():
                 print(f"    --> {' --> '.join(hl_trace)}")
             print()
 
+
             # reset window
             window_rewards.clear()
             window_steps.clear()
@@ -440,7 +473,11 @@ def main():
                 ag.set_epsilon(eps)
             if tutee_agent is not None:
                 tutee_agent.set_epsilon(eps)
-
+    with open("runs/metrics.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["episode", "reward", "steps", "mastery"])
+        for row in rows:
+            w.writerow(row)
     print("Training finished.")
 
 

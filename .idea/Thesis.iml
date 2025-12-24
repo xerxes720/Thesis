@@ -12,6 +12,7 @@
     <option name="namespacePackageFolders">
       <list>
         <option value="$MODULE_DIR$/education_framework/utils" />
+        <option value="$MODULE_DIR$/education_framework/runs" />
       </list>
     </option>
   </component>

@@ -309,8 +309,8 @@ class KDDLearnerConfig:
     mastery_threshold: float = 0.85
     opp_min: int = 3
 
-    step_penalty: float = -0.01
-    correct_reward: float = 0.02
+    # step_penalty: float = -0.01
+    # correct_reward: float = 0.02
     completion_reward: float = 3.0
 
     opp_norm: float = 20.0
@@ -506,6 +506,25 @@ class KDDLearnerModel:
         s.inc_ema[topic_id] = _clip01((1.0 - alpha) * float(s.inc_ema[topic_id]) + alpha * (float(incorrects) / max(self.cfg.inc_norm, 1e-6)))
 
     # ---------- core step ----------
+    def _paper_vars(self, s: LearnerState) -> np.ndarray:
+        """
+        Learner variables in [0,1] where higher = better, suitable for percent-change reward.
+        Keep small + stable.
+        """
+        m_mean = float(np.mean(s.mastery))
+        m_min = float(np.min(s.mastery))  # forces weakest-topic improvement
+        cov = float(np.mean(np.minimum(s.opp, self.cfg.opp_min) / max(self.cfg.opp_min, 1)))
+        return np.asarray([m_mean, m_min, cov], dtype=np.float32)
+        # m = float(np.mean(s.mastery))
+        # cfa = float(np.mean(s.cfa_ema))
+        #
+        # # "less help/struggle/time" is better → invert to keep 'higher is better'
+        # inv_hint = 1.0 - float(np.mean(s.hint_ema))
+        # inv_inc = 1.0 - float(np.mean(s.inc_ema))
+        # inv_time = 1.0 - float(np.mean(s.time_ema))
+        #
+        # return np.asarray([m, cfa, inv_hint, inv_inc, inv_time], dtype=np.float32)
+
     def step(self, topic_id: int, action_meta: ActionMeta) -> Tuple[LearnerState, Dict[str, Any]]:
         if self.bundle is None:
             raise RuntimeError("KDDLearnerModel.bundle is None; provide a trained KDDModelBundle")
@@ -558,6 +577,7 @@ class KDDLearnerModel:
             quality = qbank.predict_quality(topic_id=topic_id, action_id=int(action_meta.action), x_state=x_state)
             leaf_id = qbank.apply_leaf(topic_id, x_state)
 
+        v_prev = self._paper_vars(self.state)
         self._apply_mastery_quality_update(topic_id, quality)
 
         # 5) Observational updates (EMAs, opp, steps)
@@ -565,8 +585,16 @@ class KDDLearnerModel:
 
         # 6) Reward shaping (optional)
         done = self.is_done()
-        reward = float(self.cfg.step_penalty + (self.cfg.correct_reward if cfa == 1 else 0.0) + (self.cfg.completion_reward if done else 0.0))
+        # reward = float(self.cfg.step_penalty + (self.cfg.correct_reward if cfa == 1 else 0.0) + (self.cfg.completion_reward if done else 0.0))
+        v_next = self._paper_vars(self.state)
+        den = np.maximum(np.abs(v_prev), 0.05)  # critical: avoid dividing by ~0
+        pct = (v_next - v_prev) / den
+        r_step = float(np.mean(pct))
 
+        # optional but recommended for stability
+        r_step = float(np.clip(r_step, -0.05, 0.05))
+
+        reward = r_step + (self.cfg.completion_reward if done else 0.0)
         info = {
             "p_correct": p_correct,
             "cfa": cfa,

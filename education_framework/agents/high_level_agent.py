@@ -32,7 +32,7 @@ def _to_i64_batch(x) -> np.ndarray:
 @dataclass
 class HighLevelAgentConfig:
     num_topics: int
-    use_tutee: bool = True
+    use_tutee: bool = False
 
     # DQN hyperparameters
     gamma: float = 0.95
