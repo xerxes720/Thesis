@@ -348,7 +348,6 @@ def build_tutee_actions() -> List[str]:
     return [
         "ask_explanation",  # "Can you explain this to me?"
         "ask_worked_example",  # "Can you show me how to solve this?"
-        "ask_summary",  # "Can you summarize this topic?"
         "show_mistake_and_ask_fix",  # tutee presents possibly-wrong solution; learner must correct
     ]
 

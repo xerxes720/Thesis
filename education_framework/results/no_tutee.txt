@@ -1,471 +1,471 @@
 "D:\Uni shit\Thesis\Code_New\.venv\Scripts\python.exe" "D:\Uni shit\Thesis\Code_New\education_framework\main.py" 
-=== Training hierarchical RL tutor (KDD env) ===
+Training:   0%|          | 0/2000 [00:00<?, ?it/s]=== Training hierarchical RL tutor (KDD env) ===
 - Number of topics: 7
 - Tutee enabled:   False
 - Episodes:        2000
 - Bundle:          D:\Uni shit\Thesis\Code_New\education_framework\data\kdd_bundle.joblib
-Training:   0%|          | 10/2000 [00:05<13:48,  2.40it/s]D:\Uni shit\Thesis\Code_New\education_framework\agents\low_level_agents.py:291: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\torch\csrc\utils\tensor_new.cpp:256.)
+Training:   1%|          | 11/2000 [00:06<14:47,  2.24it/s]D:\Uni shit\Thesis\Code_New\education_framework\agents\low_level_agents.py:291: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\torch\csrc\utils\tensor_new.cpp:256.)
   states_t = torch.as_tensor(ps, dtype=torch.float32, device=self.device)
-Training:   5%|▌         | 100/2000 [00:41<10:33,  3.00it/s][Episode  100]
-  Mean reward (last 100):           1.0386
-  Mean steps per episode:          288.9
-  Mean learner mastery:            0.804
+Training:   5%|▌         | 100/2000 [00:48<14:30,  2.18it/s][Episode  100]
+  Mean reward (last 100):           0.7677
+  Mean steps per episode:          300.0
+  Mean learner mastery:            0.765
   Topic choice frequencies:
-    - Topic 0:  21.3% of high-level choices
-    - Topic 1:  15.4% of high-level choices
-    - Topic 2:  15.5% of high-level choices
-    - Topic 3:  18.3% of high-level choices
-    - Topic 4:  10.2% of high-level choices
-    - Topic 5:   7.5% of high-level choices
-    - Topic 6:  11.9% of high-level choices
+    - Topic 0:  16.6% of high-level choices
+    - Topic 1:  10.8% of high-level choices
+    - Topic 2:  15.6% of high-level choices
+    - Topic 3:  15.6% of high-level choices
+    - Topic 4:  19.1% of high-level choices
+    - Topic 5:   5.6% of high-level choices
+    - Topic 6:  16.6% of high-level choices
   Tutor action frequencies:
-    - quiz                :  14.0% of tutor actions
-    - hint                :   9.5% of tutor actions
-    - worked_example      :  37.1% of tutor actions
-    - remediation         :  24.6% of tutor actions
-    - review              :  14.7% of tutor actions
+    - quiz                :  18.1% of tutor actions
+    - hint                :  22.1% of tutor actions
+    - worked_example      :  26.3% of tutor actions
+    - remediation         :  21.5% of tutor actions
+    - review              :  12.1% of tutor actions
   High-level mode frequencies (last 100 episodes):
     - tutor: 100.0% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4
+    --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5
 
-Training:  10%|█         | 200/2000 [01:07<06:20,  4.73it/s][Episode  200]
-  Mean reward (last 100):           2.9499
-  Mean steps per episode:          195.1
-  Mean learner mastery:            0.944
+Training:  10%|█         | 200/2000 [01:27<14:02,  2.14it/s][Episode  200]
+  Mean reward (last 100):           1.9709
+  Mean steps per episode:          253.8
+  Mean learner mastery:            0.764
   Topic choice frequencies:
-    - Topic 0:  10.9% of high-level choices
-    - Topic 1:  17.2% of high-level choices
-    - Topic 2:  11.0% of high-level choices
-    - Topic 3:  12.7% of high-level choices
-    - Topic 4:  15.1% of high-level choices
-    - Topic 5:  24.5% of high-level choices
-    - Topic 6:   8.5% of high-level choices
+    - Topic 0:  22.1% of high-level choices
+    - Topic 1:  21.0% of high-level choices
+    - Topic 2:  12.5% of high-level choices
+    - Topic 3:   9.1% of high-level choices
+    - Topic 4:  11.7% of high-level choices
+    - Topic 5:  13.6% of high-level choices
+    - Topic 6:  10.1% of high-level choices
   Tutor action frequencies:
-    - quiz                :  28.0% of tutor actions
-    - hint                :  12.8% of tutor actions
-    - worked_example      :  23.9% of tutor actions
+    - quiz                :  24.3% of tutor actions
+    - hint                :  19.0% of tutor actions
+    - worked_example      :  22.6% of tutor actions
+    - remediation         :  18.2% of tutor actions
+    - review              :  15.9% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5
+
+Training:  15%|█▌        | 300/2000 [01:55<07:46,  3.65it/s][Episode  300]
+  Mean reward (last 100):           2.9895
+  Mean steps per episode:          182.9
+  Mean learner mastery:            0.946
+  Topic choice frequencies:
+    - Topic 0:  15.3% of high-level choices
+    - Topic 1:   6.7% of high-level choices
+    - Topic 2:  15.2% of high-level choices
+    - Topic 3:  10.8% of high-level choices
+    - Topic 4:  26.0% of high-level choices
+    - Topic 5:  18.9% of high-level choices
+    - Topic 6:   7.2% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  32.2% of tutor actions
+    - hint                :  14.4% of tutor actions
+    - worked_example      :  24.0% of tutor actions
+    - remediation         :  14.5% of tutor actions
+    - review              :  14.9% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0
+
+Training:  20%|██        | 400/2000 [02:20<03:28,  7.69it/s][Episode  400]
+  Mean reward (last 100):           3.5498
+  Mean steps per episode:          152.2
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  11.9% of high-level choices
+    - Topic 1:   7.3% of high-level choices
+    - Topic 2:  18.5% of high-level choices
+    - Topic 3:  10.1% of high-level choices
+    - Topic 4:  14.7% of high-level choices
+    - Topic 5:  22.8% of high-level choices
+    - Topic 6:  14.7% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  29.9% of tutor actions
+    - hint                :  10.3% of tutor actions
+    - worked_example      :  21.0% of tutor actions
+    - remediation         :  20.2% of tutor actions
+    - review              :  18.5% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_1
+
+Training:  25%|██▌       | 500/2000 [02:41<10:48,  2.31it/s][Episode  500]
+  Mean reward (last 100):           3.6063
+  Mean steps per episode:          120.1
+  Mean learner mastery:            0.753
+  Topic choice frequencies:
+    - Topic 0:  11.5% of high-level choices
+    - Topic 1:  14.7% of high-level choices
+    - Topic 2:  11.4% of high-level choices
+    - Topic 3:  18.1% of high-level choices
+    - Topic 4:  18.2% of high-level choices
+    - Topic 5:  12.5% of high-level choices
+    - Topic 6:  13.6% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  29.2% of tutor actions
+    - hint                :  15.4% of tutor actions
+    - worked_example      :  24.2% of tutor actions
+    - remediation         :   8.5% of tutor actions
+    - review              :  22.6% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6
+
+Training:  30%|███       | 600/2000 [02:56<02:27,  9.49it/s][Episode  600]
+  Mean reward (last 100):           3.7625
+  Mean steps per episode:          95.6
+  Mean learner mastery:            0.954
+  Topic choice frequencies:
+    - Topic 0:   9.7% of high-level choices
+    - Topic 1:  13.6% of high-level choices
+    - Topic 2:  10.6% of high-level choices
+    - Topic 3:  15.3% of high-level choices
+    - Topic 4:  16.2% of high-level choices
+    - Topic 5:  16.5% of high-level choices
+    - Topic 6:  18.1% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  31.9% of tutor actions
+    - hint                :  13.4% of tutor actions
+    - worked_example      :  17.8% of tutor actions
+    - remediation         :  11.4% of tutor actions
+    - review              :  25.5% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1
+
+Training:  35%|███▌      | 700/2000 [03:11<03:31,  6.15it/s][Episode  700]
+  Mean reward (last 100):           3.6319
+  Mean steps per episode:          98.7
+  Mean learner mastery:            0.949
+  Topic choice frequencies:
+    - Topic 0:  13.7% of high-level choices
+    - Topic 1:  17.4% of high-level choices
+    - Topic 2:  14.4% of high-level choices
+    - Topic 3:  12.5% of high-level choices
+    - Topic 4:  21.2% of high-level choices
+    - Topic 5:  11.2% of high-level choices
+    - Topic 6:   9.6% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  30.3% of tutor actions
+    - hint                :  15.1% of tutor actions
+    - worked_example      :  20.3% of tutor actions
+    - remediation         :  12.2% of tutor actions
+    - review              :  22.1% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0
+
+Training:  40%|████      | 800/2000 [03:26<04:42,  4.25it/s][Episode  800]
+  Mean reward (last 100):           3.6754
+  Mean steps per episode:          92.7
+  Mean learner mastery:            0.845
+  Topic choice frequencies:
+    - Topic 0:  20.0% of high-level choices
+    - Topic 1:  17.7% of high-level choices
+    - Topic 2:  14.2% of high-level choices
+    - Topic 3:   8.1% of high-level choices
+    - Topic 4:  18.0% of high-level choices
+    - Topic 5:  11.2% of high-level choices
+    - Topic 6:  10.8% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  28.4% of tutor actions
+    - hint                :  16.4% of tutor actions
+    - worked_example      :  19.9% of tutor actions
     - remediation         :  12.4% of tutor actions
     - review              :  22.9% of tutor actions
   High-level mode frequencies (last 100 episodes):
     - tutor: 100.0% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_6
+    --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1
 
-Training:  15%|█▍        | 299/2000 [01:22<03:18,  8.56it/s][Episode  300]
-  Mean reward (last 100):           3.6968
-  Mean steps per episode:          117.7
+Training:  45%|████▌     | 900/2000 [03:38<01:11, 15.28it/s][Episode  900]
+  Mean reward (last 100):           3.9550
+  Mean steps per episode:          75.5
+  Mean learner mastery:            0.943
+  Topic choice frequencies:
+    - Topic 0:  11.8% of high-level choices
+    - Topic 1:  15.8% of high-level choices
+    - Topic 2:  19.1% of high-level choices
+    - Topic 3:  17.5% of high-level choices
+    - Topic 4:  17.1% of high-level choices
+    - Topic 5:   8.8% of high-level choices
+    - Topic 6:  10.0% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  26.5% of tutor actions
+    - hint                :  14.6% of tutor actions
+    - worked_example      :  17.5% of tutor actions
+    - remediation         :  17.5% of tutor actions
+    - review              :  24.0% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2
+
+Training:  50%|█████     | 1000/2000 [03:48<01:57,  8.53it/s][Episode 1000]
+  Mean reward (last 100):           4.1132
+  Mean steps per episode:          66.9
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  16.6% of high-level choices
+    - Topic 1:  16.1% of high-level choices
+    - Topic 2:  14.7% of high-level choices
+    - Topic 3:  12.1% of high-level choices
+    - Topic 4:  14.9% of high-level choices
+    - Topic 5:  12.8% of high-level choices
+    - Topic 6:  12.9% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  24.4% of tutor actions
+    - hint                :  12.3% of tutor actions
+    - worked_example      :  21.5% of tutor actions
+    - remediation         :  17.2% of tutor actions
+    - review              :  24.6% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_5
+
+Training:  55%|█████▌    | 1100/2000 [03:59<03:25,  4.38it/s][Episode 1100]
+  Mean reward (last 100):           3.9571
+  Mean steps per episode:          74.6
   Mean learner mastery:            0.953
   Topic choice frequencies:
-    - Topic 0:  10.6% of high-level choices
-    - Topic 1:  14.4% of high-level choices
-    - Topic 2:  27.4% of high-level choices
-    - Topic 3:  10.7% of high-level choices
-    - Topic 4:  10.3% of high-level choices
-    - Topic 5:  10.0% of high-level choices
-    - Topic 6:  16.6% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  34.4% of tutor actions
-    - hint                :   9.3% of tutor actions
-    - worked_example      :  13.9% of tutor actions
-    - remediation         :  15.8% of tutor actions
-    - review              :  26.7% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_1
-
-Training:  20%|██        | 400/2000 [01:34<04:45,  5.60it/s][Episode  400]
-  Mean reward (last 100):           3.6956
-  Mean steps per episode:          86.3
-  Mean learner mastery:            0.950
-  Topic choice frequencies:
-    - Topic 0:  10.1% of high-level choices
-    - Topic 1:  19.6% of high-level choices
-    - Topic 2:  11.7% of high-level choices
-    - Topic 3:  10.4% of high-level choices
-    - Topic 4:  15.4% of high-level choices
-    - Topic 5:  17.8% of high-level choices
-    - Topic 6:  15.1% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  31.6% of tutor actions
-    - hint                :   8.8% of tutor actions
-    - worked_example      :  12.8% of tutor actions
-    - remediation         :   9.6% of tutor actions
-    - review              :  37.2% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_0
-
-Training:  25%|██▍       | 498/2000 [01:45<01:16, 19.61it/s][Episode  500]
-  Mean reward (last 100):           3.8068
-  Mean steps per episode:          80.3
-  Mean learner mastery:            0.948
-  Topic choice frequencies:
-    - Topic 0:  15.8% of high-level choices
-    - Topic 1:  16.9% of high-level choices
-    - Topic 2:   8.8% of high-level choices
-    - Topic 3:  17.3% of high-level choices
-    - Topic 4:  14.1% of high-level choices
-    - Topic 5:   9.3% of high-level choices
-    - Topic 6:  17.8% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  43.4% of tutor actions
-    - hint                :   8.2% of tutor actions
-    - worked_example      :  10.7% of tutor actions
-    - remediation         :  12.2% of tutor actions
-    - review              :  25.5% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_6
-
-Training:  30%|███       | 600/2000 [01:56<02:26,  9.59it/s][Episode  600]
-  Mean reward (last 100):           3.8337
-  Mean steps per episode:          76.6
-  Mean learner mastery:            0.950
-  Topic choice frequencies:
-    - Topic 0:  14.6% of high-level choices
-    - Topic 1:  20.0% of high-level choices
-    - Topic 2:  12.3% of high-level choices
-    - Topic 3:  18.5% of high-level choices
-    - Topic 4:  11.2% of high-level choices
-    - Topic 5:   8.2% of high-level choices
-    - Topic 6:  15.1% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  42.2% of tutor actions
-    - hint                :  10.8% of tutor actions
-    - worked_example      :  11.2% of tutor actions
-    - remediation         :  11.9% of tutor actions
-    - review              :  23.9% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_3
-
-Training:  35%|███▌      | 700/2000 [02:05<01:14, 17.35it/s][Episode  700]
-  Mean reward (last 100):           3.7856
-  Mean steps per episode:          67.3
-  Mean learner mastery:            0.943
-  Topic choice frequencies:
-    - Topic 0:  16.2% of high-level choices
-    - Topic 1:  14.2% of high-level choices
-    - Topic 2:  14.5% of high-level choices
-    - Topic 3:  18.1% of high-level choices
-    - Topic 4:  10.6% of high-level choices
-    - Topic 5:  10.2% of high-level choices
-    - Topic 6:  16.1% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  34.4% of tutor actions
-    - hint                :   7.5% of tutor actions
-    - worked_example      :  10.9% of tutor actions
-    - remediation         :  13.2% of tutor actions
-    - review              :  34.0% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_1
-
-Training:  40%|███▉      | 799/2000 [02:13<01:06, 17.96it/s][Episode  800]
-  Mean reward (last 100):           3.8945
-  Mean steps per episode:          57.4
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  17.2% of high-level choices
-    - Topic 1:  15.5% of high-level choices
-    - Topic 2:  17.1% of high-level choices
-    - Topic 3:  14.4% of high-level choices
-    - Topic 4:   8.9% of high-level choices
-    - Topic 5:   9.5% of high-level choices
-    - Topic 6:  17.4% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  30.6% of tutor actions
-    - hint                :   7.5% of tutor actions
-    - worked_example      :  10.0% of tutor actions
-    - remediation         :  13.2% of tutor actions
-    - review              :  38.7% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1
-
-Training:  45%|████▌     | 900/2000 [02:19<01:07, 16.36it/s][Episode  900]
-  Mean reward (last 100):           3.9971
-  Mean steps per episode:          43.3
-  Mean learner mastery:            0.950
-  Topic choice frequencies:
-    - Topic 0:  17.7% of high-level choices
-    - Topic 1:  12.8% of high-level choices
-    - Topic 2:  17.7% of high-level choices
-    - Topic 3:  16.6% of high-level choices
-    - Topic 4:  11.9% of high-level choices
-    - Topic 5:  10.7% of high-level choices
-    - Topic 6:  12.5% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  24.0% of tutor actions
-    - hint                :   9.6% of tutor actions
-    - worked_example      :  14.1% of tutor actions
-    - remediation         :  23.0% of tutor actions
-    - review              :  29.3% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4
-
-Training:  50%|████▉     | 999/2000 [02:26<01:39, 10.02it/s][Episode 1000]
-  Mean reward (last 100):           3.9153
-  Mean steps per episode:          52.0
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  22.1% of high-level choices
-    - Topic 1:  16.9% of high-level choices
-    - Topic 2:  11.0% of high-level choices
-    - Topic 3:  13.2% of high-level choices
-    - Topic 4:  13.9% of high-level choices
-    - Topic 5:  10.1% of high-level choices
-    - Topic 6:  12.7% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  35.2% of tutor actions
-    - hint                :   5.7% of tutor actions
-    - worked_example      :   7.1% of tutor actions
-    - remediation         :  20.6% of tutor actions
-    - review              :  31.4% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_6
-
-Training:  55%|█████▍    | 1099/2000 [02:32<00:51, 17.62it/s][Episode 1100]
-  Mean reward (last 100):           3.9835
-  Mean steps per episode:          41.3
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  19.8% of high-level choices
-    - Topic 1:  13.7% of high-level choices
-    - Topic 2:  16.5% of high-level choices
-    - Topic 3:  14.6% of high-level choices
-    - Topic 4:  11.8% of high-level choices
-    - Topic 5:  13.6% of high-level choices
-    - Topic 6:  10.1% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  29.2% of tutor actions
-    - hint                :   5.4% of tutor actions
-    - worked_example      :  12.1% of tutor actions
-    - remediation         :  21.2% of tutor actions
-    - review              :  32.0% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_4
-
-Training:  60%|█████▉    | 1198/2000 [02:39<00:50, 15.77it/s][Episode 1200]
-  Mean reward (last 100):           4.0844
-  Mean steps per episode:          52.0
-  Mean learner mastery:            0.946
-  Topic choice frequencies:
-    - Topic 0:  16.4% of high-level choices
-    - Topic 1:  11.2% of high-level choices
-    - Topic 2:  17.2% of high-level choices
-    - Topic 3:  16.6% of high-level choices
-    - Topic 4:  14.9% of high-level choices
-    - Topic 5:  13.9% of high-level choices
-    - Topic 6:   9.9% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  31.3% of tutor actions
-    - hint                :   4.1% of tutor actions
-    - worked_example      :  12.0% of tutor actions
-    - remediation         :  24.3% of tutor actions
-    - review              :  28.4% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_5
-
-Training:  65%|██████▌   | 1300/2000 [02:46<00:41, 16.67it/s][Episode 1300]
-  Mean reward (last 100):           4.0439
-  Mean steps per episode:          46.1
-  Mean learner mastery:            0.950
-  Topic choice frequencies:
-    - Topic 0:  20.9% of high-level choices
-    - Topic 1:  14.8% of high-level choices
-    - Topic 2:  13.6% of high-level choices
-    - Topic 3:  13.3% of high-level choices
-    - Topic 4:  17.6% of high-level choices
-    - Topic 5:   9.5% of high-level choices
-    - Topic 6:  10.2% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  34.9% of tutor actions
-    - hint                :   5.5% of tutor actions
-    - worked_example      :   4.6% of tutor actions
-    - remediation         :  22.8% of tutor actions
-    - review              :  32.2% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1
-
-Training:  70%|███████   | 1400/2000 [02:54<00:40, 14.75it/s][Episode 1400]
-  Mean reward (last 100):           4.0835
-  Mean steps per episode:          55.1
-  Mean learner mastery:            0.950
-  Topic choice frequencies:
-    - Topic 0:  14.0% of high-level choices
-    - Topic 1:  13.9% of high-level choices
-    - Topic 2:  14.8% of high-level choices
-    - Topic 3:  23.4% of high-level choices
-    - Topic 4:  15.6% of high-level choices
-    - Topic 5:  10.1% of high-level choices
-    - Topic 6:   8.2% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  30.0% of tutor actions
-    - hint                :   7.0% of tutor actions
-    - worked_example      :  13.3% of tutor actions
-    - remediation         :  30.3% of tutor actions
-    - review              :  19.4% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_1
-
-Training:  75%|███████▍  | 1499/2000 [02:59<00:27, 18.50it/s][Episode 1500]
-  Mean reward (last 100):           4.0793
-  Mean steps per episode:          39.9
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  11.7% of high-level choices
-    - Topic 1:  14.6% of high-level choices
-    - Topic 2:  16.9% of high-level choices
-    - Topic 3:  14.5% of high-level choices
-    - Topic 4:  20.1% of high-level choices
-    - Topic 5:  10.5% of high-level choices
-    - Topic 6:  11.8% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  32.4% of tutor actions
-    - hint                :   9.6% of tutor actions
-    - worked_example      :   8.6% of tutor actions
-    - remediation         :  28.2% of tutor actions
-    - review              :  21.1% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3
-
-Training:  80%|████████  | 1600/2000 [03:05<00:25, 15.56it/s][Episode 1600]
-  Mean reward (last 100):           4.0231
-  Mean steps per episode:          39.7
-  Mean learner mastery:            0.950
-  Topic choice frequencies:
-    - Topic 0:  14.5% of high-level choices
-    - Topic 1:  11.2% of high-level choices
-    - Topic 2:  21.5% of high-level choices
-    - Topic 3:   8.7% of high-level choices
-    - Topic 4:  20.6% of high-level choices
-    - Topic 5:  13.7% of high-level choices
-    - Topic 6:   9.6% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  43.1% of tutor actions
-    - hint                :   6.5% of tutor actions
-    - worked_example      :   6.1% of tutor actions
-    - remediation         :  20.2% of tutor actions
-    - review              :  24.1% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1
-
-Training:  85%|████████▍ | 1699/2000 [03:12<00:25, 11.85it/s][Episode 1700]
-  Mean reward (last 100):           3.9529
-  Mean steps per episode:          52.9
-  Mean learner mastery:            0.943
-  Topic choice frequencies:
-    - Topic 0:  13.5% of high-level choices
-    - Topic 1:  12.6% of high-level choices
-    - Topic 2:  13.9% of high-level choices
-    - Topic 3:  24.0% of high-level choices
-    - Topic 4:  15.5% of high-level choices
-    - Topic 5:  12.6% of high-level choices
-    - Topic 6:   8.0% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  35.5% of tutor actions
-    - hint                :   7.3% of tutor actions
-    - worked_example      :  16.5% of tutor actions
-    - remediation         :  22.0% of tutor actions
-    - review              :  18.7% of tutor actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor: 100.0% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4
-
-Training:  90%|█████████ | 1800/2000 [03:20<00:15, 12.51it/s][Episode 1800]
-  Mean reward (last 100):           3.8283
-  Mean steps per episode:          54.3
-  Mean learner mastery:            0.950
-  Topic choice frequencies:
     - Topic 0:  19.5% of high-level choices
-    - Topic 1:  12.1% of high-level choices
-    - Topic 2:  14.2% of high-level choices
-    - Topic 3:  27.8% of high-level choices
-    - Topic 4:  10.3% of high-level choices
-    - Topic 5:   8.7% of high-level choices
-    - Topic 6:   7.5% of high-level choices
+    - Topic 1:  12.6% of high-level choices
+    - Topic 2:  14.8% of high-level choices
+    - Topic 3:   7.7% of high-level choices
+    - Topic 4:  15.3% of high-level choices
+    - Topic 5:  11.9% of high-level choices
+    - Topic 6:  18.0% of high-level choices
   Tutor action frequencies:
-    - quiz                :  26.0% of tutor actions
-    - hint                :  16.6% of tutor actions
-    - worked_example      :   7.2% of tutor actions
-    - remediation         :  22.7% of tutor actions
+    - quiz                :  29.5% of tutor actions
+    - hint                :   8.4% of tutor actions
+    - worked_example      :  15.9% of tutor actions
+    - remediation         :  18.6% of tutor actions
     - review              :  27.6% of tutor actions
   High-level mode frequencies (last 100 episodes):
     - tutor: 100.0% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_4
+    --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5
 
-Training:  95%|█████████▌| 1900/2000 [03:31<00:11,  9.03it/s][Episode 1900]
-  Mean reward (last 100):           3.7856
-  Mean steps per episode:          75.4
-  Mean learner mastery:            0.950
+Training:  60%|██████    | 1200/2000 [04:13<01:13, 10.94it/s][Episode 1200]
+  Mean reward (last 100):           3.9033
+  Mean steps per episode:          97.0
+  Mean learner mastery:            0.951
   Topic choice frequencies:
-    - Topic 0:  14.8% of high-level choices
-    - Topic 1:   7.3% of high-level choices
-    - Topic 2:  15.1% of high-level choices
-    - Topic 3:  28.4% of high-level choices
-    - Topic 4:  12.7% of high-level choices
-    - Topic 5:  15.6% of high-level choices
-    - Topic 6:   6.0% of high-level choices
+    - Topic 0:  17.1% of high-level choices
+    - Topic 1:   8.9% of high-level choices
+    - Topic 2:  16.0% of high-level choices
+    - Topic 3:   9.9% of high-level choices
+    - Topic 4:  17.4% of high-level choices
+    - Topic 5:  16.4% of high-level choices
+    - Topic 6:  14.3% of high-level choices
   Tutor action frequencies:
-    - quiz                :  21.9% of tutor actions
-    - hint                :   8.4% of tutor actions
-    - worked_example      :  26.3% of tutor actions
-    - remediation         :  24.9% of tutor actions
-    - review              :  18.4% of tutor actions
+    - quiz                :  26.4% of tutor actions
+    - hint                :  13.8% of tutor actions
+    - worked_example      :  22.7% of tutor actions
+    - remediation         :  18.9% of tutor actions
+    - review              :  18.3% of tutor actions
   High-level mode frequencies (last 100 episodes):
     - tutor: 100.0% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2
+    --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_4
 
-Training: 100%|██████████| 2000/2000 [03:38<00:00,  9.16it/s]
-[Episode 2000]
-  Mean reward (last 100):           3.9802
-  Mean steps per episode:          50.0
+Training:  65%|██████▌   | 1300/2000 [04:23<01:16,  9.17it/s][Episode 1300]
+  Mean reward (last 100):           4.1369
+  Mean steps per episode:          68.6
   Mean learner mastery:            0.950
   Topic choice frequencies:
-    - Topic 0:  18.6% of high-level choices
-    - Topic 1:   7.8% of high-level choices
-    - Topic 2:  17.2% of high-level choices
-    - Topic 3:  19.3% of high-level choices
-    - Topic 4:  15.2% of high-level choices
-    - Topic 5:  13.5% of high-level choices
-    - Topic 6:   8.5% of high-level choices
+    - Topic 0:  18.0% of high-level choices
+    - Topic 1:   9.1% of high-level choices
+    - Topic 2:  16.4% of high-level choices
+    - Topic 3:   9.9% of high-level choices
+    - Topic 4:  10.7% of high-level choices
+    - Topic 5:  25.1% of high-level choices
+    - Topic 6:  10.8% of high-level choices
   Tutor action frequencies:
-    - quiz                :  27.4% of tutor actions
-    - hint                :   8.6% of tutor actions
-    - worked_example      :  17.3% of tutor actions
+    - quiz                :  22.5% of tutor actions
+    - hint                :  12.2% of tutor actions
+    - worked_example      :  28.5% of tutor actions
+    - remediation         :  22.8% of tutor actions
+    - review              :  13.9% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0
+
+Training:  70%|██████▉   | 1399/2000 [04:33<00:50, 11.85it/s][Episode 1400]
+  Mean reward (last 100):           4.2173
+  Mean steps per episode:          69.4
+  Mean learner mastery:            0.950
+Training:  70%|███████   | 1401/2000 [04:33<00:53, 11.28it/s]  Topic choice frequencies:
+    - Topic 0:  20.6% of high-level choices
+    - Topic 1:  13.5% of high-level choices
+    - Topic 2:  16.6% of high-level choices
+    - Topic 3:   9.4% of high-level choices
+    - Topic 4:   9.5% of high-level choices
+    - Topic 5:  19.2% of high-level choices
+    - Topic 6:  11.1% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  27.3% of tutor actions
+    - hint                :   9.7% of tutor actions
+    - worked_example      :  20.1% of tutor actions
+    - remediation         :  25.7% of tutor actions
+    - review              :  17.2% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6
+
+Training:  75%|███████▌  | 1500/2000 [04:43<00:46, 10.70it/s][Episode 1500]
+  Mean reward (last 100):           4.1990
+  Mean steps per episode:          64.8
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  11.7% of high-level choices
+    - Topic 1:  12.1% of high-level choices
+    - Topic 2:  18.5% of high-level choices
+    - Topic 3:  14.0% of high-level choices
+    - Topic 4:   9.2% of high-level choices
+    - Topic 5:  18.3% of high-level choices
+    - Topic 6:  16.2% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  23.8% of tutor actions
+    - hint                :  13.9% of tutor actions
+    - worked_example      :  25.5% of tutor actions
+    - remediation         :  21.9% of tutor actions
+    - review              :  14.9% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1
+
+Training:  80%|████████  | 1600/2000 [04:55<01:03,  6.34it/s][Episode 1600]
+  Mean reward (last 100):           4.0204
+  Mean steps per episode:          84.6
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  19.5% of high-level choices
+    - Topic 1:   7.4% of high-level choices
+    - Topic 2:  12.8% of high-level choices
+    - Topic 3:  14.4% of high-level choices
+    - Topic 4:  14.3% of high-level choices
+    - Topic 5:  14.8% of high-level choices
+    - Topic 6:  16.7% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  25.5% of tutor actions
+    - hint                :  12.2% of tutor actions
+    - worked_example      :  18.3% of tutor actions
+    - remediation         :  25.8% of tutor actions
+    - review              :  18.2% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5
+
+Training:  85%|████████▍ | 1699/2000 [05:07<00:28, 10.72it/s][Episode 1700]
+  Mean reward (last 100):           4.0767
+  Mean steps per episode:          79.3
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  16.1% of high-level choices
+    - Topic 1:   8.9% of high-level choices
+    - Topic 2:  14.8% of high-level choices
+    - Topic 3:  17.2% of high-level choices
+    - Topic 4:  14.9% of high-level choices
+    - Topic 5:  18.4% of high-level choices
+    - Topic 6:   9.7% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  23.0% of tutor actions
+    - hint                :  19.4% of tutor actions
+    - worked_example      :  20.9% of tutor actions
+    - remediation         :  27.5% of tutor actions
+    - review              :   9.2% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3
+
+Training:  90%|████████▉ | 1799/2000 [05:16<00:20,  9.88it/s][Episode 1800]
+  Mean reward (last 100):           4.1890
+  Mean steps per episode:          60.7
+  Mean learner mastery:            0.950
+  Topic choice frequencies:
+    - Topic 0:  11.8% of high-level choices
+    - Topic 1:  13.0% of high-level choices
+    - Topic 2:  19.0% of high-level choices
+    - Topic 3:  12.1% of high-level choices
+    - Topic 4:  16.6% of high-level choices
+    - Topic 5:  16.7% of high-level choices
+    - Topic 6:  10.9% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  26.5% of tutor actions
+    - hint                :  12.4% of tutor actions
+    - worked_example      :  20.9% of tutor actions
+    - remediation         :  28.2% of tutor actions
+    - review              :  12.1% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1
+
+Training:  95%|█████████▌| 1900/2000 [05:30<00:14,  6.79it/s][Episode 1900]
+  Mean reward (last 100):           4.0782
+  Mean steps per episode:          81.7
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:   7.5% of high-level choices
+    - Topic 1:   7.7% of high-level choices
+    - Topic 2:  15.4% of high-level choices
+    - Topic 3:   7.5% of high-level choices
+    - Topic 4:  30.6% of high-level choices
+    - Topic 5:  18.2% of high-level choices
+    - Topic 6:  13.2% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  20.1% of tutor actions
+    - hint                :  24.5% of tutor actions
+    - worked_example      :  24.8% of tutor actions
     - remediation         :  21.1% of tutor actions
-    - review              :  25.6% of tutor actions
+    - review              :   9.6% of tutor actions
   High-level mode frequencies (last 100 episodes):
     - tutor: 100.0% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6
+    --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2
+
+Training: 100%|██████████| 2000/2000 [05:42<00:00,  5.84it/s]
+[Episode 2000]
+  Mean reward (last 100):           4.0978
+  Mean steps per episode:          70.5
+  Mean learner mastery:            0.950
+  Topic choice frequencies:
+    - Topic 0:  13.6% of high-level choices
+    - Topic 1:  14.6% of high-level choices
+    - Topic 2:  15.6% of high-level choices
+    - Topic 3:   8.5% of high-level choices
+    - Topic 4:  14.1% of high-level choices
+    - Topic 5:  18.8% of high-level choices
+    - Topic 6:  14.7% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  27.3% of tutor actions
+    - hint                :  12.5% of tutor actions
+    - worked_example      :  21.5% of tutor actions
+    - remediation         :  22.4% of tutor actions
+    - review              :  16.3% of tutor actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor: 100.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5
 
 Training finished.
 

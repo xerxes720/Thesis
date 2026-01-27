@@ -1,591 +1,591 @@
 "D:\Uni shit\Thesis\Code_New\.venv\Scripts\python.exe" "D:\Uni shit\Thesis\Code_New\education_framework\main.py" 
-Training:   0%|          | 0/2000 [00:00<?, ?it/s]=== Training hierarchical RL tutor (KDD env) ===
+=== Training hierarchical RL tutor (KDD env) ===
 - Number of topics: 7
 - Tutee enabled:   True
 - Episodes:        2000
 - Bundle:          D:\Uni shit\Thesis\Code_New\education_framework\data\kdd_bundle.joblib
-Training:   1%|          | 15/2000 [00:07<12:50,  2.58it/s]D:\Uni shit\Thesis\Code_New\education_framework\agents\low_level_agents.py:291: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\torch\csrc\utils\tensor_new.cpp:256.)
+Training:   4%|▍         | 86/2000 [00:22<06:05,  5.24it/s]D:\Uni shit\Thesis\Code_New\education_framework\agents\low_level_agents.py:291: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\torch\csrc\utils\tensor_new.cpp:256.)
   states_t = torch.as_tensor(ps, dtype=torch.float32, device=self.device)
-Training:   5%|▌         | 100/2000 [00:39<11:55,  2.66it/s][Episode  100]
-  Mean reward (last 100):           1.1953
-  Mean steps per episode:          294.4
-  Mean learner mastery:            0.827
+Training:   5%|▌         | 100/2000 [00:25<05:48,  5.45it/s][Episode  100]
+  Mean reward (last 100):           0.7972
+  Mean steps per episode:          193.2
+  Mean learner mastery:            0.461
   Topic choice frequencies:
-    - Topic 0:  16.4% of high-level choices
-    - Topic 1:  11.7% of high-level choices
-    - Topic 2:  11.0% of high-level choices
-    - Topic 3:  12.1% of high-level choices
-    - Topic 4:  12.3% of high-level choices
+    - Topic 0:  32.7% of high-level choices
+    - Topic 1:  11.2% of high-level choices
+    - Topic 2:  16.2% of high-level choices
+    - Topic 3:   9.7% of high-level choices
+    - Topic 4:  10.7% of high-level choices
+    - Topic 5:   8.9% of high-level choices
+    - Topic 6:  10.5% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  12.7% of tutor actions
+    - hint                :  30.6% of tutor actions
+    - worked_example      :   1.9% of tutor actions
+    - remediation         :  28.7% of tutor actions
+    - review              :  26.2% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :  10.9% of tutee actions
+    - ask_worked_example  :  14.2% of tutee actions
+    - ask_summary         :  16.6% of tutee actions
+    - show_mistake_and_ask_fix:  58.4% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  35.4% of high-level decisions
+    - tutee:  64.6% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutee_topic_5 --> tutor_topic_5 --> tutee_topic_5 --> tutor_topic_5 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_5 --> tutor_topic_5 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutor_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutor_topic_5 --> tutee_topic_2 --> tutee_topic_3 --> tutee_topic_2 --> tutee_topic_2 --> tutor_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutor_topic_4 --> tutor_topic_3 --> tutee_topic_0 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_0 --> tutor_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_0 --> tutor_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_3 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_6 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_3 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_1 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_2 --> tutee_topic_0 --> tutor_topic_1 --> tutee_topic_0 --> tutee_topic_0
+
+Training:  10%|█         | 200/2000 [00:48<08:58,  3.34it/s][Episode  200]
+  Mean reward (last 100):           0.9784
+  Mean steps per episode:          215.4
+  Mean learner mastery:            0.462
+  Topic choice frequencies:
+    - Topic 0:  23.9% of high-level choices
+    - Topic 1:  15.0% of high-level choices
+    - Topic 2:  16.5% of high-level choices
+    - Topic 3:   9.6% of high-level choices
+    - Topic 4:  17.1% of high-level choices
+    - Topic 5:   7.7% of high-level choices
+    - Topic 6:  10.2% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  16.6% of tutor actions
+    - hint                :  19.6% of tutor actions
+    - worked_example      :  11.9% of tutor actions
+    - remediation         :  31.5% of tutor actions
+    - review              :  20.4% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :  15.0% of tutee actions
+    - ask_worked_example  :  23.5% of tutee actions
+    - ask_summary         :  26.8% of tutee actions
+    - show_mistake_and_ask_fix:  34.7% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  48.9% of high-level decisions
+    - tutee:  51.1% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_4 --> tutee_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_6 --> tutee_topic_0 --> tutor_topic_6 --> tutee_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_0 --> tutee_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutee_topic_6 --> tutor_topic_1 --> tutee_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutee_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutee_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_6 --> tutor_topic_1 --> tutee_topic_2 --> tutee_topic_4 --> tutor_topic_1 --> tutor_topic_6 --> tutee_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_1
+
+Training:  15%|█▌        | 300/2000 [01:13<07:17,  3.88it/s][Episode  300]
+  Mean reward (last 100):           1.1463
+  Mean steps per episode:          227.4
+  Mean learner mastery:            0.725
+  Topic choice frequencies:
+    - Topic 0:  21.3% of high-level choices
+    - Topic 1:  19.3% of high-level choices
+    - Topic 2:  12.6% of high-level choices
+    - Topic 3:   9.5% of high-level choices
+    - Topic 4:   9.9% of high-level choices
     - Topic 5:  13.4% of high-level choices
-    - Topic 6:  23.0% of high-level choices
+    - Topic 6:  13.9% of high-level choices
   Tutor action frequencies:
-    - quiz                :  21.4% of tutor actions
-    - hint                :  30.4% of tutor actions
-    - worked_example      :  12.2% of tutor actions
-    - remediation         :   6.7% of tutor actions
-    - review              :  29.3% of tutor actions
+    - quiz                :  15.9% of tutor actions
+    - hint                :  22.7% of tutor actions
+    - worked_example      :  18.7% of tutor actions
+    - remediation         :  21.4% of tutor actions
+    - review              :  21.4% of tutor actions
   Tutee action frequencies:
-    - ask_explanation     :  13.5% of tutee actions
-    - ask_worked_example  :  33.5% of tutee actions
-    - ask_summary         :  14.4% of tutee actions
-    - show_mistake_and_ask_fix:  38.6% of tutee actions
+    - ask_explanation     :  18.8% of tutee actions
+    - ask_worked_example  :  28.5% of tutee actions
+    - ask_summary         :  26.3% of tutee actions
+    - show_mistake_and_ask_fix:  26.3% of tutee actions
   High-level mode frequencies (last 100 episodes):
-    - tutor:  60.4% of high-level decisions
-    - tutee:  39.6% of high-level decisions
+    - tutor:  56.9% of high-level decisions
+    - tutee:  43.1% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutee_topic_6 --> tutee_topic_6 --> tutor_topic_1 --> tutee_topic_6 --> tutor_topic_1 --> tutee_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutee_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutee_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutee_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_5 --> tutee_topic_5 --> tutor_topic_3 --> tutee_topic_5 --> tutee_topic_2 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_3 --> tutee_topic_5 --> tutor_topic_4 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_3 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_6 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_2 --> tutee_topic_5 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutee_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutee_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutee_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutee_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutee_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutee_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_5 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4
+    --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_2 --> tutor_topic_5 --> tutee_topic_6 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_2 --> tutee_topic_0 --> tutor_topic_4 --> tutee_topic_6 --> tutee_topic_6 --> tutee_topic_6 --> tutee_topic_6 --> tutee_topic_2 --> tutor_topic_4 --> tutee_topic_6 --> tutee_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_6 --> tutee_topic_4 --> tutor_topic_5 --> tutee_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutee_topic_0 --> tutor_topic_3 --> tutee_topic_3 --> tutor_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_1 --> tutee_topic_0 --> tutor_topic_4 --> tutee_topic_0 --> tutee_topic_4 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_0 --> tutee_topic_0 --> tutee_topic_4 --> tutee_topic_1 --> tutee_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutor_topic_6 --> tutor_topic_2 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_6 --> tutor_topic_0 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutor_topic_2 --> tutee_topic_3 --> tutee_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutee_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_6 --> tutee_topic_1 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_3 --> tutee_topic_3 --> tutor_topic_0 --> tutee_topic_5 --> tutee_topic_4 --> tutee_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutee_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_1 --> tutor_topic_0 --> tutee_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_2
 
-Training:  10%|█         | 200/2000 [01:07<07:04,  4.24it/s][Episode  200]
-  Mean reward (last 100):           2.6738
-  Mean steps per episode:          219.2
-  Mean learner mastery:            0.946
+Training:  20%|██        | 400/2000 [01:40<06:19,  4.22it/s][Episode  400]
+  Mean reward (last 100):           1.6706
+  Mean steps per episode:          223.9
+  Mean learner mastery:            0.947
   Topic choice frequencies:
-    - Topic 0:  11.4% of high-level choices
-    - Topic 1:  16.4% of high-level choices
-    - Topic 2:  14.7% of high-level choices
-    - Topic 3:  14.2% of high-level choices
-    - Topic 4:   9.1% of high-level choices
-    - Topic 5:  20.3% of high-level choices
-    - Topic 6:  14.0% of high-level choices
+    - Topic 0:  14.6% of high-level choices
+    - Topic 1:  16.1% of high-level choices
+    - Topic 2:  19.0% of high-level choices
+    - Topic 3:  18.2% of high-level choices
+    - Topic 4:   7.4% of high-level choices
+    - Topic 5:  13.8% of high-level choices
+    - Topic 6:  10.9% of high-level choices
   Tutor action frequencies:
-    - quiz                :  27.6% of tutor actions
-    - hint                :  16.1% of tutor actions
-    - worked_example      :  12.8% of tutor actions
-    - remediation         :  15.4% of tutor actions
-    - review              :  28.1% of tutor actions
+    - quiz                :  23.3% of tutor actions
+    - hint                :  11.9% of tutor actions
+    - worked_example      :  23.4% of tutor actions
+    - remediation         :  14.2% of tutor actions
+    - review              :  27.2% of tutor actions
   Tutee action frequencies:
-    - ask_explanation     :  14.8% of tutee actions
-    - ask_worked_example  :  34.6% of tutee actions
-    - ask_summary         :  18.7% of tutee actions
-    - show_mistake_and_ask_fix:  31.8% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  68.7% of high-level decisions
-    - tutee:  31.3% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutee_topic_6 --> tutor_topic_6 --> tutee_topic_3 --> tutee_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutee_topic_0 --> tutor_topic_6 --> tutee_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_4 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_1 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_2 --> tutor_topic_4 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_1 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_3 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutee_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3
-
-Training:  15%|█▌        | 300/2000 [01:29<05:45,  4.92it/s][Episode  300]
-  Mean reward (last 100):           3.3332
-  Mean steps per episode:          182.7
-  Mean learner mastery:            0.955
-  Topic choice frequencies:
-    - Topic 0:  19.1% of high-level choices
-    - Topic 1:  20.1% of high-level choices
-    - Topic 2:  14.5% of high-level choices
-    - Topic 3:  10.6% of high-level choices
-    - Topic 4:   8.8% of high-level choices
-    - Topic 5:  17.1% of high-level choices
-    - Topic 6:   9.8% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  31.5% of tutor actions
-    - hint                :  16.9% of tutor actions
-    - worked_example      :  17.3% of tutor actions
-    - remediation         :   5.9% of tutor actions
-    - review              :  28.4% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   7.7% of tutee actions
-    - ask_worked_example  :  57.2% of tutee actions
-    - ask_summary         :  10.7% of tutee actions
-    - show_mistake_and_ask_fix:  24.3% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  58.2% of high-level decisions
-    - tutee:  41.8% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutee_topic_0 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutee_topic_1 --> tutee_topic_6 --> tutee_topic_4 --> tutor_topic_3 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_6 --> tutee_topic_6 --> tutee_topic_4 --> tutee_topic_6 --> tutee_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_4 --> tutee_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutee_topic_3 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_6 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_2 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_0 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_5 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_3 --> tutor_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_2 --> tutor_topic_5 --> tutee_topic_1 --> tutor_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_4 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_6 --> tutee_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_2 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutee_topic_1 --> tutor_topic_2 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_6 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_6 --> tutor_topic_4 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_3 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutee_topic_1 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_6 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1
-
-Training:  20%|██        | 400/2000 [01:46<02:49,  9.46it/s][Episode  400]
-  Mean reward (last 100):           3.3440
-  Mean steps per episode:          148.2
-  Mean learner mastery:            0.957
-  Topic choice frequencies:
-    - Topic 0:  11.7% of high-level choices
-    - Topic 1:  14.3% of high-level choices
-    - Topic 2:  12.1% of high-level choices
-    - Topic 3:   9.8% of high-level choices
-    - Topic 4:  20.5% of high-level choices
-    - Topic 5:  14.6% of high-level choices
-    - Topic 6:  17.0% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  22.1% of tutor actions
-    - hint                :  13.8% of tutor actions
-    - worked_example      :  26.9% of tutor actions
-    - remediation         :   4.8% of tutor actions
-    - review              :  32.4% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :  10.2% of tutee actions
-    - ask_worked_example  :  54.4% of tutee actions
-    - ask_summary         :   9.4% of tutee actions
-    - show_mistake_and_ask_fix:  25.9% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  56.6% of high-level decisions
-    - tutee:  43.4% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_0 --> tutee_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_2 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_2 --> tutee_topic_6 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1
-
-Training:  25%|██▌       | 500/2000 [01:59<04:40,  5.34it/s][Episode  500]
-  Mean reward (last 100):           3.6839
-  Mean steps per episode:          101.6
-  Mean learner mastery:            0.913
-  Topic choice frequencies:
-    - Topic 0:  15.3% of high-level choices
-    - Topic 1:  20.6% of high-level choices
-    - Topic 2:   8.8% of high-level choices
-    - Topic 3:   9.3% of high-level choices
-    - Topic 4:  16.3% of high-level choices
-    - Topic 5:  13.5% of high-level choices
-    - Topic 6:  16.3% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  27.1% of tutor actions
-    - hint                :  15.6% of tutor actions
-    - worked_example      :  16.4% of tutor actions
-    - remediation         :   7.4% of tutor actions
-    - review              :  33.5% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   8.8% of tutee actions
-    - ask_worked_example  :  52.8% of tutee actions
-    - ask_summary         :  15.5% of tutee actions
-    - show_mistake_and_ask_fix:  22.9% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  68.4% of high-level decisions
-    - tutee:  31.6% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_4 --> tutee_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_3 --> tutee_topic_6 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_3 --> tutee_topic_4 --> tutor_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_2 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_5 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_6 --> tutee_topic_5 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_1 --> tutee_topic_4 --> tutor_topic_1 --> tutee_topic_4 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_4 --> tutee_topic_1 --> tutee_topic_4 --> tutee_topic_1 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_5 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_1 --> tutor_topic_2 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_4 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_6 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_5 --> tutor_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_0 --> tutor_topic_5 --> tutee_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_3 --> tutee_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_4
-
-Training:  30%|██▉       | 599/2000 [02:09<01:37, 14.41it/s][Episode  600]
-  Mean reward (last 100):           3.7475
-  Mean steps per episode:          86.6
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  15.1% of high-level choices
-    - Topic 1:  21.6% of high-level choices
-    - Topic 2:  10.1% of high-level choices
-    - Topic 3:  12.5% of high-level choices
-    - Topic 4:  14.0% of high-level choices
-    - Topic 5:  10.9% of high-level choices
-    - Topic 6:  15.8% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  24.2% of tutor actions
-    - hint                :  12.6% of tutor actions
-    - worked_example      :  12.5% of tutor actions
-    - remediation         :   8.5% of tutor actions
-    - review              :  42.2% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   5.4% of tutee actions
-    - ask_worked_example  :  58.5% of tutee actions
-    - ask_summary         :  15.8% of tutee actions
-    - show_mistake_and_ask_fix:  20.3% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  58.3% of high-level decisions
-    - tutee:  41.7% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutee_topic_5 --> tutee_topic_0 --> tutee_topic_6 --> tutor_topic_4 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_3 --> tutee_topic_0 --> tutor_topic_1 --> tutee_topic_0 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_5 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_5 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_3 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_5 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_4 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_5 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_4 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_5 --> tutee_topic_0 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_6
-
-Training:  35%|███▌      | 700/2000 [02:20<02:29,  8.68it/s][Episode  700]
-  Mean reward (last 100):           3.7237
-  Mean steps per episode:          91.8
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  16.5% of high-level choices
-    - Topic 1:  26.0% of high-level choices
-    - Topic 2:   8.3% of high-level choices
-    - Topic 3:  13.7% of high-level choices
-    - Topic 4:  12.5% of high-level choices
-    - Topic 5:  12.2% of high-level choices
-    - Topic 6:  10.8% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  26.1% of tutor actions
-    - hint                :  20.9% of tutor actions
-    - worked_example      :   9.1% of tutor actions
-    - remediation         :   5.8% of tutor actions
-    - review              :  38.1% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   8.7% of tutee actions
-    - ask_worked_example  :  65.2% of tutee actions
-    - ask_summary         :   7.0% of tutee actions
-    - show_mistake_and_ask_fix:  19.1% of tutee actions
+    - ask_explanation     :  15.6% of tutee actions
+    - ask_worked_example  :  23.3% of tutee actions
+    - ask_summary         :  26.8% of tutee actions
+    - show_mistake_and_ask_fix:  34.2% of tutee actions
   High-level mode frequencies (last 100 episodes):
     - tutor:  67.1% of high-level decisions
     - tutee:  32.9% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_6 --> tutee_topic_6 --> tutee_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_4 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_1 --> tutee_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutee_topic_2 --> tutor_topic_5
+    --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_5 --> tutee_topic_0 --> tutor_topic_5 --> tutee_topic_0 --> tutee_topic_2 --> tutor_topic_5 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_2 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_0 --> tutee_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_3 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_2 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_1 --> tutor_topic_0 --> tutor_topic_6 --> tutee_topic_0 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_2 --> tutee_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_1 --> tutee_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3
 
-Training:  40%|████      | 800/2000 [02:30<01:15, 15.95it/s][Episode  800]
-  Mean reward (last 100):           3.6091
-  Mean steps per episode:          80.1
-  Mean learner mastery:            0.950
-  Topic choice frequencies:
-    - Topic 0:  17.0% of high-level choices
-    - Topic 1:  18.4% of high-level choices
-    - Topic 2:   7.2% of high-level choices
-    - Topic 3:  18.2% of high-level choices
-    - Topic 4:  15.1% of high-level choices
-    - Topic 5:   8.1% of high-level choices
-    - Topic 6:  16.0% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  27.0% of tutor actions
-    - hint                :  15.2% of tutor actions
-    - worked_example      :  14.6% of tutor actions
-    - remediation         :   3.8% of tutor actions
-    - review              :  39.4% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   7.7% of tutee actions
-    - ask_worked_example  :  57.0% of tutee actions
-    - ask_summary         :   6.9% of tutee actions
-    - show_mistake_and_ask_fix:  28.5% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  69.2% of high-level decisions
-    - tutee:  30.8% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_5 --> tutee_topic_3 --> tutor_topic_2 --> tutee_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1
-
-Training:  45%|████▍     | 899/2000 [02:36<00:51, 21.38it/s][Episode  900]
-  Mean reward (last 100):           3.9484
-  Mean steps per episode:          45.9
+Training:  25%|██▍       | 499/2000 [02:02<06:08,  4.08it/s][Episode  500]
+  Mean reward (last 100):           2.9550
+  Mean steps per episode:          180.7
   Mean learner mastery:            0.952
   Topic choice frequencies:
-    - Topic 0:  20.2% of high-level choices
-    - Topic 1:  19.2% of high-level choices
-    - Topic 2:  12.5% of high-level choices
-    - Topic 3:  15.9% of high-level choices
-    - Topic 4:   9.3% of high-level choices
-    - Topic 5:  11.5% of high-level choices
-    - Topic 6:  11.4% of high-level choices
+    - Topic 0:  15.2% of high-level choices
+    - Topic 1:  13.3% of high-level choices
+    - Topic 2:   9.4% of high-level choices
+    - Topic 3:  16.1% of high-level choices
+    - Topic 4:  18.2% of high-level choices
+    - Topic 5:  15.1% of high-level choices
+    - Topic 6:  12.6% of high-level choices
   Tutor action frequencies:
-    - quiz                :  14.6% of tutor actions
-    - hint                :  19.3% of tutor actions
-    - worked_example      :  18.4% of tutor actions
-    - remediation         :   6.3% of tutor actions
-    - review              :  41.4% of tutor actions
+    - quiz                :  20.6% of tutor actions
+    - hint                :   8.3% of tutor actions
+    - worked_example      :  33.6% of tutor actions
+    - remediation         :  12.4% of tutor actions
+    - review              :  25.0% of tutor actions
   Tutee action frequencies:
-    - ask_explanation     :   5.6% of tutee actions
-    - ask_worked_example  :  65.3% of tutee actions
-    - ask_summary         :   5.0% of tutee actions
-    - show_mistake_and_ask_fix:  24.1% of tutee actions
+    - ask_explanation     :  15.2% of tutee actions
+    - ask_worked_example  :  20.1% of tutee actions
+    - ask_summary         :  42.6% of tutee actions
+    - show_mistake_and_ask_fix:  22.1% of tutee actions
   High-level mode frequencies (last 100 episodes):
-    - tutor:  71.2% of high-level decisions
-    - tutee:  28.8% of high-level decisions
+    - tutor:  75.0% of high-level decisions
+    - tutee:  25.0% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_4 --> tutee_topic_2 --> tutee_topic_6 --> tutee_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutee_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutee_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_1 --> tutee_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_0 --> tutee_topic_1 --> tutor_topic_6 --> tutee_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_4 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_5 --> tutee_topic_0 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutee_topic_1 --> tutor_topic_3 --> tutor_topic_6 --> tutee_topic_0 --> tutor_topic_6
+    --> tutee_topic_2 --> tutor_topic_3 --> tutor_topic_5 --> tutee_topic_0 --> tutor_topic_3 --> tutor_topic_5 --> tutee_topic_0 --> tutor_topic_3 --> tutee_topic_0 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_4 --> tutee_topic_0 --> tutor_topic_2 --> tutor_topic_3 --> tutee_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_1
 
-Training:  50%|█████     | 1000/2000 [02:44<01:12, 13.79it/s][Episode 1000]
-  Mean reward (last 100):           3.9058
-  Mean steps per episode:          61.9
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  25.8% of high-level choices
-    - Topic 1:  14.9% of high-level choices
-    - Topic 2:  10.5% of high-level choices
-    - Topic 3:  12.0% of high-level choices
-    - Topic 4:  12.8% of high-level choices
-    - Topic 5:   9.5% of high-level choices
-    - Topic 6:  14.6% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  10.4% of tutor actions
-    - hint                :  13.8% of tutor actions
-    - worked_example      :  23.0% of tutor actions
-    - remediation         :   6.8% of tutor actions
-    - review              :  46.1% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   4.8% of tutee actions
-    - ask_worked_example  :  54.3% of tutee actions
-    - ask_summary         :   6.7% of tutee actions
-    - show_mistake_and_ask_fix:  34.2% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  68.4% of high-level decisions
-    - tutee:  31.6% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_2 --> tutee_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_4 --> tutee_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_4 --> tutor_topic_2 --> tutee_topic_2 --> tutee_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6
-
-Training:  55%|█████▍    | 1098/2000 [02:51<00:49, 18.08it/s][Episode 1100]
-  Mean reward (last 100):           3.9795
-  Mean steps per episode:          58.2
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  23.1% of high-level choices
-    - Topic 1:  14.1% of high-level choices
-    - Topic 2:   8.7% of high-level choices
-    - Topic 3:  18.2% of high-level choices
-    - Topic 4:  13.0% of high-level choices
-    - Topic 5:  10.2% of high-level choices
-    - Topic 6:  12.8% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  12.5% of tutor actions
-    - hint                :  20.3% of tutor actions
-    - worked_example      :  29.2% of tutor actions
-    - remediation         :   8.0% of tutor actions
-    - review              :  30.0% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   9.7% of tutee actions
-    - ask_worked_example  :  49.5% of tutee actions
-    - ask_summary         :   6.2% of tutee actions
-    - show_mistake_and_ask_fix:  34.6% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  68.4% of high-level decisions
-    - tutee:  31.6% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_4 --> tutor_topic_2 --> tutee_topic_5 --> tutor_topic_0 --> tutee_topic_5 --> tutor_topic_0 --> tutee_topic_5 --> tutee_topic_2 --> tutee_topic_5 --> tutee_topic_3 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_6 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_2 --> tutee_topic_1
-
-Training:  60%|█████▉    | 1199/2000 [02:58<00:43, 18.35it/s][Episode 1200]
-  Mean reward (last 100):           3.9267
-  Mean steps per episode:          56.4
+Training:  30%|███       | 600/2000 [02:27<04:53,  4.78it/s][Episode  600]
+  Mean reward (last 100):           2.7187
+  Mean steps per episode:          182.8
   Mean learner mastery:            0.950
   Topic choice frequencies:
-    - Topic 0:  20.6% of high-level choices
-    - Topic 1:  17.8% of high-level choices
-    - Topic 2:  10.1% of high-level choices
-    - Topic 3:  12.3% of high-level choices
-    - Topic 4:  10.3% of high-level choices
-    - Topic 5:  11.6% of high-level choices
-    - Topic 6:  17.3% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  11.5% of tutor actions
-    - hint                :  22.6% of tutor actions
-    - worked_example      :   9.0% of tutor actions
-    - remediation         :  11.7% of tutor actions
-    - review              :  45.2% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :  16.7% of tutee actions
-    - ask_worked_example  :  45.0% of tutee actions
-    - ask_summary         :   6.9% of tutee actions
-    - show_mistake_and_ask_fix:  31.5% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  72.8% of high-level decisions
-    - tutee:  27.2% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_2 --> tutor_topic_0 --> tutee_topic_5 --> tutor_topic_1 --> tutee_topic_2 --> tutee_topic_1 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_4 --> tutee_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_3 --> tutee_topic_1 --> tutor_topic_6
-
-Training:  65%|██████▌   | 1300/2000 [03:05<00:57, 12.13it/s][Episode 1300]
-  Mean reward (last 100):           3.9103
-  Mean steps per episode:          50.6
-  Mean learner mastery:            0.857
-  Topic choice frequencies:
-    - Topic 0:  26.1% of high-level choices
-    - Topic 1:  14.0% of high-level choices
-    - Topic 2:  13.0% of high-level choices
-    - Topic 3:  15.1% of high-level choices
-    - Topic 4:   8.8% of high-level choices
-    - Topic 5:  13.2% of high-level choices
-    - Topic 6:   9.7% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  19.5% of tutor actions
-    - hint                :  18.4% of tutor actions
-    - worked_example      :  10.3% of tutor actions
-    - remediation         :   5.9% of tutor actions
-    - review              :  45.9% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   4.7% of tutee actions
-    - ask_worked_example  :  48.2% of tutee actions
-    - ask_summary         :   3.8% of tutee actions
-    - show_mistake_and_ask_fix:  43.2% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  67.5% of high-level decisions
-    - tutee:  32.5% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_4 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_0 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutee_topic_5 --> tutor_topic_4 --> tutor_topic_6 --> tutee_topic_5 --> tutor_topic_4 --> tutee_topic_5 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_4 --> tutor_topic_6 --> tutee_topic_5 --> tutor_topic_6 --> tutee_topic_4 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_4 --> tutor_topic_6 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_4 --> tutor_topic_6 --> tutee_topic_5 --> tutee_topic_6 --> tutee_topic_4 --> tutee_topic_0 --> tutee_topic_4 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_1 --> tutee_topic_4 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_6 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_6 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_6 --> tutee_topic_4 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_4 --> tutor_topic_6 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_4 --> tutor_topic_6 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_0 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_4 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_0 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_0 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_0 --> tutee_topic_5 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutee_topic_0 --> tutee_topic_4 --> tutee_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_6 --> tutee_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutee_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6
-
-Training:  70%|██████▉   | 1399/2000 [03:11<00:34, 17.48it/s][Episode 1400]
-  Mean reward (last 100):           3.9757
-  Mean steps per episode:          50.9
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  25.6% of high-level choices
-    - Topic 1:  12.0% of high-level choices
-    - Topic 2:  11.1% of high-level choices
-    - Topic 3:  19.1% of high-level choices
-    - Topic 4:   8.8% of high-level choices
-    - Topic 5:   8.6% of high-level choices
-    - Topic 6:  14.9% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  16.3% of tutor actions
-    - hint                :  20.4% of tutor actions
-    - worked_example      :  18.6% of tutor actions
-    - remediation         :   8.4% of tutor actions
-    - review              :  36.2% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   7.3% of tutee actions
-    - ask_worked_example  :  48.2% of tutee actions
-    - ask_summary         :   5.6% of tutee actions
-    - show_mistake_and_ask_fix:  38.9% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  70.4% of high-level decisions
-    - tutee:  29.6% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_3 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutee_topic_5 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_2 --> tutee_topic_1 --> tutor_topic_6
-
-Training:  75%|███████▌  | 1500/2000 [03:19<00:38, 12.96it/s][Episode 1500]
-  Mean reward (last 100):           3.8676
-  Mean steps per episode:          55.7
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  32.5% of high-level choices
-    - Topic 1:  10.2% of high-level choices
-    - Topic 2:  12.6% of high-level choices
-    - Topic 3:  13.2% of high-level choices
-    - Topic 4:  15.2% of high-level choices
-    - Topic 5:   6.8% of high-level choices
-    - Topic 6:   9.4% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  15.3% of tutor actions
-    - hint                :  11.1% of tutor actions
-    - worked_example      :  19.4% of tutor actions
-    - remediation         :   9.4% of tutor actions
-    - review              :  44.8% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :  12.1% of tutee actions
-    - ask_worked_example  :  44.7% of tutee actions
-    - ask_summary         :   3.7% of tutee actions
-    - show_mistake_and_ask_fix:  39.5% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  68.4% of high-level decisions
-    - tutee:  31.6% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_0 --> tutee_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutee_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutee_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_1 --> tutor_topic_3 --> tutee_topic_1 --> tutor_topic_3 --> tutor_topic_4
-
-Training:  80%|████████  | 1600/2000 [03:26<00:22, 17.46it/s][Episode 1600]
-  Mean reward (last 100):           3.9751
-  Mean steps per episode:          60.0
-  Mean learner mastery:            0.950
-  Topic choice frequencies:
-    - Topic 0:  23.5% of high-level choices
-    - Topic 1:  14.0% of high-level choices
-    - Topic 2:   9.0% of high-level choices
-    - Topic 3:  17.7% of high-level choices
-    - Topic 4:  19.3% of high-level choices
-    - Topic 5:   7.5% of high-level choices
-    - Topic 6:   8.9% of high-level choices
-  Tutor action frequencies:
-    - quiz                :  16.1% of tutor actions
-    - hint                :  20.2% of tutor actions
-    - worked_example      :  27.6% of tutor actions
-    - remediation         :   7.3% of tutor actions
-    - review              :  28.7% of tutor actions
-  Tutee action frequencies:
-    - ask_explanation     :   4.8% of tutee actions
-    - ask_worked_example  :  27.3% of tutee actions
-    - ask_summary         :   2.4% of tutee actions
-    - show_mistake_and_ask_fix:  65.5% of tutee actions
-  High-level mode frequencies (last 100 episodes):
-    - tutor:  74.6% of high-level decisions
-    - tutee:  25.4% of high-level decisions
-  High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_2 --> tutee_topic_0 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6
-
-Training:  85%|████████▌ | 1700/2000 [03:33<00:13, 22.08it/s][Episode 1700]
-  Mean reward (last 100):           4.0036
-  Mean steps per episode:          49.5
-  Mean learner mastery:            0.951
-  Topic choice frequencies:
-    - Topic 0:  32.2% of high-level choices
-    - Topic 1:  10.4% of high-level choices
+    - Topic 0:  12.9% of high-level choices
+    - Topic 1:  13.5% of high-level choices
     - Topic 2:  12.9% of high-level choices
-    - Topic 3:  13.8% of high-level choices
-    - Topic 4:  11.9% of high-level choices
-    - Topic 5:   8.6% of high-level choices
-    - Topic 6:  10.3% of high-level choices
+    - Topic 3:  23.6% of high-level choices
+    - Topic 4:  12.0% of high-level choices
+    - Topic 5:  13.2% of high-level choices
+    - Topic 6:  11.8% of high-level choices
   Tutor action frequencies:
-    - quiz                :  21.2% of tutor actions
-    - hint                :  12.0% of tutor actions
-    - worked_example      :  18.4% of tutor actions
-    - remediation         :  13.2% of tutor actions
-    - review              :  35.2% of tutor actions
+    - quiz                :  21.0% of tutor actions
+    - hint                :   8.2% of tutor actions
+    - worked_example      :  33.7% of tutor actions
+    - remediation         :  11.8% of tutor actions
+    - review              :  25.2% of tutor actions
   Tutee action frequencies:
-    - ask_explanation     :  16.1% of tutee actions
-    - ask_worked_example  :  33.0% of tutee actions
-    - ask_summary         :   3.5% of tutee actions
-    - show_mistake_and_ask_fix:  47.4% of tutee actions
+    - ask_explanation     :   6.3% of tutee actions
+    - ask_worked_example  :  26.0% of tutee actions
+    - ask_summary         :  55.0% of tutee actions
+    - show_mistake_and_ask_fix:  12.7% of tutee actions
   High-level mode frequencies (last 100 episodes):
-    - tutor:  68.1% of high-level decisions
-    - tutee:  31.9% of high-level decisions
+    - tutor:  75.9% of high-level decisions
+    - tutee:  24.1% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_6 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_3 --> tutee_topic_0 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_4
+    --> tutor_topic_3 --> tutee_topic_1 --> tutee_topic_0 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutee_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutee_topic_4 --> tutor_topic_1 --> tutee_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_3 --> tutee_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_6 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_2 --> tutor_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_3 --> tutor_topic_0
 
-Training:  90%|████████▉ | 1798/2000 [03:40<00:12, 16.06it/s][Episode 1800]
-  Mean reward (last 100):           4.0624
-  Mean steps per episode:          55.9
+Training:  35%|███▍      | 699/2000 [02:46<04:11,  5.17it/s][Episode  700]
+  Mean reward (last 100):           3.3888
+  Mean steps per episode:          132.0
   Mean learner mastery:            0.951
   Topic choice frequencies:
-    - Topic 0:  29.6% of high-level choices
-    - Topic 1:  16.2% of high-level choices
-    - Topic 2:  14.6% of high-level choices
-    - Topic 3:  12.6% of high-level choices
-    - Topic 4:   9.3% of high-level choices
-    - Topic 5:   7.1% of high-level choices
-    - Topic 6:  10.6% of high-level choices
+    - Topic 0:   8.9% of high-level choices
+    - Topic 1:  14.9% of high-level choices
+    - Topic 2:  13.4% of high-level choices
+    - Topic 3:  15.8% of high-level choices
+    - Topic 4:  17.0% of high-level choices
+    - Topic 5:  15.8% of high-level choices
+    - Topic 6:  14.2% of high-level choices
   Tutor action frequencies:
-    - quiz                :  13.6% of tutor actions
-    - hint                :  15.1% of tutor actions
-    - worked_example      :  16.2% of tutor actions
-    - remediation         :  14.0% of tutor actions
-    - review              :  41.2% of tutor actions
+    - quiz                :  19.2% of tutor actions
+    - hint                :  13.3% of tutor actions
+    - worked_example      :  30.0% of tutor actions
+    - remediation         :   6.5% of tutor actions
+    - review              :  31.0% of tutor actions
   Tutee action frequencies:
-    - ask_explanation     :  12.9% of tutee actions
-    - ask_worked_example  :  16.9% of tutee actions
-    - ask_summary         :  11.1% of tutee actions
-    - show_mistake_and_ask_fix:  59.1% of tutee actions
+    - ask_explanation     :  19.7% of tutee actions
+    - ask_worked_example  :  36.2% of tutee actions
+    - ask_summary         :  35.4% of tutee actions
+    - show_mistake_and_ask_fix:   8.7% of tutee actions
   High-level mode frequencies (last 100 episodes):
-    - tutor:  66.1% of high-level decisions
-    - tutee:  33.9% of high-level decisions
+    - tutor:  72.6% of high-level decisions
+    - tutee:  27.4% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_5 --> tutee_topic_0 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6
+    --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutee_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_5 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_2 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_1 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_5 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_3 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_1 --> tutee_topic_3 --> tutor_topic_2 --> tutee_topic_0 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutee_topic_4 --> tutee_topic_4 --> tutor_topic_2
 
-Training:  95%|█████████▍| 1899/2000 [03:47<00:10,  9.47it/s][Episode 1900]
-  Mean reward (last 100):           3.8303
-  Mean steps per episode:          60.2
+Training:  40%|████      | 800/2000 [03:02<04:39,  4.29it/s][Episode  800]
+  Mean reward (last 100):           3.2973
+  Mean steps per episode:          109.6
+  Mean learner mastery:            0.865
+  Topic choice frequencies:
+    - Topic 0:  18.4% of high-level choices
+    - Topic 1:  13.5% of high-level choices
+    - Topic 2:  11.1% of high-level choices
+    - Topic 3:  20.0% of high-level choices
+    - Topic 4:  15.5% of high-level choices
+    - Topic 5:   7.9% of high-level choices
+    - Topic 6:  13.6% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  24.3% of tutor actions
+    - hint                :   6.4% of tutor actions
+    - worked_example      :  29.8% of tutor actions
+    - remediation         :   7.4% of tutor actions
+    - review              :  32.1% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :  17.9% of tutee actions
+    - ask_worked_example  :  16.0% of tutee actions
+    - ask_summary         :  60.0% of tutee actions
+    - show_mistake_and_ask_fix:   6.1% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  76.5% of high-level decisions
+    - tutee:  23.5% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_5 --> tutee_topic_5 --> tutor_topic_5 --> tutee_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_5 --> tutee_topic_1 --> tutor_topic_5 --> tutee_topic_2 --> tutor_topic_5 --> tutee_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutee_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutee_topic_4 --> tutor_topic_0 --> tutee_topic_4 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutee_topic_1 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_2 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_3 --> tutor_topic_0 --> tutee_topic_4 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_4 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_5 --> tutee_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_0 --> tutee_topic_2 --> tutor_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_3 --> tutee_topic_1 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_4 --> tutee_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_5 --> tutee_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_6 --> tutor_topic_5 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_2 --> tutor_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_0 --> tutor_topic_0 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_5 --> tutee_topic_4 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_2 --> tutee_topic_1 --> tutee_topic_1 --> tutor_topic_3 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_2 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1 --> tutee_topic_1
+
+Training:  45%|████▍     | 899/2000 [03:13<01:18, 14.05it/s][Episode  900]
+  Mean reward (last 100):           3.7087
+  Mean steps per episode:          83.7
   Mean learner mastery:            0.950
   Topic choice frequencies:
-    - Topic 0:  34.1% of high-level choices
-    - Topic 1:  11.1% of high-level choices
-    - Topic 2:  13.1% of high-level choices
-    - Topic 3:  11.5% of high-level choices
+    - Topic 0:  15.5% of high-level choices
+    - Topic 1:  12.8% of high-level choices
+    - Topic 2:  15.3% of high-level choices
+    - Topic 3:  10.6% of high-level choices
+    - Topic 4:  11.7% of high-level choices
+    - Topic 5:  16.4% of high-level choices
+    - Topic 6:  17.8% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  21.9% of tutor actions
+    - hint                :   5.3% of tutor actions
+    - worked_example      :  17.8% of tutor actions
+    - remediation         :   9.5% of tutor actions
+    - review              :  45.5% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :  14.1% of tutee actions
+    - ask_worked_example  :  15.1% of tutee actions
+    - ask_summary         :  64.2% of tutee actions
+    - show_mistake_and_ask_fix:   6.6% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  76.9% of high-level decisions
+    - tutee:  23.1% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_4 --> tutee_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_4 --> tutee_topic_3 --> tutor_topic_2 --> tutee_topic_3 --> tutor_topic_3 --> tutee_topic_0 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_0 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutee_topic_3 --> tutor_topic_1 --> tutee_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_5 --> tutor_topic_2 --> tutee_topic_4 --> tutor_topic_6 --> tutee_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutee_topic_4 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutee_topic_2 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6
+
+Training:  50%|████▉     | 999/2000 [03:22<01:23, 11.95it/s][Episode 1000]
+  Mean reward (last 100):           3.7110
+  Mean steps per episode:          72.7
+  Mean learner mastery:            0.950
+  Topic choice frequencies:
+    - Topic 0:  22.5% of high-level choices
+    - Topic 1:  10.2% of high-level choices
+    - Topic 2:  14.1% of high-level choices
+    - Topic 3:  16.9% of high-level choices
+    - Topic 4:   9.8% of high-level choices
+    - Topic 5:   8.1% of high-level choices
+    - Topic 6:  18.4% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  20.6% of tutor actions
+    - hint                :   5.2% of tutor actions
+    - worked_example      :  27.4% of tutor actions
+    - remediation         :   6.4% of tutor actions
+    - review              :  40.5% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :  11.9% of tutee actions
+    - ask_worked_example  :  23.3% of tutee actions
+    - ask_summary         :  44.4% of tutee actions
+    - show_mistake_and_ask_fix:  20.4% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  74.3% of high-level decisions
+    - tutee:  25.7% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutee_topic_4 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutee_topic_3 --> tutor_topic_3
+
+Training:  55%|█████▍    | 1099/2000 [03:31<01:13, 12.22it/s][Episode 1100]
+  Mean reward (last 100):           4.0380
+  Mean steps per episode:          57.7
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  19.0% of high-level choices
+    - Topic 1:  13.5% of high-level choices
+    - Topic 2:  18.6% of high-level choices
+    - Topic 3:  14.2% of high-level choices
     - Topic 4:   9.1% of high-level choices
-    - Topic 5:  13.9% of high-level choices
-    - Topic 6:   7.2% of high-level choices
+    - Topic 5:  13.2% of high-level choices
+    - Topic 6:  12.3% of high-level choices
   Tutor action frequencies:
-    - quiz                :  16.3% of tutor actions
-    - hint                :  16.0% of tutor actions
-    - worked_example      :  12.4% of tutor actions
-    - remediation         :  29.2% of tutor actions
-    - review              :  26.1% of tutor actions
+    - quiz                :  22.0% of tutor actions
+    - hint                :   9.7% of tutor actions
+    - worked_example      :  19.6% of tutor actions
+    - remediation         :  13.3% of tutor actions
+    - review              :  35.4% of tutor actions
   Tutee action frequencies:
-    - ask_explanation     :  15.3% of tutee actions
-    - ask_worked_example  :  37.4% of tutee actions
-    - ask_summary         :  14.1% of tutee actions
-    - show_mistake_and_ask_fix:  33.2% of tutee actions
+    - ask_explanation     :  12.8% of tutee actions
+    - ask_worked_example  :  33.1% of tutee actions
+    - ask_summary         :  48.8% of tutee actions
+    - show_mistake_and_ask_fix:   5.3% of tutee actions
   High-level mode frequencies (last 100 episodes):
-    - tutor:  58.9% of high-level decisions
-    - tutee:  41.1% of high-level decisions
+    - tutor:  86.2% of high-level decisions
+    - tutee:  13.8% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_1 --> tutee_topic_2 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutee_topic_0 --> tutor_topic_4 --> tutee_topic_0 --> tutor_topic_6 --> tutor_topic_3 --> tutee_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutee_topic_0
+    --> tutee_topic_4 --> tutor_topic_3 --> tutor_topic_2 --> tutee_topic_0 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_1
 
-Training: 100%|██████████| 2000/2000 [03:56<00:00,  8.45it/s]
-[Episode 2000]
-  Mean reward (last 100):           3.8258
-  Mean steps per episode:          69.2
+Training:  60%|██████    | 1200/2000 [03:38<01:02, 12.86it/s][Episode 1200]
+  Mean reward (last 100):           3.9648
+  Mean steps per episode:          55.0
   Mean learner mastery:            0.950
   Topic choice frequencies:
-    - Topic 0:  30.4% of high-level choices
-    - Topic 1:  19.3% of high-level choices
-    - Topic 2:  11.4% of high-level choices
-    - Topic 3:  10.1% of high-level choices
-    - Topic 4:  12.9% of high-level choices
-    - Topic 5:   5.7% of high-level choices
+    - Topic 0:  19.8% of high-level choices
+    - Topic 1:  13.7% of high-level choices
+    - Topic 2:  15.7% of high-level choices
+    - Topic 3:  22.8% of high-level choices
+    - Topic 4:   8.4% of high-level choices
+    - Topic 5:  10.4% of high-level choices
+    - Topic 6:   9.1% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  27.8% of tutor actions
+    - hint                :   4.3% of tutor actions
+    - worked_example      :  20.1% of tutor actions
+    - remediation         :  14.8% of tutor actions
+    - review              :  33.0% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :  21.1% of tutee actions
+    - ask_worked_example  :  32.1% of tutee actions
+    - ask_summary         :  41.6% of tutee actions
+    - show_mistake_and_ask_fix:   5.2% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  83.5% of high-level decisions
+    - tutee:  16.5% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_0 --> tutee_topic_1 --> tutor_topic_0 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_0 --> tutee_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutee_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_0 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5
+
+Training:  65%|██████▍   | 1298/2000 [03:45<00:38, 18.42it/s][Episode 1300]
+  Mean reward (last 100):           3.9436
+  Mean steps per episode:          46.0
+  Mean learner mastery:            0.950
+  Topic choice frequencies:
+    - Topic 0:  18.0% of high-level choices
+    - Topic 1:  19.2% of high-level choices
+    - Topic 2:  15.1% of high-level choices
+    - Topic 3:  14.8% of high-level choices
+    - Topic 4:   9.5% of high-level choices
+    - Topic 5:  13.2% of high-level choices
     - Topic 6:  10.2% of high-level choices
   Tutor action frequencies:
-    - quiz                :  19.4% of tutor actions
-    - hint                :  13.2% of tutor actions
-    - worked_example      :  18.6% of tutor actions
-    - remediation         :  13.9% of tutor actions
-    - review              :  35.0% of tutor actions
+    - quiz                :  24.7% of tutor actions
+    - hint                :   6.7% of tutor actions
+    - worked_example      :  14.9% of tutor actions
+    - remediation         :  12.5% of tutor actions
+    - review              :  41.1% of tutor actions
   Tutee action frequencies:
-    - ask_explanation     :   8.7% of tutee actions
-    - ask_worked_example  :  41.1% of tutee actions
-    - ask_summary         :  24.5% of tutee actions
-    - show_mistake_and_ask_fix:  25.7% of tutee actions
+    - ask_explanation     :   8.4% of tutee actions
+    - ask_worked_example  :   6.7% of tutee actions
+    - ask_summary         :  77.3% of tutee actions
+    - show_mistake_and_ask_fix:   7.6% of tutee actions
   High-level mode frequencies (last 100 episodes):
-    - tutor:  67.8% of high-level decisions
-    - tutee:  32.2% of high-level decisions
+    - tutor:  88.6% of high-level decisions
+    - tutee:  11.4% of high-level decisions
   High-level decision sequence (last episode):
-    --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_2 --> tutee_topic_0 --> tutor_topic_6 --> tutor_topic_3 --> tutee_topic_0 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_3 --> tutee_topic_1 --> tutor_topic_5 --> tutor_topic_2 --> tutee_topic_0
+    --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_1 --> tutee_topic_6 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_2 --> tutee_topic_4 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutee_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_4
+
+Training:  70%|██████▉   | 1398/2000 [03:51<00:30, 19.65it/s][Episode 1400]
+  Mean reward (last 100):           3.9440
+  Mean steps per episode:          39.2
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  12.4% of high-level choices
+    - Topic 1:  19.5% of high-level choices
+    - Topic 2:  12.4% of high-level choices
+    - Topic 3:  11.7% of high-level choices
+    - Topic 4:  20.0% of high-level choices
+    - Topic 5:  13.0% of high-level choices
+    - Topic 6:  11.1% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  26.1% of tutor actions
+    - hint                :   3.9% of tutor actions
+    - worked_example      :  13.2% of tutor actions
+    - remediation         :   4.1% of tutor actions
+    - review              :  52.6% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :   1.6% of tutee actions
+    - ask_worked_example  :   2.8% of tutee actions
+    - ask_summary         :  93.1% of tutee actions
+    - show_mistake_and_ask_fix:   2.5% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  91.9% of high-level decisions
+    - tutee:   8.1% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_1 --> tutor_topic_4 --> tutee_topic_4 --> tutor_topic_5 --> tutee_topic_5 --> tutee_topic_4 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_3
+
+Training:  75%|███████▍  | 1498/2000 [03:57<00:37, 13.31it/s][Episode 1500]
+  Mean reward (last 100):           3.9279
+  Mean steps per episode:          37.7
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  10.2% of high-level choices
+    - Topic 1:  20.9% of high-level choices
+    - Topic 2:  15.9% of high-level choices
+    - Topic 3:  17.4% of high-level choices
+    - Topic 4:  13.2% of high-level choices
+    - Topic 5:  12.0% of high-level choices
+    - Topic 6:  10.4% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  19.4% of tutor actions
+    - hint                :  12.9% of tutor actions
+    - worked_example      :  13.7% of tutor actions
+    - remediation         :   9.6% of tutor actions
+    - review              :  44.5% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :   1.5% of tutee actions
+    - ask_worked_example  :   1.8% of tutee actions
+    - ask_summary         :  94.9% of tutee actions
+    - show_mistake_and_ask_fix:   1.8% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  89.7% of high-level decisions
+    - tutee:  10.3% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_3 --> tutee_topic_4 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_5 --> tutee_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_1
+
+Training:  80%|███████▉  | 1598/2000 [04:03<00:18, 21.38it/s][Episode 1600]
+  Mean reward (last 100):           3.8428
+  Mean steps per episode:          41.5
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  12.5% of high-level choices
+    - Topic 1:  13.9% of high-level choices
+    - Topic 2:  11.1% of high-level choices
+    - Topic 3:  18.6% of high-level choices
+    - Topic 4:   8.8% of high-level choices
+    - Topic 5:  10.5% of high-level choices
+    - Topic 6:  24.7% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  18.9% of tutor actions
+    - hint                :  14.6% of tutor actions
+    - worked_example      :  16.1% of tutor actions
+    - remediation         :  15.7% of tutor actions
+    - review              :  34.8% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :   1.6% of tutee actions
+    - ask_worked_example  :   4.5% of tutee actions
+    - ask_summary         :  92.3% of tutee actions
+    - show_mistake_and_ask_fix:   1.6% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  94.1% of high-level decisions
+    - tutee:   5.9% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_6
+
+Training:  85%|████████▍ | 1698/2000 [04:08<00:16, 17.81it/s][Episode 1700]
+  Mean reward (last 100):           3.8800
+  Mean steps per episode:          32.2
+  Mean learner mastery:            0.950
+  Topic choice frequencies:
+    - Topic 0:  10.4% of high-level choices
+    - Topic 1:  17.5% of high-level choices
+    - Topic 2:  10.6% of high-level choices
+    - Topic 3:  17.8% of high-level choices
+    - Topic 4:  11.4% of high-level choices
+    - Topic 5:  19.3% of high-level choices
+    - Topic 6:  13.0% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  19.5% of tutor actions
+    - hint                :   4.2% of tutor actions
+    - worked_example      :  23.6% of tutor actions
+    - remediation         :   9.8% of tutor actions
+    - review              :  42.8% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :   4.3% of tutee actions
+    - ask_worked_example  :  42.0% of tutee actions
+    - ask_summary         :  48.6% of tutee actions
+    - show_mistake_and_ask_fix:   5.1% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  95.7% of high-level decisions
+    - tutee:   4.3% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_6 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_2 --> tutee_topic_1 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_3 --> tutee_topic_0 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_6
+
+Training:  90%|█████████ | 1800/2000 [04:13<00:08, 23.60it/s][Episode 1800]
+  Mean reward (last 100):           3.8822
+  Mean steps per episode:          27.8
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  15.2% of high-level choices
+    - Topic 1:  13.8% of high-level choices
+    - Topic 2:  12.5% of high-level choices
+    - Topic 3:  13.0% of high-level choices
+    - Topic 4:  11.8% of high-level choices
+    - Topic 5:  15.7% of high-level choices
+    - Topic 6:  18.0% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  22.7% of tutor actions
+    - hint                :  10.1% of tutor actions
+    - worked_example      :  16.7% of tutor actions
+    - remediation         :   2.0% of tutor actions
+    - review              :  48.6% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :   2.4% of tutee actions
+    - ask_worked_example  :  19.3% of tutee actions
+    - ask_summary         :  75.9% of tutee actions
+    - show_mistake_and_ask_fix:   2.4% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  97.0% of high-level decisions
+    - tutee:   3.0% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutor_topic_1 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_2 --> tutor_topic_4 --> tutor_topic_1 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3
+
+Training:  95%|█████████▌| 1900/2000 [04:23<00:06, 15.09it/s][Episode 1900]
+  Mean reward (last 100):           3.7543
+  Mean steps per episode:          62.3
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:   9.6% of high-level choices
+    - Topic 1:   8.8% of high-level choices
+    - Topic 2:   7.7% of high-level choices
+    - Topic 3:  43.8% of high-level choices
+    - Topic 4:   6.2% of high-level choices
+    - Topic 5:  12.0% of high-level choices
+    - Topic 6:  12.0% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  16.5% of tutor actions
+    - hint                :   6.1% of tutor actions
+    - worked_example      :  30.9% of tutor actions
+    - remediation         :   9.0% of tutor actions
+    - review              :  37.6% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :  14.7% of tutee actions
+    - ask_worked_example  :  12.6% of tutee actions
+    - ask_summary         :  71.1% of tutee actions
+    - show_mistake_and_ask_fix:   1.7% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  88.5% of high-level decisions
+    - tutee:  11.5% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutee_topic_0 --> tutee_topic_0 --> tutor_topic_1 --> tutor_topic_0 --> tutee_topic_6 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_4 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_2
+
+Training: 100%|██████████| 2000/2000 [04:30<00:00,  7.40it/s]
+[Episode 2000]
+  Mean reward (last 100):           3.8414
+  Mean steps per episode:          42.8
+  Mean learner mastery:            0.951
+  Topic choice frequencies:
+    - Topic 0:  14.1% of high-level choices
+    - Topic 1:  10.5% of high-level choices
+    - Topic 2:  10.4% of high-level choices
+    - Topic 3:  30.7% of high-level choices
+    - Topic 4:   7.3% of high-level choices
+    - Topic 5:  16.8% of high-level choices
+    - Topic 6:  10.2% of high-level choices
+  Tutor action frequencies:
+    - quiz                :  11.3% of tutor actions
+    - hint                :   8.7% of tutor actions
+    - worked_example      :  15.9% of tutor actions
+    - remediation         :  17.7% of tutor actions
+    - review              :  46.4% of tutor actions
+  Tutee action frequencies:
+    - ask_explanation     :  15.3% of tutee actions
+    - ask_worked_example  :  77.3% of tutee actions
+    - ask_summary         :   5.6% of tutee actions
+    - show_mistake_and_ask_fix:   1.8% of tutee actions
+  High-level mode frequencies (last 100 episodes):
+    - tutor:  85.8% of high-level decisions
+    - tutee:  14.2% of high-level decisions
+  High-level decision sequence (last episode):
+    --> tutee_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_0 --> tutor_topic_5 --> tutee_topic_5 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_6 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_3 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_5 --> tutor_topic_3 --> tutor_topic_1 --> tutor_topic_4 --> tutor_topic_6 --> tutor_topic_2 --> tutor_topic_2 --> tutor_topic_6 --> tutor_topic_3 --> tutor_topic_3 --> tutor_topic_2 --> tutor_topic_3 --> tutor_topic_4
 
 Training finished.
 

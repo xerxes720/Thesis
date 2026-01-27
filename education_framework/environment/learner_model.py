@@ -91,7 +91,7 @@ class LowLevelAction(IntEnum):
     """Unified action id space used by the simulator.
 
     0..4 are tutor-labelled actions (learned directly from KDD via schema rules).
-    5..7 are *tutee actions* (not present in KDD as interventions; calibrated via proxies).
+    5..7 are *tutee actions* (not present in KDD; simulated as a metacognitive intervention).
 
     Keeping |A|=8 preserves comparability with the paper's simulator size.
     """
@@ -316,6 +316,27 @@ class KDDLearnerConfig:
     mastery_threshold: float = 0.85
     opp_min: int = 3
 
+    # --- tutee (protégé / learning-by-teaching) simulation ---
+    # Conservative, bounded mastery bonus with explicit cost.
+    tutee_bonus_base: float = 0.015
+    tutee_bonus_mastery_low: float = 0.20
+    tutee_bonus_mastery_high: float = 0.80
+
+    # Per-action multipliers (quiz=retrieval, explain=self-explanation, fix=elaboration)
+    tutee_mult_quiz: float = 1.0
+    tutee_mult_explain: float = 0.9
+    tutee_mult_fix: float = 0.8
+
+    # Explicit effort cost in additional "step units" consumed by tutee actions.
+    tutee_step_cost_quiz: int = 1
+    tutee_step_cost_explain: int = 2
+    tutee_step_cost_fix: int = 2
+
+    # Duration multipliers (affects time_ema only; env also consumes step units via step_cost)
+    tutee_duration_mult_quiz: float = 1.10
+    tutee_duration_mult_explain: float = 1.25
+    tutee_duration_mult_fix: float = 1.20
+
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02
     completion_reward: float = 3.0
@@ -457,19 +478,6 @@ class KDDLearnerModel:
         y = float(m.predict(x.reshape(1, -1))[0])
         return max(0.0, float(y))
 
-    def _outcome_proxy_action(self, a: LowLevelAction) -> LowLevelAction:
-        """Map tutee actions to the closest tutor action for outcome prediction.
-
-        Rationale: response/aux models are trained on tutor-labelled KDD actions (0..4).
-        """
-        if a == LowLevelAction.TUTEE_QUIZ:
-            return LowLevelAction.TUTOR_QUIZ
-        if a == LowLevelAction.TUTEE_EXPLAIN:
-            return LowLevelAction.TUTOR_HINT
-        if a == LowLevelAction.TUTEE_FIX:
-            return LowLevelAction.TUTOR_REMEDIATION
-        return a
-
     def _apply_mastery_quality_update(self, topic_id: int, quality: str) -> None:
         s = self.state
         m = float(s.mastery[topic_id])
@@ -497,7 +505,46 @@ class KDDLearnerModel:
 
         s.mastery[topic_id] = _clip01(m2)
 
-    def _apply_observation_updates(self, topic_id: int, *, cfa: int, hints: int, incorrects: int, duration: float) -> None:
+    def _tutee_mastery_bonus(self, mastery: float, a: LowLevelAction) -> float:
+        """Conservative, bounded bonus for learning-by-teaching / self-explanation / retrieval.
+
+        This is intentionally *not* learned from KDD (KDD has no explicit tutee interactions).
+        """
+        cfg = self.cfg
+        if mastery < float(cfg.tutee_bonus_mastery_low) or mastery > float(cfg.tutee_bonus_mastery_high):
+            return 0.0
+
+        if a == LowLevelAction.TUTEE_QUIZ:
+            mult = float(cfg.tutee_mult_quiz)
+        elif a == LowLevelAction.TUTEE_EXPLAIN:
+            mult = float(cfg.tutee_mult_explain)
+        elif a == LowLevelAction.TUTEE_FIX:
+            mult = float(cfg.tutee_mult_fix)
+        else:
+            mult = 0.0
+
+        base = float(cfg.tutee_bonus_base)
+        return max(0.0, base * mult * (1.0 - float(mastery)))
+
+    def _apply_tutee_bonus(self, topic_id: int, a: LowLevelAction) -> float:
+        """Apply tutee bonus and return the applied delta."""
+        s = self.state
+        m = float(s.mastery[topic_id])
+        b = self._tutee_mastery_bonus(m, a)
+        if b > 0.0:
+            s.mastery[topic_id] = _clip01(m + b)
+        return float(b)
+
+    def _apply_observation_updates(
+        self,
+        topic_id: int,
+        *,
+        cfa: int,
+        hints: int,
+        incorrects: int,
+        duration: float,
+        step_cost: int = 1,
+    ) -> None:
         if self.bundle is None:
             alpha = 0.2
         else:
@@ -505,7 +552,7 @@ class KDDLearnerModel:
 
         s = self.state
         s.opp[topic_id] += 1
-        s.total_steps += 1
+        s.total_steps += int(max(1, step_cost))
 
         s.cfa_ema[topic_id] = _clip01((1.0 - alpha) * float(s.cfa_ema[topic_id]) + alpha * float(cfa))
         s.hint_ema[topic_id] = _clip01((1.0 - alpha) * float(s.hint_ema[topic_id]) + alpha * (float(hints) / max(self.cfg.hints_norm, 1e-6)))
@@ -584,37 +631,6 @@ class KDDLearnerModel:
             x_state = self._state_features(s, topic_id)
             leaf_id = qbank.apply_leaf(topic_id, x_state)
 
-        # For outcome prediction, use a tutor-action proxy for tutee actions.
-        # proxy_action = self._outcome_proxy_action(action_meta.action)
-        # proxy_meta = ActionMeta(action=proxy_action, is_tutee=action_meta.is_tutee, force_generation=action_meta.force_generation)
-        #
-        # x_base = self._build_features(
-        #     s=s,
-        #     topic_id=topic_id,
-        #     action_meta=proxy_meta,
-        #     generation_mode=0,
-        #     include_outcome=False,
-        # )
-
-        # 1) Sample CFA
-        # resp_model = self.bundle.response_models.get(topic_id)
-        # p_correct = float(s.mastery[topic_id]) if resp_model is None else self._predict_proba_1(resp_model, x_base)
-        # cfa = 1 if self.rng.random() < p_correct else 0
-        #
-        # # 2) Sample auxiliary outcomes
-        # hints = self._predict_aux_int(topic_id, x_base, self.bundle.hints_models, default=0)
-        # incorrects = self._predict_aux_int(topic_id, x_base, self.bundle.inc_models, default=(0 if cfa == 1 else 1))
-        # duration = self._predict_aux_float(topic_id, x_base, self.bundle.time_models, default=self.bundle.schema.dur_q50)
-        #
-        # # Simple tutee outcome shaping (kept minimal; avoids destabilizing the simulator)
-        # if action_meta.action == LowLevelAction.TUTEE_QUIZ:
-        #     hints = min(hints, int(self.bundle.schema.hints_q50))
-        # elif action_meta.action == LowLevelAction.TUTEE_EXPLAIN:
-        #     hints = min(hints, int(self.bundle.schema.hints_q50))
-        #     duration = max(duration, float(self.bundle.schema.dur_q75))
-        # elif action_meta.action == LowLevelAction.TUTEE_FIX:
-        #     duration = max(duration, float(self.bundle.schema.dur_q50))
-
         # -------- (A) OUTCOMES --------
         if (not is_tutee):
             # Tutor actions: unchanged behavior
@@ -635,54 +651,37 @@ class KDDLearnerModel:
             duration = self._predict_aux_float(topic_id, x_base, self.bundle.time_models,
                                                default=self.bundle.schema.dur_q50)
 
+            step_cost = 1
+
         else:
-            # Tutee actions: NEW behavior (leaf -> topic -> fallback to tutor-proxy models)
-            stats = None
+            # Tutee actions: simulated metacognitive intervention.
+            # IMPORTANT: we do NOT derive tutee outcomes from KDD (no direct tutee signals)
+            # and we do NOT proxy tutee -> tutor for outcome prediction.
+            m = float(s.mastery[topic_id])
 
-            # 1) leaf-level stats
-            if self.bundle.tutee_outcome_leaf is not None:
-                stats = (
-                    self.bundle.tutee_outcome_leaf
-                    .get(int(topic_id), {})
-                    .get(int(leaf_id), {})
-                    .get(int(action_meta.action))
-                )
+            # Conservative correctness model: no intrinsic boost; the learning gain comes
+            # from the tutee mastery bonus below (not from "more correct" outcomes).
+            p_correct = _clip01(m)
+            cfa = 1 if self.rng.random() < p_correct else 0
 
-            # 2) topic-level stats
-            if stats is None and self.bundle.tutee_outcome_topic is not None:
-                stats = (
-                    self.bundle.tutee_outcome_topic
-                    .get(int(topic_id), {})
-                    .get(int(action_meta.action))
-                )
+            # Keep observational outcomes simple and stable.
+            hints = 0
+            incorrects = 0 if cfa == 1 else 1
 
-            if stats is not None:
-                cfa, hints, incorrects, duration = self._sample_tutee_outcomes_from_stats(stats)
-                p_correct = float(stats.get("p_correct", float(s.mastery[topic_id])))
+            base_dur = float(self.bundle.schema.dur_q50)
+            if action_meta.action == LowLevelAction.TUTEE_EXPLAIN:
+                duration = base_dur * float(self.cfg.tutee_duration_mult_explain)
+                step_cost = int(self.cfg.tutee_step_cost_explain)
+            elif action_meta.action == LowLevelAction.TUTEE_FIX:
+                duration = base_dur * float(self.cfg.tutee_duration_mult_fix)
+                step_cost = int(self.cfg.tutee_step_cost_fix)
             else:
-                # 3) fallback: OLD behavior (tutee->tutor proxy outcome prediction)
-                proxy_action = self._outcome_proxy_action(action_meta.action)
-                proxy_meta = ActionMeta(action=proxy_action, is_tutee=action_meta.is_tutee,
-                                        force_generation=action_meta.force_generation)
+                duration = base_dur * float(self.cfg.tutee_duration_mult_quiz)
+                step_cost = int(self.cfg.tutee_step_cost_quiz)
 
-                x_base = self._build_features(
-                    s=s,
-                    topic_id=topic_id,
-                    action_meta=proxy_meta,
-                    generation_mode=0,
-                    include_outcome=False,
-                )
-
-                resp_model = self.bundle.response_models.get(topic_id)
-                p_correct = float(s.mastery[topic_id]) if resp_model is None else self._predict_proba_1(resp_model,
-                                                                                                        x_base)
-                cfa = 1 if self.rng.random() < p_correct else 0
-
-                hints = self._predict_aux_int(topic_id, x_base, self.bundle.hints_models, default=0)
-                incorrects = self._predict_aux_int(topic_id, x_base, self.bundle.inc_models,
-                                                   default=(0 if cfa == 1 else 1))
-                duration = self._predict_aux_float(topic_id, x_base, self.bundle.time_models,
-                                                   default=self.bundle.schema.dur_q50)
+            # Small noise on duration to avoid degenerate constant signals.
+            if duration > 1e-6:
+                duration = max(0.0, float(self.np_rng.normal(duration, 0.05 * duration)))
 
         # 3) generation_mode (optional feature; not required by quality update)
         generation_mode = 1 if (action_meta.force_generation or action_meta.action == LowLevelAction.TUTEE_EXPLAIN) else 0
@@ -694,14 +693,34 @@ class KDDLearnerModel:
             leaf_id = -1
         else:
             x_state = self._state_features(s, topic_id)
-            quality = qbank.predict_quality(topic_id=topic_id, action_id=int(action_meta.action), x_state=x_state)
             leaf_id = qbank.apply_leaf(topic_id, x_state)
+            # For tutee actions, do not use the quality bank (which was learned from tutor-labelled KDD).
+            quality = "neutral" if is_tutee else qbank.predict_quality(
+                topic_id=topic_id,
+                action_id=int(action_meta.action),
+                x_state=x_state,
+            )
 
         v_prev = self._paper_vars(self.state)
-        self._apply_mastery_quality_update(topic_id, quality)
+
+        tutee_bonus = 0.0
+        if is_tutee:
+            # Neutral quality update (no penalty/reward from tutor-derived leaf qualities)
+            self._apply_mastery_quality_update(topic_id, "neutral")
+            # Mechanistic bounded bonus
+            tutee_bonus = self._apply_tutee_bonus(topic_id, action_meta.action)
+        else:
+            self._apply_mastery_quality_update(topic_id, quality)
 
         # 5) Observational updates (EMAs, opp, steps)
-        self._apply_observation_updates(topic_id, cfa=cfa, hints=hints, incorrects=incorrects, duration=duration)
+        self._apply_observation_updates(
+            topic_id,
+            cfa=cfa,
+            hints=hints,
+            incorrects=incorrects,
+            duration=duration,
+            step_cost=step_cost,
+        )
 
         # 6) Reward shaping (optional)
         done = self.is_done()
@@ -721,9 +740,11 @@ class KDDLearnerModel:
             "hints": hints,
             "incorrects": incorrects,
             "duration": duration,
+            "step_cost": int(step_cost),
             "generation_mode": generation_mode,
             "quality": quality,
             "leaf": leaf_id,
+            "tutee_bonus": float(tutee_bonus),
             "reward": reward,
             "done": done,
         }
