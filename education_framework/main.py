@@ -319,7 +319,7 @@ def main():
     ap.add_argument("--bundle", type=str, default="education_framework/data/kdd_bundle.joblib")
     ap.add_argument("--episodes", type=int, default=2000)
     ap.add_argument("--log_window", type=int, default=100)
-    ap.add_argument("--use_tutee", action="store_true", default=False)
+    ap.add_argument("--use_tutee", action="store_true", default=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max_steps", type=int, default=300)
     args = ap.parse_args()

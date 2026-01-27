@@ -1,3 +1,4 @@
+from __future__ import annotations
 # education_framework/scripts/build_decision_tree.py
 """build_decision_tree.py
 
@@ -15,7 +16,13 @@ This replaces the earlier "transition regressor" with an interpretable leaf-qual
 which is easier to explain and avoids EMA double-counting.
 """
 
-from __future__ import annotations
+"""
+Run with: 
+python -m education_framework.scripts.build_decision_tree --csv education_framework/data/algebra_2005_2006_train.txt --out education_framework/data/kdd_bundle.joblib --n_topics 7 --max_depth 7 --min_leaf 50 --ema_alpha 0.2 --seed 0 
+
+"""
+
+
 
 import argparse
 import json
@@ -148,22 +155,113 @@ class TrainConfig:
     # quality tree constraints
     min_leaf_action_count: int = 25
 
+    # quality labeling: treat small deltas as neutral to avoid sign/semantic mismatch
+    quality_eps: float = 0.003  # mastery-delta noise floor for leaf-wise action scoring
 
-def _rank_to_quality(action_ids: List[int], scores: List[float]) -> Dict[int, str]:
-    """Map 8 actions to 5 categories by rank: 1/2/2/2/1 buckets."""
-    pairs = sorted(zip(action_ids, scores), key=lambda x: x[1])  # ascending
-    # worst..best
-    buckets = {
-        "very_bad": [pairs[0][0]],
-        "bad": [pairs[1][0], pairs[2][0]],
-        "neutral": [pairs[3][0], pairs[4][0]],
-        "good": [pairs[5][0], pairs[6][0]],
-        "very_good": [pairs[7][0]],
-    }
-    out: Dict[int, str] = {}
-    for q, ids in buckets.items():
-        for a in ids:
-            out[int(a)] = q
+    # --- tutee readiness thresholds (tiered) ---
+    # Interpreted as "minimum mastery_pre in this topic to count a KDD row as a proxy for teaching."
+    tutee_ready_quiz: float = 0.50     # retrieval / prepare-to-teach
+    tutee_ready_explain: float = 0.70  # teach-back / self-explanation
+    tutee_ready_fix: float = 0.80      # diagnose & correct
+
+# def _rank_to_quality(action_ids: List[int], scores: List[float]) -> Dict[int, str]:
+#     """Map 8 actions to 5 categories by rank: 1/2/2/2/1 buckets."""
+#     pairs = sorted(zip(action_ids, scores), key=lambda x: x[1])  # ascending
+#     # worst..best
+#     buckets = {
+#         "very_bad": [pairs[0][0]],
+#         "bad": [pairs[1][0], pairs[2][0]],
+#         "neutral": [pairs[3][0], pairs[4][0]],
+#         "good": [pairs[5][0], pairs[6][0]],
+#         "very_good": [pairs[7][0]],
+#     }
+#     out: Dict[int, str] = {}
+#     for q, ids in buckets.items():
+#         for a in ids:
+#             out[int(a)] = q
+#     return out
+
+def _rank_to_quality(action_ids: List[int], scores: List[float], eps: float = 0.003) -> Dict[int, str]:
+    """Map actions to {very_good, good, neutral, bad, very_bad} using a magnitude-aware hybrid rule.
+
+    Rationale:
+      - Avoid labeling empirically positive actions as 'bad/very_bad', because downstream transitions
+        treat bad/very_bad as mastery decay.
+      - Preserve the policy-shaping benefit of relative ranking by ranking within the positive set
+        (and within the negative set), while assigning near-zero effects to 'neutral'.
+
+    Rule (per leaf):
+      - If score >  +eps  => positive set  (eligible for good/very_good)
+      - If score <  -eps  => negative set  (eligible for bad/very_bad)
+      - Otherwise         => neutral
+
+    Within sets:
+      - positive: best -> very_good (if ≥2 positives), remaining -> good
+      - negative: worst -> very_bad (if ≥2 negatives), remaining -> bad
+
+    Notes:
+      - This may yield fewer than 5 labels in a given leaf (e.g., no negatives).
+      - All actions always receive a label.
+    """
+    if len(action_ids) != len(scores):
+        raise ValueError(f"action_ids and scores must have same length, got {len(action_ids)} and {len(scores)}")
+
+    out: Dict[int, str] = {int(a): "neutral" for a in action_ids}
+
+    pos = [(int(a), float(s)) for a, s in zip(action_ids, scores) if s > eps]
+    neg = [(int(a), float(s)) for a, s in zip(action_ids, scores) if s < -eps]
+
+    if pos:
+        pos_sorted = sorted(pos, key=lambda x: x[1])  # ascending; last is best
+        best_a = pos_sorted[-1][0]
+        out[best_a] = "very_good" if len(pos_sorted) >= 2 else "good"
+        for a, _ in pos_sorted[:-1]:
+            out[a] = "good"
+
+    if neg:
+        neg_sorted = sorted(neg, key=lambda x: x[1])  # ascending; first is worst (most negative)
+        worst_a = neg_sorted[0][0]
+        out[worst_a] = "very_bad" if len(neg_sorted) >= 2 else "bad"
+        for a, _ in neg_sorted[1:]:
+            out[a] = "bad"
+
+    return out
+
+def _rank_to_quality_small(action_ids, scores: dict, eps: float = 1e-6):
+    """
+    Rank a small action set (e.g., 3 tutee actions) into quality labels.
+    Rule:
+      - default neutral
+      - positives (>eps): best -> very_good, others -> good
+      - negatives (<-eps): worst -> very_bad, others -> bad
+    This mirrors the spirit of your full ranking, but works for n < 5.
+    """
+    out = {int(a): "neutral" for a in action_ids}
+
+    # collect (a, score)
+    items = [(int(a), float(scores[int(a)])) for a in action_ids]
+
+    pos = [(a, s) for a, s in items if s > eps]
+    neg = [(a, s) for a, s in items if s < -eps]
+
+    # positives: best is very_good, rest good
+    if pos:
+        pos.sort(key=lambda x: x[1])  # ascending
+        best_a, _ = pos[-1]
+        out[best_a] = "very_good"
+        for a, _ in pos[:-1]:
+            out[a] = "good"
+
+    # negatives: worst is very_bad, rest bad
+    if neg:
+        neg.sort(key=lambda x: x[1])  # ascending (most negative first)
+        worst_a, _ = neg[0]
+        out[worst_a] = "very_bad"
+        for a, _ in neg[1:]:
+            # don't overwrite a positive assignment if an action somehow appears in both sets (shouldn't)
+            if out[a] == "neutral":
+                out[a] = "bad"
+
     return out
 
 
@@ -242,6 +340,9 @@ def train_bundle_from_kdd_csv(
     hints_y: Dict[int, List[int]] = {k: [] for k in range(cfg.n_topics)}
     inc_y: Dict[int, List[int]] = {k: [] for k in range(cfg.n_topics)}
     dur_y: Dict[int, List[float]] = {k: [] for k in range(cfg.n_topics)}
+
+    tutee_outcome_topic: Dict[int, Dict[int, Dict[str, float]]] = {}
+    tutee_outcome_leaf: Dict[int, Dict[int, Dict[int, Dict[str, float]]]] = {}
 
     for tr in builder.iter_training_rows(
         rows_by_student,
@@ -335,27 +436,90 @@ def train_bundle_from_kdd_csv(
             if vals:
                 topic_action_mean[k][a] = float(np.mean(vals))
         # tutee proxies: compute topic-level proxy means
-        # proxy definitions (simple, dataset-tethered)
+        # NOTE: readiness conditioning added to prevent "tutee is great even at very low mastery".
+        def _ready_thr(kind: str) -> float:
+            if kind == "quiz":
+                return cfg.tutee_ready_quiz
+            if kind == "explain":
+                return cfg.tutee_ready_explain
+            return cfg.tutee_ready_fix  # "fix"
+
         for a_tutee, mask_name in [
             (int(LowLevelAction.TUTEE_QUIZ), "quiz"),
             (int(LowLevelAction.TUTEE_EXPLAIN), "explain"),
             (int(LowLevelAction.TUTEE_FIX), "fix"),
         ]:
+            thr = _ready_thr(mask_name)
             vals2: List[float] = []
-            for dm, cfa, hints, inc, dur in zip(delta_m[k], y_cfa[k], hints_y[k], inc_y[k], dur_y[k]):
+
+            # IMPORTANT: include mastery_pre in the zip
+            for dm, mp, cfa, hints, inc, dur in zip(
+                delta_m[k], mastery_pre[k], y_cfa[k], hints_y[k], inc_y[k], dur_y[k]
+            ):
+                if float(mp) < thr:
+                    continue  # not "ready to teach", do not treat this row as a tutee proxy
+
                 if mask_name == "quiz":
                     ok = (hints <= schema.hints_q50) and (inc <= schema.inc_q50) and (dur >= schema.dur_q25) and (dur <= schema.dur_q90)
                 elif mask_name == "explain":
                     ok = (hints <= schema.hints_q50) and (inc <= schema.inc_q50) and (dur >= schema.dur_q75)
                 else:
                     ok = (cfa == 0) or (inc > schema.inc_q50)
+
                 if ok:
-                    vals2.append(dm)
+                    vals2.append(float(dm))
+
             if vals2:
                 topic_action_mean[k][a_tutee] = float(np.mean(vals2))
 
+            if a_tutee not in topic_action_mean[k]:
+                topic_action_mean[k][a_tutee] = 0.0
+    def _stats_from_lists(cfas, hints, incs, durs) -> Dict[str, float]:
+        # means
+        p_correct = float(np.mean(cfas)) if cfas else 0.5
+        h_mu = float(np.mean(hints)) if hints else 0.0
+        i_mu = float(np.mean(incs)) if incs else 0.0
+        d_mu = float(np.mean(durs)) if durs else float(schema.dur_q50)
+
+        # stds (0 if too few)
+        h_sd = float(np.std(hints)) if len(hints) >= 2 else 0.0
+        i_sd = float(np.std(incs)) if len(incs) >= 2 else 0.0
+        d_sd = float(np.std(durs)) if len(durs) >= 2 else 0.0
+
+        return {
+            "p_correct": float(np.clip(p_correct, 0.0, 1.0)),
+            "hints_mean": h_mu, "hints_std": h_sd,
+            "inc_mean": i_mu, "inc_std": i_sd,
+            "dur_mean": d_mu, "dur_std": d_sd,
+        }
     # per-topic models
     for k in range(cfg.n_topics):
+        tutee_outcome_topic[k] = {}
+
+        for a_tutee, mask_name in [
+            (int(LowLevelAction.TUTEE_QUIZ), "quiz"),
+            (int(LowLevelAction.TUTEE_EXPLAIN), "explain"),
+            (int(LowLevelAction.TUTEE_FIX), "fix"),
+        ]:
+            cfas2, hints2, incs2, durs2 = [], [], [], []
+            for dm, cfa, hints, inc, dur in zip(delta_m[k], y_cfa[k], hints_y[k], inc_y[k], dur_y[k]):
+                if mask_name == "quiz":
+                    ok = (hints <= schema.hints_q50) and (inc <= schema.inc_q50) and (dur >= schema.dur_q25) and (
+                                dur <= schema.dur_q90)
+                elif mask_name == "explain":
+                    ok = (hints <= schema.hints_q50) and (inc <= schema.inc_q50) and (dur >= schema.dur_q75)
+                else:
+                    ok = (cfa == 0) or (inc > schema.inc_q50)
+
+                if ok:
+                    cfas2.append(int(cfa))
+                    hints2.append(int(hints))
+                    incs2.append(int(inc))
+                    durs2.append(float(dur))
+
+            if len(cfas2) >= cfg.min_leaf_action_count:  # reuse same threshold
+                tutee_outcome_topic[k][a_tutee] = _stats_from_lists(cfas2, hints2, incs2, durs2)
+
         Xs = np.asarray(X_state[k], dtype=np.float32)
         yk = np.asarray(y_cfa[k], dtype=np.int32)
         if Xs.shape[0] < max(500, cfg.min_samples_leaf * 8):
@@ -373,7 +537,11 @@ def train_bundle_from_kdd_csv(
         leaf_to_action_score: Dict[int, Dict[int, float]] = {}
         leaf_to_action_quality: Dict[int, Dict[int, str]] = {}
 
+        tutee_outcome_leaf[k] = {}
+
         for leaf, idxs in idx_by_leaf.items():
+            tutee_outcome_leaf[k].setdefault(int(leaf), {})
+
             # action scores for 0..4 (tutor-labelled)
             scores: Dict[int, float] = {}
             for a in range(5):
@@ -383,22 +551,38 @@ def train_bundle_from_kdd_csv(
 
             # tutee proxies in this leaf
             # NOTE: these are computed from *subsets* of KDD steps within the same leaf.
+            def _ready_thr(kind: str) -> float:
+                if kind == "quiz":
+                    return cfg.tutee_ready_quiz
+                if kind == "explain":
+                    return cfg.tutee_ready_explain
+                return cfg.tutee_ready_fix  # "fix"
+
             def _proxy_vals(kind: str) -> List[float]:
                 out: List[float] = []
+                thr = _ready_thr(kind)
+
                 for i in idxs:
-                    dm = delta_m[k][i]
-                    cfa = y_cfa[k][i]
-                    hints = hints_y[k][i]
-                    inc = inc_y[k][i]
-                    dur = dur_y[k][i]
+                    mp = float(mastery_pre[k][i])
+                    if mp < thr:
+                        continue  # not ready => do not count as tutee proxy evidence
+
+                    dm = float(delta_m[k][i])
+                    cfa = int(y_cfa[k][i])
+                    hints = int(hints_y[k][i])
+                    inc = int(inc_y[k][i])
+                    dur = float(dur_y[k][i])
+
                     if kind == "quiz":
                         ok = (hints <= schema.hints_q50) and (inc <= schema.inc_q50) and (dur >= schema.dur_q25) and (dur <= schema.dur_q90)
                     elif kind == "explain":
                         ok = (hints <= schema.hints_q50) and (inc <= schema.inc_q50) and (dur >= schema.dur_q75)
                     else:
                         ok = (cfa == 0) or (inc > schema.inc_q50)
+
                     if ok:
                         out.append(dm)
+
                 return out
 
             for a_tutee, kind in [
@@ -409,6 +593,10 @@ def train_bundle_from_kdd_csv(
                 vals = _proxy_vals(kind)
                 if len(vals) >= cfg.min_leaf_action_count:
                     scores[a_tutee] = float(np.mean(vals))
+                else:
+                    # Not enough "ready-to-teach" evidence in this leaf => treat tutee as neutral here.
+                    # This prevents fallback defaults from making tutee look "good" at low mastery.
+                    scores[a_tutee] = 0.0
 
             # fill missing actions with topic-level means (or 0)
             for a in range(8):
@@ -416,11 +604,58 @@ def train_bundle_from_kdd_csv(
                     continue
                 scores[a] = float(topic_action_mean.get(k, {}).get(a, 0.0))
 
+            # store scores for all actions (unchanged)
             action_ids = list(range(8))
-            sc_list = [scores[a] for a in action_ids]
-
             leaf_to_action_score[leaf] = {a: float(scores[a]) for a in action_ids}
-            leaf_to_action_quality[leaf] = _rank_to_quality(action_ids, sc_list)
+
+            # --- NEW: rank tutor and tutee separately so they don't distort each other ---
+            tutor_ids = [0, 1, 2, 3, 4]
+            tutee_ids = [5, 6, 7]
+
+            tutor_scores = [float(scores[a]) for a in tutor_ids]
+            tutee_scores = [float(scores[a]) for a in tutee_ids]
+
+            tutor_q = _rank_to_quality(tutor_ids, tutor_scores, cfg.quality_eps)
+            tutee_q = _rank_to_quality(tutee_ids, tutee_scores, cfg.quality_eps)
+
+            leaf_quality = {}
+            leaf_quality.update(tutor_q)
+            leaf_quality.update(tutee_q)
+
+            leaf_to_action_quality[leaf] = leaf_quality
+
+            def _proxy_outcomes(kind: str):
+                cfas2, hints2, incs2, durs2 = [], [], [], []
+                for i in idxs:
+                    cfa = y_cfa[k][i]
+                    hints = hints_y[k][i]
+                    inc = inc_y[k][i]
+                    dur = dur_y[k][i]
+
+                    if kind == "quiz":
+                        ok = (hints <= schema.hints_q50) and (inc <= schema.inc_q50) and (dur >= schema.dur_q25) and (
+                                    dur <= schema.dur_q90)
+                    elif kind == "explain":
+                        ok = (hints <= schema.hints_q50) and (inc <= schema.inc_q50) and (dur >= schema.dur_q75)
+                    else:
+                        ok = (cfa == 0) or (inc > schema.inc_q50)
+
+                    if ok:
+                        cfas2.append(int(cfa))
+                        hints2.append(int(hints))
+                        incs2.append(int(inc))
+                        durs2.append(float(dur))
+
+                return cfas2, hints2, incs2, durs2
+
+        for a_tutee, kind in [
+            (int(LowLevelAction.TUTEE_QUIZ), "quiz"),
+            (int(LowLevelAction.TUTEE_EXPLAIN), "explain"),
+            (int(LowLevelAction.TUTEE_FIX), "fix"),
+        ]:
+            cfas2, hints2, incs2, durs2 = _proxy_outcomes(kind)
+            if len(cfas2) >= cfg.min_leaf_action_count:
+                tutee_outcome_leaf[k][int(leaf)][a_tutee] = _stats_from_lists(cfas2, hints2, incs2, durs2)
 
         qbank.bank[k] = LeafQualityModel(
             tree=route,
@@ -500,6 +735,8 @@ def train_bundle_from_kdd_csv(
         quality_bank=qbank,
         one_hot_actions=True,
         ema_alpha=cfg.ema_alpha,
+        tutee_outcome_topic=tutee_outcome_topic,
+        tutee_outcome_leaf=tutee_outcome_leaf,
     )
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)

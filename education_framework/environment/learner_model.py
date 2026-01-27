@@ -297,6 +297,13 @@ class KDDModelBundle:
     one_hot_actions: bool = True
     ema_alpha: float = 0.2
 
+    # tutee outcomes estimated from proxy subsets
+    # topic_id -> action_id(5..7) -> stats dict
+    tutee_outcome_topic: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None
+
+    # topic_id -> leaf_id -> action_id(5..7) -> stats dict
+    tutee_outcome_leaf: Optional[Dict[int, Dict[int, Dict[int, Dict[str, float]]]]] = None
+
 
 # ----------------------------
 # Learner simulator
@@ -525,6 +532,40 @@ class KDDLearnerModel:
         #
         # return np.asarray([m, cfa, inv_hint, inv_inc, inv_time], dtype=np.float32)
 
+    def _sample_tutee_outcomes_from_stats(
+            self,
+            stats: Dict[str, float],
+    ) -> Tuple[int, int, int, float]:
+        """
+        Sample (cfa, hints, incorrects, duration) from precomputed stats.
+        Keeps sampling simple and stable.
+        """
+        # 1) CFA ~ Bernoulli(p)
+        p = _clip01(float(stats.get("p_correct", 0.5)))
+        cfa = 1 if self.rng.random() < p else 0
+
+        # 2) hints/inc ~ Normal(mean, std) then clamp+round to int >= 0
+        def _sample_nonneg_int(mu_key: str, sd_key: str) -> int:
+            mu = float(stats.get(mu_key, 0.0))
+            sd = float(stats.get(sd_key, 0.0))
+            if sd <= 1e-6:
+                return max(0, int(round(mu)))
+            x = float(self.np_rng.normal(mu, sd))
+            return max(0, int(round(x)))
+
+        hints = _sample_nonneg_int("hints_mean", "hints_std")
+        incorrects = _sample_nonneg_int("inc_mean", "inc_std")
+
+        # 3) duration ~ Normal(mean, std) then clamp >= 0
+        dmu = float(stats.get("dur_mean", 0.0))
+        dsd = float(stats.get("dur_std", 0.0))
+        if dsd <= 1e-6:
+            duration = max(0.0, dmu)
+        else:
+            duration = max(0.0, float(self.np_rng.normal(dmu, dsd)))
+
+        return cfa, hints, incorrects, duration
+
     def step(self, topic_id: int, action_meta: ActionMeta) -> Tuple[LearnerState, Dict[str, Any]]:
         if self.bundle is None:
             raise RuntimeError("KDDLearnerModel.bundle is None; provide a trained KDDModelBundle")
@@ -533,36 +574,115 @@ class KDDLearnerModel:
 
         s = self.state
 
-        # For outcome prediction, use a tutor-action proxy for tutee actions.
-        proxy_action = self._outcome_proxy_action(action_meta.action)
-        proxy_meta = ActionMeta(action=proxy_action, is_tutee=action_meta.is_tutee, force_generation=action_meta.force_generation)
+        is_tutee = int(action_meta.action) >= 5
 
-        x_base = self._build_features(
-            s=s,
-            topic_id=topic_id,
-            action_meta=proxy_meta,
-            generation_mode=0,
-            include_outcome=False,
-        )
+        # Pre-compute x_state / leaf for backoff (only if we have a bank)
+        leaf_id = -1
+        x_state = None
+        qbank = self.bundle.quality_bank
+        if qbank is not None:
+            x_state = self._state_features(s, topic_id)
+            leaf_id = qbank.apply_leaf(topic_id, x_state)
+
+        # For outcome prediction, use a tutor-action proxy for tutee actions.
+        # proxy_action = self._outcome_proxy_action(action_meta.action)
+        # proxy_meta = ActionMeta(action=proxy_action, is_tutee=action_meta.is_tutee, force_generation=action_meta.force_generation)
+        #
+        # x_base = self._build_features(
+        #     s=s,
+        #     topic_id=topic_id,
+        #     action_meta=proxy_meta,
+        #     generation_mode=0,
+        #     include_outcome=False,
+        # )
 
         # 1) Sample CFA
-        resp_model = self.bundle.response_models.get(topic_id)
-        p_correct = float(s.mastery[topic_id]) if resp_model is None else self._predict_proba_1(resp_model, x_base)
-        cfa = 1 if self.rng.random() < p_correct else 0
+        # resp_model = self.bundle.response_models.get(topic_id)
+        # p_correct = float(s.mastery[topic_id]) if resp_model is None else self._predict_proba_1(resp_model, x_base)
+        # cfa = 1 if self.rng.random() < p_correct else 0
+        #
+        # # 2) Sample auxiliary outcomes
+        # hints = self._predict_aux_int(topic_id, x_base, self.bundle.hints_models, default=0)
+        # incorrects = self._predict_aux_int(topic_id, x_base, self.bundle.inc_models, default=(0 if cfa == 1 else 1))
+        # duration = self._predict_aux_float(topic_id, x_base, self.bundle.time_models, default=self.bundle.schema.dur_q50)
+        #
+        # # Simple tutee outcome shaping (kept minimal; avoids destabilizing the simulator)
+        # if action_meta.action == LowLevelAction.TUTEE_QUIZ:
+        #     hints = min(hints, int(self.bundle.schema.hints_q50))
+        # elif action_meta.action == LowLevelAction.TUTEE_EXPLAIN:
+        #     hints = min(hints, int(self.bundle.schema.hints_q50))
+        #     duration = max(duration, float(self.bundle.schema.dur_q75))
+        # elif action_meta.action == LowLevelAction.TUTEE_FIX:
+        #     duration = max(duration, float(self.bundle.schema.dur_q50))
 
-        # 2) Sample auxiliary outcomes
-        hints = self._predict_aux_int(topic_id, x_base, self.bundle.hints_models, default=0)
-        incorrects = self._predict_aux_int(topic_id, x_base, self.bundle.inc_models, default=(0 if cfa == 1 else 1))
-        duration = self._predict_aux_float(topic_id, x_base, self.bundle.time_models, default=self.bundle.schema.dur_q50)
+        # -------- (A) OUTCOMES --------
+        if (not is_tutee):
+            # Tutor actions: unchanged behavior
+            x_base = self._build_features(
+                s=s,
+                topic_id=topic_id,
+                action_meta=action_meta,
+                generation_mode=0,
+                include_outcome=False,
+            )
 
-        # Simple tutee outcome shaping (kept minimal; avoids destabilizing the simulator)
-        if action_meta.action == LowLevelAction.TUTEE_QUIZ:
-            hints = min(hints, int(self.bundle.schema.hints_q50))
-        elif action_meta.action == LowLevelAction.TUTEE_EXPLAIN:
-            hints = min(hints, int(self.bundle.schema.hints_q50))
-            duration = max(duration, float(self.bundle.schema.dur_q75))
-        elif action_meta.action == LowLevelAction.TUTEE_FIX:
-            duration = max(duration, float(self.bundle.schema.dur_q50))
+            resp_model = self.bundle.response_models.get(topic_id)
+            p_correct = float(s.mastery[topic_id]) if resp_model is None else self._predict_proba_1(resp_model, x_base)
+            cfa = 1 if self.rng.random() < p_correct else 0
+
+            hints = self._predict_aux_int(topic_id, x_base, self.bundle.hints_models, default=0)
+            incorrects = self._predict_aux_int(topic_id, x_base, self.bundle.inc_models, default=(0 if cfa == 1 else 1))
+            duration = self._predict_aux_float(topic_id, x_base, self.bundle.time_models,
+                                               default=self.bundle.schema.dur_q50)
+
+        else:
+            # Tutee actions: NEW behavior (leaf -> topic -> fallback to tutor-proxy models)
+            stats = None
+
+            # 1) leaf-level stats
+            if self.bundle.tutee_outcome_leaf is not None:
+                stats = (
+                    self.bundle.tutee_outcome_leaf
+                    .get(int(topic_id), {})
+                    .get(int(leaf_id), {})
+                    .get(int(action_meta.action))
+                )
+
+            # 2) topic-level stats
+            if stats is None and self.bundle.tutee_outcome_topic is not None:
+                stats = (
+                    self.bundle.tutee_outcome_topic
+                    .get(int(topic_id), {})
+                    .get(int(action_meta.action))
+                )
+
+            if stats is not None:
+                cfa, hints, incorrects, duration = self._sample_tutee_outcomes_from_stats(stats)
+                p_correct = float(stats.get("p_correct", float(s.mastery[topic_id])))
+            else:
+                # 3) fallback: OLD behavior (tutee->tutor proxy outcome prediction)
+                proxy_action = self._outcome_proxy_action(action_meta.action)
+                proxy_meta = ActionMeta(action=proxy_action, is_tutee=action_meta.is_tutee,
+                                        force_generation=action_meta.force_generation)
+
+                x_base = self._build_features(
+                    s=s,
+                    topic_id=topic_id,
+                    action_meta=proxy_meta,
+                    generation_mode=0,
+                    include_outcome=False,
+                )
+
+                resp_model = self.bundle.response_models.get(topic_id)
+                p_correct = float(s.mastery[topic_id]) if resp_model is None else self._predict_proba_1(resp_model,
+                                                                                                        x_base)
+                cfa = 1 if self.rng.random() < p_correct else 0
+
+                hints = self._predict_aux_int(topic_id, x_base, self.bundle.hints_models, default=0)
+                incorrects = self._predict_aux_int(topic_id, x_base, self.bundle.inc_models,
+                                                   default=(0 if cfa == 1 else 1))
+                duration = self._predict_aux_float(topic_id, x_base, self.bundle.time_models,
+                                                   default=self.bundle.schema.dur_q50)
 
         # 3) generation_mode (optional feature; not required by quality update)
         generation_mode = 1 if (action_meta.force_generation or action_meta.action == LowLevelAction.TUTEE_EXPLAIN) else 0
