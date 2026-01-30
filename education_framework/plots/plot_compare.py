@@ -19,6 +19,9 @@ COND_DIRS = {
 
     # HRL multi-agent with weighted transfer (experience sharing = weighted_cka)
     "weighted transfer": "../runs/multi_agent_es.csv",
+
+    "tutee": "../runs/multi_agent_es_tutee.csv",
+
 }
 
 # Needed for "average reward over all agents" proxy
@@ -133,21 +136,27 @@ def _representative_curve(dfs, col: str, cumulative: bool = False):
 def plot_fig5_reward_per_episode():
     single_dfs = _load_curves_for_condition(COND_DIRS["single-agent"])
     multi_dfs = _load_curves_for_condition(COND_DIRS["multi-agent"])
+    tutee_dfs = _load_curves_for_condition(COND_DIRS["tutee"])
+
 
     plt.figure(figsize=(7.2, 4.2))
 
     # representative raw (one seed)
     xs, ys = _representative_curve(single_dfs, "reward", cumulative=False)
     xm, ym = _representative_curve(multi_dfs, "reward", cumulative=False)
+    xt, yt = _representative_curve(tutee_dfs, "reward", cumulative=False)
 
     # mean across seeds + smoothing
     xs_avg, ys_avg = _mean_curve(single_dfs, "reward", cumulative=False)
     xm_avg, ym_avg = _mean_curve(multi_dfs, "reward", cumulative=False)
+    xt_avg, yt_avg = _mean_curve(tutee_dfs, "reward", cumulative=False)
 
     if xs is not None:    plt.plot(xs, ys, alpha=0.25, linewidth=1.0, label="Single-agent")
     if xm is not None:    plt.plot(xm, ym, alpha=0.25, linewidth=1.0, label="Multi-agent")
+    if xt is not None:    plt.plot(xt, yt, alpha=0.25, linewidth=1.0, label="Tutee")
     if xs_avg is not None: plt.plot(xs_avg, _rolling_mean(ys_avg, SMOOTH_W), linewidth=2.5, label="Single-agent (Avg)")
     if xm_avg is not None: plt.plot(xm_avg, _rolling_mean(ym_avg, SMOOTH_W), linewidth=2.5, label="Multi-agent (Avg)")
+    if xt_avg is not None: plt.plot(xt_avg, _rolling_mean(yt_avg, SMOOTH_W), linewidth=2.5, label="Tutee (Avg)")
 
     plt.xlabel("Training Episode")
     plt.ylabel("Cumulative Reward Obtained")  # paper wording: cumulative *within episode*
@@ -159,19 +168,24 @@ def plot_fig5_reward_per_episode():
 def plot_fig6_steps_per_episode():
     single_dfs = _load_curves_for_condition(COND_DIRS["single-agent"])
     multi_dfs = _load_curves_for_condition(COND_DIRS["multi-agent"])
+    tutee_dfs = _load_curves_for_condition(COND_DIRS["tutee"])
 
     plt.figure(figsize=(7.2, 4.2))
 
     xs, ys = _representative_curve(single_dfs, "steps", cumulative=False)
     xm, ym = _representative_curve(multi_dfs, "steps", cumulative=False)
+    xt, yt = _representative_curve(tutee_dfs, "steps", cumulative=False)
 
     xs_avg, ys_avg = _mean_curve(single_dfs, "steps", cumulative=False)
     xm_avg, ym_avg = _mean_curve(multi_dfs, "steps", cumulative=False)
+    xt_avg, yt_avg = _mean_curve(tutee_dfs, "steps", cumulative=False)
 
     if xs is not None:    plt.plot(xs, ys, alpha=0.25, linewidth=1.0, label="Single-agent")
     if xm is not None:    plt.plot(xm, ym, alpha=0.25, linewidth=1.0, label="Multi-agent")
+    if xt is not None:    plt.plot(xt, yt, alpha=0.25, linewidth=1.0, label="Tutee")
     if xs_avg is not None: plt.plot(xs_avg, _rolling_mean(ys_avg, SMOOTH_W), linewidth=2.5, label="Single-agent (Avg)")
     if xm_avg is not None: plt.plot(xm_avg, _rolling_mean(ym_avg, SMOOTH_W), linewidth=2.5, label="Multi-agent (Avg)")
+    if xt_avg is not None: plt.plot(xt_avg, _rolling_mean(yt_avg, SMOOTH_W), linewidth=2.5, label="Tutee (Avg)")
 
     plt.xlabel("Training Episode")
     plt.ylabel("Cumulative Steps per Episode")  # paper phrasing, but value is per-episode steps
@@ -185,6 +199,7 @@ def plot_average_reward_over_all_agents():
     dfs_single = _load_curves_for_condition(COND_DIRS["single-agent"])
     dfs_multi = _load_curves_for_condition(COND_DIRS["multi-agent"])
     dfs_weighted = _load_curves_for_condition(COND_DIRS["weighted transfer"])
+    dfs_tutee = _load_curves_for_condition(COND_DIRS["tutee"])
 
     def avg_agent_reward_curve(dfs, *, single_agent: bool):
         """
@@ -222,10 +237,12 @@ def plot_average_reward_over_all_agents():
     x1, y1 = avg_agent_reward_curve(dfs_single, single_agent=True)
     x2, y2 = avg_agent_reward_curve(dfs_multi, single_agent=False)
     x3, y3 = avg_agent_reward_curve(dfs_weighted, single_agent=False)
+    x4, y4 = avg_agent_reward_curve(dfs_tutee, single_agent=False)
 
     if x1 is not None: plt.plot(x1, y1, linewidth=2.0, label="Single-agent")
     if x2 is not None: plt.plot(x2, y2, linewidth=2.0, label="Multi-agent")
     if x3 is not None: plt.plot(x3, y3, linewidth=2.0, label="Weighted Transfer")
+    if x4 is not None: plt.plot(x4, y4, linewidth=2.0, label="Tutee")
 
     plt.xlabel("Training Episode")
     plt.ylabel("Average Reward over all Agents")
