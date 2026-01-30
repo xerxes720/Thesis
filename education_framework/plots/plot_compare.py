@@ -23,6 +23,8 @@ COND_DIRS = {
 
 # Needed for "average reward over all agents" proxy
 NUM_TOPICS = 7  # <- set this to bundle.n_topics in your experiment
+# NUM_TOPICS = 8  # or pull from config if you have it
+
 SMOOTH_W = 100  # paper-like smoothing; tweak to 50/200 if you want
 
 
@@ -178,7 +180,6 @@ def plot_fig6_steps_per_episode():
     plt.show()
 
 
-NUM_TOPICS = 8  # or pull from config if you have it
 
 def plot_average_reward_over_all_agents():
     dfs_single = _load_curves_for_condition(COND_DIRS["single-agent"])

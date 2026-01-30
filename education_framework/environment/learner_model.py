@@ -313,7 +313,7 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.85
+    mastery_threshold: float = 0.95
     opp_min: int = 3
 
     # --- tutee (protégé / learning-by-teaching) simulation ---

@@ -565,16 +565,42 @@ def main():
                 (total_reward, steps, topic_counts, tutor_action_counts, tutee_action_counts,
                  tutor_hl_count, tutee_hl_count, hl_trace, ll_rewards, tutee_reward_total) = run_episode(...)
                 flat_agent_reward = 0.0
+                for ag in tutor_agents:
+                    ag.reset_share_stats()
 
             else:
                 total_reward, steps = run_episode_flat(env, flat_agent, train=True)
                 flat_agent_reward = float(total_reward)
                 ll_rewards = [0.0 for _ in range(num_topics)]
                 tutee_reward_total = 0.0
+                flat_agent.agent.reset_share_stats()
             m_vec = env.model.state.mastery
             m_mean = float(np.mean(m_vec))
             m_min = float(np.min(m_vec))
             completed = 1 if env.model.is_done() else 0
+
+            # ---- collect sharing diagnostics for this episode ----
+            if args.arch == "hrl":
+                n_ll_agents = len(tutor_agents)
+                share_enabled_eff = int(tutor_agents and tutor_agents[0].cfg.experience_sharing and tutor_agents[0].cfg.share_mode != "off")
+                share_mode_eff = tutor_agents[0].cfg.share_mode if tutor_agents else "off"
+                stats_list = [ag.pop_share_stats() for ag in tutor_agents]
+            else:
+                n_ll_agents = 1
+                share_enabled_eff = 0
+                share_mode_eff = "off"
+                stats_list = [flat_agent.agent.pop_share_stats()]
+
+            share_attempts = sum(s["share_attempts"] for s in stats_list)
+            share_peer_samples = sum(s["peer_samples"] for s in stats_list)
+            peer_weight_sum = sum(s["peer_weight_sum"] for s in stats_list)
+            eligible_peers_sum = sum(s["eligible_peers_sum"] for s in stats_list)
+            selected_peers_sum = sum(s["selected_peers_sum"] for s in stats_list)
+
+            share_mean_peer_weight = (peer_weight_sum / share_peer_samples) if share_peer_samples > 0 else 0.0
+            share_eligible_peers_mean = (eligible_peers_sum / share_attempts) if share_attempts > 0 else 0.0
+            share_selected_peers_mean = (selected_peers_sum / share_attempts) if share_attempts > 0 else 0.0
+
 
             ep_rewards.append(float(total_reward))
             ep_steps.append(int(steps))
@@ -584,9 +610,21 @@ def main():
             rows.append([
                 episode, float(total_reward), int(steps), m_mean, m_min, completed,
                 float(flat_agent_reward),
+
+                # ---- sharing diagnostics ----
+                int(n_ll_agents),
+                int(share_enabled_eff),
+                str(share_mode_eff),
+                int(share_attempts),
+                int(share_peer_samples),
+                float(share_mean_peer_weight),
+                float(share_eligible_peers_mean),
+                float(share_selected_peers_mean),
+
                 *[float(x) for x in ll_rewards],
                 float(tutee_reward_total),
             ])
+
             window_rewards.append(float(total_reward))
             window_steps.append(int(steps))
 
@@ -605,7 +643,17 @@ def main():
 
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
-            "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed","flat_agent_reward"
+            "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward",
+
+            # ---- sharing diagnostics ----
+            "n_ll_agents",
+            "share_enabled_eff",
+            "share_mode_eff",
+            "share_attempts",
+            "share_peer_samples",
+            "share_mean_peer_weight",
+            "share_eligible_peers_mean",
+            "share_selected_peers_mean",
         ]
         header += [f"ll_reward_{i}" for i in range(num_topics)]
         header += ["tutee_reward_total"]
@@ -808,6 +856,12 @@ def main():
         rows = []
 
         for episode in tqdm(range(1, args.episodes + 1), desc=f"Training(seed={seed})"):
+            # ---- reset per-episode sharing counters (MUST be before the episode runs) ----
+            if args.arch == "hrl":
+                for ag in tutor_agents:
+                    ag.reset_share_stats()
+            else:
+                flat_agent.agent.reset_share_stats()
             if args.arch == "hrl":
                 (
                     total_reward,
@@ -822,7 +876,6 @@ def main():
                     tutee_reward_total,  # NEW
                 ) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
                 flat_agent_reward = 0.0
-
             else:
                 total_reward, steps = run_episode_flat(env, flat_agent, train=True)
                 # fill HRL-only stats with zeros/empties for logging consistency
@@ -840,9 +893,43 @@ def main():
             min_mastery = float(np.min(env.model.state.mastery))
             completed = 1 if env.model.is_done() else 0
 
+            # ---- collect sharing diagnostics for this episode ----
+            if args.arch == "hrl":
+                n_ll_agents = len(tutor_agents)
+                share_enabled_eff = int(tutor_agents and tutor_agents[0].cfg.experience_sharing and tutor_agents[0].cfg.share_mode != "off")
+                share_mode_eff = tutor_agents[0].cfg.share_mode if tutor_agents else "off"
+                stats_list = [ag.pop_share_stats() for ag in tutor_agents]
+            else:
+                n_ll_agents = 1
+                share_enabled_eff = 0
+                share_mode_eff = "off"
+                stats_list = [flat_agent.agent.pop_share_stats()]
+
+            share_attempts = sum(s["share_attempts"] for s in stats_list)
+            share_peer_samples = sum(s["peer_samples"] for s in stats_list)
+            peer_weight_sum = sum(s["peer_weight_sum"] for s in stats_list)
+            eligible_peers_sum = sum(s["eligible_peers_sum"] for s in stats_list)
+            selected_peers_sum = sum(s["selected_peers_sum"] for s in stats_list)
+
+            share_mean_peer_weight = (peer_weight_sum / share_peer_samples) if share_peer_samples > 0 else 0.0
+            share_eligible_peers_mean = (eligible_peers_sum / share_attempts) if share_attempts > 0 else 0.0
+            share_selected_peers_mean = (selected_peers_sum / share_attempts) if share_attempts > 0 else 0.0
+
+
             rows.append([
                 episode, float(total_reward), int(steps), mean_mastery, min_mastery, completed,
                 float(flat_agent_reward),
+
+                # ---- sharing diagnostics ----
+                int(n_ll_agents),
+                int(share_enabled_eff),
+                str(share_mode_eff),
+                int(share_attempts),
+                int(share_peer_samples),
+                float(share_mean_peer_weight),
+                float(share_eligible_peers_mean),
+                float(share_selected_peers_mean),
+
                 *[float(x) for x in ll_rewards],
                 float(tutee_reward_total),
             ])
@@ -937,7 +1024,17 @@ def main():
 
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
-            "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward"
+            "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward",
+
+            # ---- sharing diagnostics ----
+            "n_ll_agents",
+            "share_enabled_eff",
+            "share_mode_eff",
+            "share_attempts",
+            "share_peer_samples",
+            "share_mean_peer_weight",
+            "share_eligible_peers_mean",
+            "share_selected_peers_mean",
         ]
         header += [f"ll_reward_{i}" for i in range(num_topics)]
         header += ["tutee_reward_total"]

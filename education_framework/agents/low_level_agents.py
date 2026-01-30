@@ -50,8 +50,8 @@ class LowLevelAgentConfig:
     # experience_sharing: bool = False
     share_mode: str = "weighted_cka"  # options: "off", "mutual", "weighted_cka"
     # share_mode: str = "off"  # options: "off", "mutual", "weighted_cka"
-    max_peers_per_update: int = 3  # sample up to this many peers each train step (for speed)
-    peer_batch_size: int = 32  # how many transitions to sample from each peer
+    max_peers_per_update: int = 4  # sample up to this many peers each train step (for speed)
+    peer_batch_size: int = 128  # how many transitions to sample from each peer
     min_peer_replay_size: int = 500  # peers must have at least this many samples to participate
     share_weight_floor: float = 0.0  # clamp similarity weights
     share_weight_ceiling: float = 1.0
@@ -169,7 +169,32 @@ class DQNLowLevelAgent:
 
         self.total_steps = 0
         self._peers: List["DQNLowLevelAgent"] = []
+        # ---- sharing diagnostics (per-episode counters; reset by main) ----
+        self._share_attempts = 0  # number of times _build_shared_batch() ran with sharing active
+        self._share_peer_samples = 0  # total peer transitions appended
+        self._share_peer_weight_sum = 0.0  # sum(weight * num_peer_samples) across all peers/updates
+        self._share_eligible_peers_sum = 0  # sum(#eligible_peers) across sharing attempts
+        self._share_selected_peers_sum = 0  # sum(#selected_peers) across sharing attempts
 
+    def reset_share_stats(self) -> None:
+        """Reset per-episode sharing counters."""
+        self._share_attempts = 0
+        self._share_peer_samples = 0
+        self._share_peer_weight_sum = 0.0
+        self._share_eligible_peers_sum = 0
+        self._share_selected_peers_sum = 0
+
+    def pop_share_stats(self) -> dict:
+        """Return current counters and reset them."""
+        stats = {
+            "share_attempts": int(self._share_attempts),
+            "peer_samples": int(self._share_peer_samples),
+            "peer_weight_sum": float(self._share_peer_weight_sum),
+            "eligible_peers_sum": int(self._share_eligible_peers_sum),
+            "selected_peers_sum": int(self._share_selected_peers_sum),
+        }
+        self.reset_share_stats()
+        return stats
     @property
     def num_actions(self) -> int:
         return len(self.actions)
@@ -267,30 +292,36 @@ class DQNLowLevelAgent:
         if (not self.cfg.experience_sharing) or self.cfg.share_mode == "off":
             return s, a, r, s2, d, w
 
-        # Determine eligible peers (enough replay)
+        # ---- diagnostics: sharing attempt ----
+        self._share_attempts += 1
+
+        # Determine eligible peers (enough replay + initialized nets)
         eligible = [
             p for p in self._peers
             if len(p.replay) >= max(self.cfg.min_peer_replay_size, self.cfg.peer_batch_size)
                and p.policy_net is not None
         ]
+        eligible_n = len(eligible)
+        self._share_eligible_peers_sum += eligible_n
+
         if not eligible:
             return s, a, r, s2, d, w
 
         # Sample a subset of peers for this update (for speed)
-        k = min(self.cfg.max_peers_per_update, len(eligible))
+        k = min(self.cfg.max_peers_per_update, eligible_n)
         peers = random.sample(eligible, k)
+        self._share_selected_peers_sum += k
 
-        # We compute similarity on the peer states (s) used for sharing.
+        peer_samples_added = 0
+        peer_weight_sum = 0.0
+
         for p in peers:
             ps, pa, pr, ps2, pd = p.replay.sample(self.cfg.peer_batch_size)
 
             if self.cfg.share_mode == "mutual":
                 weight = 1.0
             elif self.cfg.share_mode == "weighted_cka":
-                # compute CKA between representations on the SAME states
                 states_t = torch.as_tensor(ps, dtype=torch.float32, device=self.device)
-                # Note: networks live on potentially different devices; move peer net to our device temporarily not advised.
-                # Best practice: enforce same device in config.
                 weight = avg_layer_cka(self.policy_net, p.policy_net, states_t, self.cfg.cka_layers)
             else:
                 weight = 0.0
@@ -305,7 +336,16 @@ class DQNLowLevelAgent:
             d.extend(pd)
             w.extend([weight] * len(ps))
 
+            n = len(ps)
+            peer_samples_added += n
+            peer_weight_sum += weight * n
+
+        # ---- diagnostics: accumulate ----
+        self._share_peer_samples += peer_samples_added
+        self._share_peer_weight_sum += peer_weight_sum
+
         return s, a, r, s2, d, w
+
 
     def _ensure_networks(self, input_dim: int) -> None:
         if self.policy_net is not None:
