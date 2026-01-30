@@ -361,6 +361,8 @@ class KDDLearnerModel:
         self.rng = random.Random(seed)
         self.np_rng = np.random.default_rng(seed)
         self.state = LearnerState(n_topics=self.cfg.n_topics)
+        # Per-topic one-time completion flags (reset each episode).
+        self._topic_completed = np.zeros(self.cfg.n_topics, dtype=np.bool_)
 
     # ---------- persistence ----------
     def save(self, path: str) -> None:
@@ -390,6 +392,7 @@ class KDDLearnerModel:
         self.state.time_ema[:] = 0.0
         self.state.inc_ema[:] = 0.0
         self.state.total_steps = 0
+        self._topic_completed[:] = False
         return self.state.copy()
 
     def is_done(self) -> bool:
@@ -397,6 +400,14 @@ class KDDLearnerModel:
         mastered = (s.mastery >= self.cfg.mastery_threshold).astype(np.int32)
         enough_opp = (s.opp >= self.cfg.opp_min).astype(np.int32)
         return bool(np.all((mastered * enough_opp) > 0))
+
+    def is_topic_complete(self, topic_id: int) -> bool:
+        """Topic/subtask is complete when mastery >= threshold AND opp >= opp_min."""
+        s = self.state
+        return bool(
+            (s.mastery[topic_id] >= self.cfg.mastery_threshold) and
+            (s.opp[topic_id] >= self.cfg.opp_min)
+        )
 
     # ---------- feature engineering ----------
     def _state_features(self, s: LearnerState, topic_id: int) -> np.ndarray:
@@ -733,7 +744,17 @@ class KDDLearnerModel:
         # optional but recommended for stability
         r_step = float(np.clip(r_step, -0.05, 0.05))
 
-        reward = r_step + (self.cfg.completion_reward if done else 0.0)
+        # reward = r_step + (self.cfg.completion_reward if done else 0.0)
+        # One-time completion reward per topic/subtask:
+        # give +r_c the first time this topic reaches (mastery >= threshold AND opp >= opp_min).
+        topic_completion_bonus = 0.0
+        if (not bool(self._topic_completed[topic_id])) and self.is_topic_complete(topic_id):
+            self._topic_completed[topic_id] = True
+            topic_completion_bonus = float(self.cfg.completion_reward)
+            # info["topic_completion_bonus"] = float(topic_completion_bonus)
+            # info["topic_completed"] = bool(self._topic_completed[topic_id])
+
+        reward = r_step + topic_completion_bonus
         info = {
             "p_correct": p_correct,
             "cfa": cfa,

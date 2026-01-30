@@ -178,6 +178,8 @@ def plot_fig6_steps_per_episode():
     plt.show()
 
 
+NUM_TOPICS = 8  # or pull from config if you have it
+
 def plot_average_reward_over_all_agents():
     dfs_single = _load_curves_for_condition(COND_DIRS["single-agent"])
     dfs_multi = _load_curves_for_condition(COND_DIRS["multi-agent"])
@@ -185,19 +187,21 @@ def plot_average_reward_over_all_agents():
 
     def avg_agent_reward_curve(dfs, *, single_agent: bool):
         """
-        HRL: mean(ll_reward_*) per episode
-        Flat: (no ll_reward_*) -> use episode 'reward' as the single agent’s reward
+        HRL: mean(ll_reward_*) per episode  (already averaged over agents)
+        Flat/single-agent logging: df["reward"] is team/episode reward -> normalize by NUM_TOPICS
         """
         ys = []
         for df in dfs:
             ll_cols = [c for c in df.columns if c.startswith("ll_reward_")]
 
             if single_agent:
-                y = df["reward"].to_numpy(dtype=float)
+                # team episodic reward -> average over 8 topic-agents for Fig.7 comparability
+                y = df["reward"].to_numpy(dtype=float) / float(NUM_TOPICS)
+
             elif ll_cols:
+                # already "average over agents"
                 y = df[ll_cols].to_numpy(dtype=float)
                 y = np.nanmean(y, axis=1)
-
 
             else:
                 continue
@@ -227,6 +231,7 @@ def plot_average_reward_over_all_agents():
     plt.tight_layout()
     plt.legend()
     plt.show()
+
 
 
 if __name__ == "__main__":
