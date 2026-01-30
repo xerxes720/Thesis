@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import sys
+from collections import Counter
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,10 +15,6 @@ from typing import Dict, List, Optional
 import joblib
 import numpy as np
 from tqdm import tqdm
-import os
-import csv
-from collections import deque, Counter
-import math
 
 # --- Ensure imports work whether you run:
 #   python -m education_framework.main
@@ -28,9 +26,12 @@ if str(ROOT) not in sys.path:
 
 from education_framework.agents.high_level_agent import HighLevelAgent, HighLevelAgentConfig
 from education_framework.agents.low_level_agents import (
+    DQNLowLevelAgent,
     TutorLowLevelAgent,
     TuteeLowLevelAgent,
     LowLevelAgentConfig,
+    build_tutor_actions,
+    build_tutee_actions,
 )
 
 from education_framework.environment.learner_model import (
@@ -41,12 +42,13 @@ from education_framework.environment.learner_model import (
     LowLevelAction,
 )
 
-# RUN WITH python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300
 
+# RUN WITH python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300
 
 
 def _safe_mean(x):
     return float(sum(x) / max(1, len(x)))
+
 
 def topic_entropy(topic_ids):
     """Normalized entropy in [0,1] for topic selection concentration."""
@@ -58,6 +60,7 @@ def topic_entropy(topic_ids):
     ent = -sum(p * math.log(p + 1e-12) for p in probs)
     ent_max = math.log(len(c) + 1e-12)
     return float(ent / (ent_max + 1e-12))
+
 
 # ----------------------------
 # Environment wrapper (KDD)
@@ -82,12 +85,12 @@ class KDDHierEnv:
     """
 
     def __init__(
-        self,
-        *,
-        bundle: KDDModelBundle,
-        cfg: Optional[KDDEnvConfig] = None,
-        learner_cfg: Optional[KDDLearnerConfig] = None,
-        seed: int = 0,
+            self,
+            *,
+            bundle: KDDModelBundle,
+            cfg: Optional[KDDEnvConfig] = None,
+            learner_cfg: Optional[KDDLearnerConfig] = None,
+            seed: int = 0,
     ) -> None:
         self.cfg = cfg or KDDEnvConfig(num_topics=bundle.n_topics)
         self.num_topics = int(self.cfg.num_topics)
@@ -105,7 +108,8 @@ class KDDHierEnv:
             # tutor actions from build_tutor_actions()
             'quiz': ActionMeta(action=LowLevelAction.TUTOR_QUIZ, is_tutee=False, force_generation=False),
             'hint': ActionMeta(action=LowLevelAction.TUTOR_HINT, is_tutee=False, force_generation=False),
-            'worked_example': ActionMeta(action=LowLevelAction.TUTOR_WORKED_EXAMPLE, is_tutee=False, force_generation=False),
+            'worked_example': ActionMeta(action=LowLevelAction.TUTOR_WORKED_EXAMPLE, is_tutee=False,
+                                         force_generation=False),
             'remediation': ActionMeta(action=LowLevelAction.TUTOR_REMEDIATION, is_tutee=False, force_generation=False),
             'review': ActionMeta(action=LowLevelAction.TUTOR_REVIEW, is_tutee=False, force_generation=False),
 
@@ -118,7 +122,8 @@ class KDDHierEnv:
             # Map to *distinct* action ids (5..7) so the QualityTreeBank can assign separate effects.
             'ask_worked_example': ActionMeta(action=LowLevelAction.TUTEE_QUIZ, is_tutee=True, force_generation=False),
             'ask_explanation': ActionMeta(action=LowLevelAction.TUTEE_EXPLAIN, is_tutee=True, force_generation=False),
-            'show_mistake_and_ask_fix': ActionMeta(action=LowLevelAction.TUTEE_FIX, is_tutee=True, force_generation=False),
+            'show_mistake_and_ask_fix': ActionMeta(action=LowLevelAction.TUTEE_FIX, is_tutee=True,
+                                                   force_generation=False),
         }
 
     def reset(self) -> List[float]:
@@ -195,11 +200,11 @@ class KDDHierEnv:
 # ----------------------------
 
 def create_agents(
-    num_topics: int,
-    use_tutee: bool,
-    ll_mode: str = "multi",                  # NEW
-    experience_sharing: bool = False,        # NEW
-    share_mode: str = "weighted_cka",        # NEW
+        num_topics: int,
+        use_tutee: bool,
+        ll_mode: str = "multi",  # NEW
+        experience_sharing: bool = False,  # NEW
+        share_mode: str = "weighted_cka",  # NEW
 ):
     hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
     hl_cfg.device = "cpu"
@@ -214,7 +219,7 @@ def create_agents(
 
     # --- build tutor agents: single vs multi ---
     if ll_mode == "single":
-        tutor_agents = [TutorLowLevelAgent(ll_cfg)]      # one shared tutor DQN
+        tutor_agents = [TutorLowLevelAgent(ll_cfg)]  # one shared tutor DQN
     else:
         tutor_agents = [TutorLowLevelAgent(ll_cfg) for _ in range(num_topics)]  # per-topic
 
@@ -233,10 +238,54 @@ def create_agents(
     return high_level_agent, tutor_agents, tutee_agent
 
 
-
 def add_topic(obs, topic_id: int) -> np.ndarray:
     obs_np = np.asarray(obs, dtype=np.float32)
     return np.concatenate([obs_np, np.array([topic_id], dtype=np.float32)])
+
+
+class FlatAgent:
+    """
+    Single-agent RL baseline: one DQN chooses (mode, topic_id, ll_action_str) directly.
+    No hierarchical split.
+    """
+
+    def __init__(self, cfg: LowLevelAgentConfig, num_topics: int, use_tutee: bool):
+        self.num_topics = int(num_topics)
+        self.use_tutee = bool(use_tutee)
+
+        tutor_actions = build_tutor_actions()
+        self.actions = []
+        for t in range(self.num_topics):
+            for a in tutor_actions:
+                self.actions.append(("tutor", t, a))
+
+        if self.use_tutee:
+            tutee_actions = build_tutee_actions()
+            for t in range(self.num_topics):
+                for a in tutee_actions:
+                    self.actions.append(("tutee", t, a))
+
+        # Use the same DQN backbone
+        self.agent = DQNLowLevelAgent(cfg, actions=[self._encode(x) for x in self.actions])
+
+    def _encode(self, tpl):
+        mode, t, a = tpl
+        return f"{mode}|{t}|{a}"
+
+    def decode_action(self, idx: int):
+        return self.actions[int(idx)]
+
+    def set_epsilon(self, eps: float):
+        self.agent.set_epsilon(eps)
+
+    def select_action(self, obs):
+        return self.agent.select_action(obs)
+
+    def update(self, obs, a, r, obs2, done):
+        self.agent.update(obs, a, r, obs2, done)
+
+    def get_action_meanings(self):
+        return self.agent.get_action_meanings()
 
 
 # ----------------------------
@@ -255,6 +304,12 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 
     num_topics = env.num_topics
     topic_counts = [0 for _ in range(num_topics)]
+    if len(tutor_agents) == 1:
+        ll_rewards = [0.0]  # one shared LL agent
+    else:
+        ll_rewards = [0.0 for _ in range(
+            num_topics)]  # one per topic
+    tutee_reward_total = 0.0  # optional: total reward earned in tutee mode
 
     tutor_action_counts = defaultdict(int)
     tutee_action_counts = defaultdict(int)
@@ -289,6 +344,11 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
             next_tutor_obs = add_topic(next_obs, topic_id)
 
+            # per-agent reward attribution:
+            # - multi-agent: reward belongs to that topic’s LL agent
+            # - single-agent: reward belongs to the single shared LL agent (index 0)
+            ll_idx = 0 if len(tutor_agents) == 1 else int(topic_id)
+            ll_rewards[ll_idx] += float(reward)
             if train:
                 high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
                 tutor_agent.update(tutor_obs, ll_action_idx, reward, next_tutor_obs, done)
@@ -303,6 +363,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 
             next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
             next_tutee_obs = add_topic(next_obs, topic_id)
+            tutee_reward_total += float(reward)
 
             if train:
                 high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
@@ -328,7 +389,34 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         tutor_hl_count,
         tutee_hl_count,
         hl_trace,
+        ll_rewards,            # NEW
+        tutee_reward_total,    # NEW
     )
+
+
+def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
+    obs = env.reset()
+    done = False
+    total_reward = 0.0
+    steps = 0
+
+    while not done:
+        a_idx = flat_agent.select_action(obs)
+        mode, topic_id, ll_action_str = flat_agent.decode_action(a_idx)
+
+        if mode == "tutee":
+            next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
+        else:
+            next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
+
+        if train:
+            flat_agent.update(obs, a_idx, reward, next_obs, done)
+
+        total_reward += float(reward)
+        steps += int(info.get("step_cost", 1))
+        obs = next_obs
+
+    return total_reward, steps
 
 
 # ----------------------------
@@ -392,6 +480,13 @@ def main():
         choices=["off", "mutual", "weighted_cka"],
         help="Sharing mode used by low-level tutor agents when experience_sharing is enabled.",
     )
+    ap.add_argument(
+        "--arch",
+        type=str,
+        default="hrl",
+        choices=["hrl", "flat"],
+        help="hrl: High-level + low-level (paper main). flat: single-agent RL baseline (paper exp1).",
+    )
     args = ap.parse_args()
 
     bundle_path = Path(args.bundle).resolve()
@@ -405,6 +500,7 @@ def main():
             raise FileNotFoundError(f"Bundle not found: {bundle_path} (also tried {alt})")
 
     bundle = joblib.load(bundle_path)
+
     # bundle_path = Path(args.bundle)
     # if not bundle_path.exists():
     #     raise FileNotFoundError(f"Bundle not found: {bundle_path}")
@@ -429,13 +525,26 @@ def main():
         )
 
         num_topics = env.num_topics
-        high_level_agent, tutor_agents, tutee_agent = create_agents(
-            num_topics=bundle.n_topics,
-            use_tutee=use_tutee,
-            ll_mode=args.ll_mode,
-            experience_sharing=args.experience_sharing,
-            share_mode=args.share_mode,
-        )
+
+        if args.arch == "hrl":
+            high_level_agent, tutor_agents, tutee_agent = create_agents(
+                num_topics=bundle.n_topics,
+                use_tutee=use_tutee,
+                ll_mode=args.ll_mode,
+                experience_sharing=args.experience_sharing,
+                share_mode=args.share_mode,
+            )
+            flat_agent = None
+        else:
+            # --- flat single-agent RL baseline (no HL/LL decomposition) ---
+            ll_cfg = LowLevelAgentConfig(num_topics=bundle.n_topics)
+            ll_cfg.device = "cpu"
+            ll_cfg.experience_sharing = False
+            ll_cfg.share_mode = "off"
+            flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics, use_tutee=use_tutee)
+
+            high_level_agent, tutor_agents, tutee_agent = None, [], None
+
         window_rewards: List[float] = []
         window_steps: List[int] = []
 
@@ -450,9 +559,18 @@ def main():
         eps_decay_episodes = max(1, args.episodes)
 
         rows = []
-        for episode in tqdm(range(1, args.episodes + 1), desc=f"Training(seed={seed}, tutee={use_tutee}, base={tutee_bonus_base})"):
-            total_reward, steps, *_ = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
+        for episode in tqdm(range(1, args.episodes + 1),
+                            desc=f"Training(seed={seed}, tutee={use_tutee}, base={tutee_bonus_base})"):
+            if args.arch == "hrl":
+                (total_reward, steps, topic_counts, tutor_action_counts, tutee_action_counts,
+                 tutor_hl_count, tutee_hl_count, hl_trace, ll_rewards, tutee_reward_total) = run_episode(...)
+                flat_agent_reward = 0.0
 
+            else:
+                total_reward, steps = run_episode_flat(env, flat_agent, train=True)
+                flat_agent_reward = float(total_reward)
+                ll_rewards = [0.0 for _ in range(num_topics)]
+                tutee_reward_total = 0.0
             m_vec = env.model.state.mastery
             m_mean = float(np.mean(m_vec))
             m_min = float(np.min(m_vec))
@@ -463,25 +581,44 @@ def main():
             ep_mastery_mean.append(m_mean)
             ep_mastery_min.append(m_min)
             ep_completed.append(int(completed))
-            rows.append([episode, float(total_reward), int(steps), m_mean, m_min, completed])
-
+            rows.append([
+                episode, float(total_reward), int(steps), m_mean, m_min, completed,
+                float(flat_agent_reward),
+                *[float(x) for x in ll_rewards],
+                float(tutee_reward_total),
+            ])
             window_rewards.append(float(total_reward))
             window_steps.append(int(steps))
 
             if episode % args.log_window == 0:
                 progress = min(1.0, episode / eps_decay_episodes)
                 eps = eps_start + (eps_end - eps_start) * progress
-                high_level_agent.set_epsilon(eps)
-                for ag in tutor_agents:
-                    ag.set_epsilon(eps)
-                if tutee_agent is not None:
-                    tutee_agent.set_epsilon(eps)
 
+                if args.arch == "hrl":
+                    high_level_agent.set_epsilon(eps)
+                    for ag in tutor_agents:
+                        ag.set_epsilon(eps)
+                    if tutee_agent is not None:
+                        tutee_agent.set_epsilon(eps)
+                else:
+                    flat_agent.set_epsilon(eps)
+
+        header = [
+            "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
+            "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed","flat_agent_reward"
+        ]
+        header += [f"ll_reward_{i}" for i in range(num_topics)]
+        header += ["tutee_reward_total"]
         # write per-episode metrics
         with open(out_dir / "metrics.csv", "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["episode", "reward", "steps", "mastery_mean", "mastery_min", "completed"])
-            w.writerows(rows)
+            w.writerow(header)
+            for row in rows:
+                # row is: [episode, reward, steps, mastery_mean, mastery_min, completed, ll_reward_0.., tutee_reward_total]
+                w.writerow([
+                    args.arch, args.ll_mode, int(args.experience_sharing), args.share_mode, int(use_tutee),
+                    *row
+                ])
 
         # compute end-window summary
         w = max(1, int(args.eval_window))
@@ -493,6 +630,7 @@ def main():
 
         summary = {
             "seed": int(seed),
+            "arch": str(args.arch),
             "use_tutee": bool(use_tutee),
             "tutee_bonus_base": float(tutee_bonus_base),
             "episodes": int(args.episodes),
@@ -503,9 +641,9 @@ def main():
             "mastery_mean_lastW_mean": float(np.mean(mm_last)) if mm_last else 0.0,
             "mastery_min_lastW_mean": float(np.mean(mn_last)) if mn_last else 0.0,
             "completion_rate_lastW": float(np.mean(c_last)) if c_last else 0.0,
-            "ll_mode": str(args.ll_mode),
-            "experience_sharing": bool(args.experience_sharing),
-            "share_mode": str(args.share_mode),
+            "ll_mode": str(args.ll_mode) if args.arch == "hrl" else "n/a",
+            "experience_sharing": bool(args.experience_sharing) if args.arch == "hrl" else False,
+            "share_mode": str(args.share_mode) if args.arch == "hrl" else "off",
         }
         with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
             import json
@@ -540,6 +678,7 @@ def main():
             w = csv.writer(f)
             w.writerow([
                 "seed",
+                'arch',
                 "ll_mode",
                 "experience_sharing",
                 "share_mode",
@@ -557,6 +696,7 @@ def main():
             for s in all_summaries:
                 w.writerow([
                     s["seed"],
+                    s['arch'],
                     s["ll_mode"],
                     int(s["experience_sharing"]),
                     s["share_mode"],
@@ -578,11 +718,11 @@ def main():
     # ---- Single run mode (original behavior) ----
 
     def _train_one_run(
-        *,
-        seed: int,
-        use_tutee: bool,
-        tutee_bonus_base: Optional[float],
-        out_dir: Path,
+            *,
+            seed: int,
+            use_tutee: bool,
+            tutee_bonus_base: Optional[float],
+            out_dir: Path,
     ) -> Dict[str, float]:
         """Train once and write a per-episode metrics.csv. Returns end-window summary metrics."""
 
@@ -600,16 +740,33 @@ def main():
         )
 
         num_topics = env.num_topics
-        high_level_agent, tutor_agents, tutee_agent = create_agents(
-            num_topics=bundle.n_topics,
-            use_tutee=use_tutee,
-            ll_mode=args.ll_mode,
-            experience_sharing=args.experience_sharing,
-            share_mode=args.share_mode,
-        )
-        print("=== Training hierarchical RL tutor (KDD env) ===")
+
+        if args.arch == "hrl":
+            high_level_agent, tutor_agents, tutee_agent = create_agents(
+                num_topics=bundle.n_topics,
+                use_tutee=use_tutee,
+                ll_mode=args.ll_mode,
+                experience_sharing=args.experience_sharing,
+                share_mode=args.share_mode,
+            )
+            flat_agent = None
+        else:
+            # flat single-agent RL baseline (no HL/LL decomposition)
+            ll_cfg = LowLevelAgentConfig(num_topics=bundle.n_topics)
+            ll_cfg.device = "cpu"
+            ll_cfg.experience_sharing = False
+            ll_cfg.share_mode = "off"
+            flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics, use_tutee=use_tutee)
+
+            high_level_agent, tutor_agents, tutee_agent = None, [], None
+
+        print("=== Training (KDD env) ===")
+        print(f"- Architecture:    {args.arch}")
         print(f"- Number of topics: {num_topics}")
         print(f"- Tutee enabled:   {use_tutee}")
+        if args.arch == "hrl":
+            print(f"- LL mode:         {args.ll_mode}")
+            print(f"- Experience share:{args.experience_sharing} ({args.share_mode})")
         if tutee_bonus_base is not None:
             print(f"- Tutee bonus base:{tutee_bonus_base}")
         print(f"- Episodes:        {args.episodes}")
@@ -623,13 +780,21 @@ def main():
         window_mastery: List[float] = []
         window_done: List[int] = []
 
-        tutor_action_names = tutor_agents[0].get_action_meanings()
-        window_tutor_action_counts = {a: 0 for a in tutor_action_names}
+        if args.arch == "hrl":
+            tutor_action_names = tutor_agents[0].get_action_meanings()
+            window_tutor_action_counts = {a: 0 for a in tutor_action_names}
 
-        if tutee_agent is not None:
-            tutee_action_names = tutee_agent.get_action_meanings()
-            window_tutee_action_counts = {a: 0 for a in tutee_action_names}
+            if tutee_agent is not None:
+                tutee_action_names = tutee_agent.get_action_meanings()
+                window_tutee_action_counts = {a: 0 for a in tutee_action_names}
+            else:
+                tutee_action_names = []
+                window_tutee_action_counts = {}
         else:
+            # flat agent has its own action meanings (encoded mode|topic|action)
+            tutor_action_names = []
+            window_tutor_action_counts = {}
+            tutee_action_names = []
             window_tutee_action_counts = {}
 
         window_topic_counts = [0 for _ in range(num_topics)]
@@ -643,37 +808,58 @@ def main():
         rows = []
 
         for episode in tqdm(range(1, args.episodes + 1), desc=f"Training(seed={seed})"):
-            (
-                total_reward,
-                steps,
-                topic_counts,
-                tutor_action_counts,
-                tutee_action_counts,
-                tutor_hl_count,
-                tutee_hl_count,
-                hl_trace,
-            ) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
+            if args.arch == "hrl":
+                (
+                    total_reward,
+                    steps,
+                    topic_counts,
+                    tutor_action_counts,
+                    tutee_action_counts,
+                    tutor_hl_count,
+                    tutee_hl_count,
+                    hl_trace,
+                    ll_rewards,  # NEW
+                    tutee_reward_total,  # NEW
+                ) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
+                flat_agent_reward = 0.0
+
+            else:
+                total_reward, steps = run_episode_flat(env, flat_agent, train=True)
+                # fill HRL-only stats with zeros/empties for logging consistency
+                topic_counts = [0 for _ in range(num_topics)]
+                tutor_action_counts = {}
+                tutee_action_counts = {}
+                tutor_hl_count = 0
+                tutee_hl_count = 0
+                hl_trace = []
+                flat_agent_reward = float(total_reward)
+                ll_rewards = [0.0 for _ in range(num_topics)]  # NEW (avoid crash)
+                tutee_reward_total = 0.0  # NEW (avoid crash)
 
             mean_mastery = float(np.mean(env.model.state.mastery))
             min_mastery = float(np.min(env.model.state.mastery))
             completed = 1 if env.model.is_done() else 0
 
-            rows.append([episode, float(total_reward), int(steps), mean_mastery, min_mastery, completed])
-
+            rows.append([
+                episode, float(total_reward), int(steps), mean_mastery, min_mastery, completed,
+                float(flat_agent_reward),
+                *[float(x) for x in ll_rewards],
+                float(tutee_reward_total),
+            ])
             window_rewards.append(float(total_reward))
             window_steps.append(int(steps))
             window_mastery.append(mean_mastery)
             window_done.append(completed)
 
-            for i in range(num_topics):
-                window_topic_counts[i] += int(topic_counts[i])
-            for a in tutor_action_names:
-                window_tutor_action_counts[a] += int(tutor_action_counts[a])
-            for a in window_tutee_action_counts:
-                window_tutee_action_counts[a] += int(tutee_action_counts.get(a, 0))
-
-            window_tutor_hl += int(tutor_hl_count)
-            window_tutee_hl += int(tutee_hl_count)
+            if args.arch == "hrl":
+                for i in range(num_topics):
+                    window_topic_counts[i] += int(topic_counts[i])
+                for a in tutor_action_names:
+                    window_tutor_action_counts[a] += int(tutor_action_counts.get(a, 0))
+                for a in window_tutee_action_counts:
+                    window_tutee_action_counts[a] += int(tutee_action_counts.get(a, 0))
+                window_tutor_hl += int(tutor_hl_count)
+                window_tutee_hl += int(tutee_hl_count)
 
             if episode % args.log_window == 0:
                 w = args.log_window
@@ -686,37 +872,40 @@ def main():
                 topic_freqs = [c / total_topic_choices for c in window_topic_counts]
 
                 total_tutor_actions = sum(window_tutor_action_counts.values()) or 1
-                tutor_action_freqs = {a: window_tutor_action_counts[a] / total_tutor_actions for a in tutor_action_names}
+                tutor_action_freqs = {a: window_tutor_action_counts[a] / total_tutor_actions for a in
+                                      tutor_action_names}
 
                 print(f"[Episode {episode:4d}]")
                 print(f"  Mean reward (last {w}):          {mean_reward_w: .4f}")
                 print(f"  Mean steps per episode (cost):   {mean_steps_w: .1f}")
                 print(f"  Mean learner mastery:            {mean_mastery_w: .3f}")
                 print(f"  Completion rate (last {w}):      {done_rate_w: .2f}")
-                print("  Topic choice frequencies:")
-                for i, f in enumerate(topic_freqs):
-                    print(f"    - Topic {i}: {f * 100:5.1f}% of high-level choices")
 
-                print("  Tutor action frequencies:")
-                for a, f in tutor_action_freqs.items():
-                    print(f"    - {a:20s}: {f * 100:5.1f}% of tutor actions")
+                if args.arch == "hrl":
+                    print("  Topic choice frequencies:")
 
-                if use_tutee and window_tutee_action_counts:
-                    total_tutee_actions = sum(window_tutee_action_counts.values()) or 1
-                    print("  Tutee action frequencies:")
-                    for a, c in window_tutee_action_counts.items():
-                        f = c / total_tutee_actions
-                        print(f"    - {a:20s}: {f * 100:5.1f}% of tutee actions")
+                    for i, f in enumerate(topic_freqs):
+                        print(f"    - Topic {i}: {f * 100:5.1f}% of high-level choices")
+                    print("  Tutor action frequencies:")
+                    for a, f in tutor_action_freqs.items():
+                        print(f"    - {a:20s}: {f * 100:5.1f}% of tutor actions")
 
-                total_hl = window_tutor_hl + window_tutee_hl or 1
-                print(f"  High-level mode frequencies (last {w} episodes):")
-                print(f"    - tutor: {window_tutor_hl / total_hl * 100:5.1f}% of high-level decisions")
-                if use_tutee:
-                    print(f"    - tutee: {window_tutee_hl / total_hl * 100:5.1f}% of high-level decisions")
+                    if use_tutee and window_tutee_action_counts:
+                        total_tutee_actions = sum(window_tutee_action_counts.values()) or 1
+                        print("  Tutee action frequencies:")
+                        for a, c in window_tutee_action_counts.items():
+                            f = c / total_tutee_actions
+                            print(f"    - {a:20s}: {f * 100:5.1f}% of tutee actions")
 
-                if hl_trace:
-                    print("  High-level decision sequence (last episode):")
-                    print(f"    --> {' --> '.join(hl_trace)}")
+                    total_hl = window_tutor_hl + window_tutee_hl or 1
+                    print(f"  High-level mode frequencies (last {w} episodes):")
+                    print(f"    - tutor: {window_tutor_hl / total_hl * 100:5.1f}% of high-level decisions")
+                    if use_tutee:
+                        print(f"    - tutee: {window_tutee_hl / total_hl * 100:5.1f}% of high-level decisions")
+
+                    if hl_trace:
+                        print("  High-level decision sequence (last episode):")
+                        print(f"    --> {' --> '.join(hl_trace)}")
                 print()
 
                 # reset window
@@ -724,31 +913,43 @@ def main():
                 window_steps.clear()
                 window_mastery.clear()
                 window_done.clear()
-                window_topic_counts[:] = [0 for _ in range(num_topics)]
-                window_tutor_action_counts = {a: 0 for a in tutor_action_names}
-                window_tutor_hl = 0
-                window_tutee_hl = 0
-                if use_tutee and tutee_agent is not None:
-                    window_tutee_action_counts = {a: 0 for a in tutee_action_names}
+
+                if args.arch == "hrl":
+                    window_topic_counts[:] = [0 for _ in range(num_topics)]
+                    window_tutor_action_counts = {a: 0 for a in tutor_action_names}
+                    window_tutor_hl = 0
+                    window_tutee_hl = 0
+                    if use_tutee and tutee_agent is not None:
+                        window_tutee_action_counts = {a: 0 for a in tutee_action_names}
 
                 # epsilon schedule
                 progress = min(1.0, episode / eps_decay_episodes)
                 eps = eps_start + (eps_end - eps_start) * progress
-                high_level_agent.set_epsilon(eps)
-                for ag in tutor_agents:
-                    ag.set_epsilon(eps)
-                if tutee_agent is not None:
-                    tutee_agent.set_epsilon(eps)
 
+                if args.arch == "hrl":
+                    high_level_agent.set_epsilon(eps)
+                    for ag in tutor_agents:
+                        ag.set_epsilon(eps)
+                    if tutee_agent is not None:
+                        tutee_agent.set_epsilon(eps)
+                else:
+                    flat_agent.set_epsilon(eps)
+
+        header = [
+            "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
+            "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward"
+        ]
+        header += [f"ll_reward_{i}" for i in range(num_topics)]
+        header += ["tutee_reward_total"]
         with open(out_dir / "metrics.csv", "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow([
-                "ll_mode", "experience_sharing", "share_mode", "use_tutee",
-                "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed"
-            ])
-            for (ep, r, st, mm, mn, comp) in rows:
-                w.writerow([args.ll_mode, int(args.experience_sharing), args.share_mode, int(use_tutee),
-                            ep, r, st, mm, mn, comp])
+            w.writerow(header)
+            for row in rows:
+                # row is: [episode, reward, steps, mastery_mean, mastery_min, completed, ll_reward_0.., tutee_reward_total]
+                w.writerow([
+                    args.arch, args.ll_mode, int(args.experience_sharing), args.share_mode, int(use_tutee),
+                    *row
+                ])
 
         # end-window summary
         ew = int(max(1, min(args.eval_window, len(rows))))
@@ -770,8 +971,9 @@ def main():
     # ----------------------------
     # Single-run mode (backwards compatible)
     # ----------------------------
-    out_dir = Path("runs")
-    metrics = _train_one_run(seed=int(args.seed), use_tutee=bool(args.use_tutee), tutee_bonus_base=None, out_dir=out_dir)
+    out_dir = Path("education_framework/runs")
+    metrics = _train_one_run(seed=int(args.seed), use_tutee=bool(args.use_tutee), tutee_bonus_base=None,
+                             out_dir=out_dir)
     print("Training finished.")
     print("End-window metrics:", metrics)
 
