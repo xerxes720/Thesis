@@ -43,11 +43,11 @@ QUALITY_LEVELS: List[str] = ["very_bad", "bad", "neutral", "good", "very_good"]
 class MasteryUpdateParams:
     """Parameters for category-based mastery updates."""
 
-    mastery_jump: float = 0.95  # used for very_good
+    mastery_jump: float = 0.97  # used for very_good
 
     # Positive learning rates (applied as + beta * (1 - M))
     beta_good: float = 0.04
-    beta_very_good: float = 0.07
+    beta_very_good: float = 0.1
 
     # Negative decay rates (applied as - beta * M)
     beta_bad: float = 0.02

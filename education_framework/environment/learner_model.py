@@ -313,24 +313,24 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.97
-    opp_min: int = 3
+    mastery_threshold: float = 0.95
+    opp_min: int = 2
 
     # --- tutee (protégé / learning-by-teaching) simulation ---
     # Conservative, bounded mastery bonus with explicit cost.
-    tutee_bonus_base: float = 0.015
-    tutee_bonus_mastery_low: float = 0.20
-    tutee_bonus_mastery_high: float = 0.80
+    tutee_bonus_base: float = 0.03
+    tutee_bonus_mastery_low: float = 0.05
+    tutee_bonus_mastery_high: float = 0.95
 
     # Per-action multipliers (quiz=retrieval, explain=self-explanation, fix=elaboration)
     tutee_mult_quiz: float = 1.0
-    tutee_mult_explain: float = 0.9
-    tutee_mult_fix: float = 0.8
+    tutee_mult_explain: float = 1.1
+    tutee_mult_fix: float = 1.0
 
     # Explicit effort cost in additional "step units" consumed by tutee actions.
     tutee_step_cost_quiz: int = 1
-    tutee_step_cost_explain: int = 2
-    tutee_step_cost_fix: int = 2
+    tutee_step_cost_explain: int = 1
+    tutee_step_cost_fix: int = 1
 
     # Duration multipliers (affects time_ema only; env also consumes step units via step_cost)
     tutee_duration_mult_quiz: float = 1.10
@@ -535,7 +535,7 @@ class KDDLearnerModel:
             mult = 0.0
 
         base = float(cfg.tutee_bonus_base)
-        return max(0.0, base * mult * (1.0 - float(mastery)))
+        return max(0.0, base * mult * math.sqrt(1.0 - float(mastery)))
 
     def _apply_tutee_bonus(self, topic_id: int, a: LowLevelAction) -> float:
         """Apply tutee bonus and return the applied delta."""
@@ -755,6 +755,8 @@ class KDDLearnerModel:
             # info["topic_completed"] = bool(self._topic_completed[topic_id])
 
         reward = r_step + topic_completion_bonus
+        # can add a lambda 0.5 or 1 or 2 to tutee bonud -> lambda * tutee_bonus
+        reward += tutee_bonus
         info = {
             "p_correct": p_correct,
             "cfa": cfa,
