@@ -130,11 +130,18 @@ class HighLevelAgent:
         if random.random() < self.cfg.epsilon:
             return random.randrange(self.num_actions)
 
+        # if self.cfg.use_tutee and np.mean(obs[-self.cfg.num_topics:]) > 0.85:  # avg mastery high
+        #     tutee_mask = [False if "tutee" in a else True for a in self.actions]
+        #     q_masked = q.clone();q_masked[:, ~torch.tensor(tutee_mask)] = -float('inf')
+        #     action = int(torch.argmax(q_masked).item())
+
         with torch.no_grad():
             obs_np = np.asarray(obs, dtype=np.float32)
             x = torch.from_numpy(obs_np).unsqueeze(0)  # CPU
             q = self.policy_net(x)
+
             return int(q.argmax(dim=1).item())
+
 
     def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool) -> None:
         self._ensure_networks(input_dim=len(obs))

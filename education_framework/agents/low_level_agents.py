@@ -10,6 +10,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from copy import deepcopy
+
 
 def _to_f32_batch(x) -> np.ndarray:
     """
@@ -33,14 +35,16 @@ class LowLevelAgentConfig:
     # DQN hyperparameters
     gamma: float = 0.95
     lr: float = 1e-3
-    epsilon: float = 0.1
+    epsilon: float = 0.2
 
     buffer_size: int = 50_000
     batch_size: int = 1024
     min_replay_size: int = 1_000
 
-    target_update_steps: int = 1_000
     train_every_steps: int = 100
+    # target_update_steps: int = 1_000
+    #To be faithful to the original paper: k=5
+    target_update_steps: int = 5 * train_every_steps
 
     max_grad_norm: float = 10.0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -380,15 +384,22 @@ class TutorLowLevelAgent(DQNLowLevelAgent):
 
 
 # ---------- TUTEE low-level agent ----------
+class TuteeLowLevelAgent(DQNLowLevelAgent):
+    def __init__(self, config: LowLevelAgentConfig):
+        cfg = deepcopy(config)
+        cfg.experience_sharing = False
+        cfg.share_mode = "off"
+        # optional: smaller buffer & faster updates for tutee
+        # cfg.buffer_size = 20_000
+        # cfg.train_every_steps = 50
+        super().__init__(cfg, actions=build_tutee_actions())
 
 def build_tutee_actions() -> List[str]:
-    """
-    Discrete requests made by the Tutee to the learner.
-    """
+    # align 1:1 with learner_model LowLevelAction semantics
     return [
-        "ask_explanation",  # "Can you explain this to me?"
-        "ask_worked_example",  # "Can you show me how to solve this?"
-        "show_mistake_and_ask_fix",  # tutee presents possibly-wrong solution; learner must correct
+        "tutee_quiz",
+        "tutee_explain",
+        "tutee_fix",
     ]
 
 

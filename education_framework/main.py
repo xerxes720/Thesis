@@ -71,6 +71,8 @@ class KDDEnvConfig:
     num_topics: int = 7
     max_steps: int = 500
     initial_mastery: float = 0.2
+    lambda_step: float = 0.005  # NEW: reward penalty per step-cost unit
+
 
 
 class KDDHierEnv:
@@ -95,6 +97,7 @@ class KDDHierEnv:
         self.cfg = cfg or KDDEnvConfig(num_topics=bundle.n_topics)
         self.num_topics = int(self.cfg.num_topics)
         self.max_steps = int(self.cfg.max_steps)
+        self.lambda_step = float(self.cfg.lambda_step)
 
         self.model = KDDLearnerModel(
             cfg=learner_cfg or KDDLearnerConfig(n_topics=self.num_topics),
@@ -120,9 +123,9 @@ class KDDHierEnv:
         self._tutee_action_map: Dict[str, ActionMeta] = {
             # tutee actions from build_tutee_actions()
             # Map to *distinct* action ids (5..7) so the QualityTreeBank can assign separate effects.
-            'ask_worked_example': ActionMeta(action=LowLevelAction.TUTEE_QUIZ, is_tutee=True, force_generation=False),
-            'ask_explanation': ActionMeta(action=LowLevelAction.TUTEE_EXPLAIN, is_tutee=True, force_generation=False),
-            'show_mistake_and_ask_fix': ActionMeta(action=LowLevelAction.TUTEE_FIX, is_tutee=True,
+            'tutee_quiz': ActionMeta(action=LowLevelAction.TUTEE_QUIZ, is_tutee=True, force_generation=False),
+            'tutee_explain': ActionMeta(action=LowLevelAction.TUTEE_EXPLAIN, is_tutee=True, force_generation=False),
+            'tutee_fix': ActionMeta(action=LowLevelAction.TUTEE_FIX, is_tutee=True,
                                                    force_generation=False),
         }
 
@@ -172,25 +175,41 @@ class KDDHierEnv:
         self.step_count += int(info.get("step_cost", 1))
 
         done = self._done()
-        # If time-out without completion, optionally damp reward (keeps training stable)
-        reward = float(info.get("reward", 0.0))
-        # if (self.step_count >= self.max_steps) and (not self.model.is_done()):
-        #     reward -= 0.25
+
+        base_reward = float(info.get("reward", 0.0))
+        step_cost = int(info.get("step_cost", 1))
+
+        # NEW: penalize step-cost in the reward signal (what RL learns)
+        reward = base_reward - self.lambda_step * step_cost
+
+        # Optional: keep diagnostics in info
+        info = dict(info)
+        info["base_reward"] = base_reward
+        info["step_penalty"] = float(self.lambda_step * step_cost)
+        info["reward_after_penalty"] = float(reward)
 
         return self.get_observation(), reward, done, {"mode": "tutor", **info}
 
     def step_tutee(self, topic_id: int, action: str):
         meta = self._tutee_action_map.get(action)
         if meta is None:
-            meta = self._tutee_action_map["ask_explanation"]
+            meta = self._tutee_action_map["tutee_explain"]
 
         _, info = self.model.step(topic_id=topic_id, action_meta=meta)
         self.step_count += int(info.get("step_cost", 1))
 
         done = self._done()
-        reward = float(info.get("reward", 0.0))
-        # if (self.step_count >= self.max_steps) and (not self.model.is_done()):
-        #     reward -= 0.25
+
+        base_reward = float(info.get("reward", 0.0))
+        step_cost = int(info.get("step_cost", 1))
+
+        # reward = base_reward - self.lambda_step * step_cost
+        reward = base_reward - self.lambda_step * step_cost * 0.75
+
+        info = dict(info)
+        info["base_reward"] = base_reward
+        info["step_penalty"] = float(self.lambda_step * step_cost)
+        info["reward_after_penalty"] = float(reward)
 
         return self.get_observation(), reward, done, {"mode": "tutee", **info}
 
@@ -555,15 +574,16 @@ def main():
         ep_completed: List[int] = []
 
         eps_start = 0.2
-        eps_end = 0.0
-        eps_decay_episodes = max(1, args.episodes)
+        eps_end = 0.005
+        # eps_decay_episodes = max(1, args.episodes)
+        eps_decay_episodes = 1200
 
         rows = []
         for episode in tqdm(range(1, args.episodes + 1),
                             desc=f"Training(seed={seed}, tutee={use_tutee}, base={tutee_bonus_base})"):
             if args.arch == "hrl":
                 (total_reward, steps, topic_counts, tutor_action_counts, tutee_action_counts,
-                 tutor_hl_count, tutee_hl_count, hl_trace, ll_rewards, tutee_reward_total) = run_episode(...)
+                 tutor_hl_count, tutee_hl_count, hl_trace, ll_rewards, tutee_reward_total) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
                 flat_agent_reward = 0.0
                 for ag in tutor_agents:
                     ag.reset_share_stats()
@@ -628,18 +648,18 @@ def main():
             window_rewards.append(float(total_reward))
             window_steps.append(int(steps))
 
-            if episode % args.log_window == 0:
-                progress = min(1.0, episode / eps_decay_episodes)
-                eps = eps_start + (eps_end - eps_start) * progress
+            # if episode % args.log_window == 0:
+            progress = min(1.0, episode / eps_decay_episodes)
+            eps = eps_start + (eps_end - eps_start) * progress
 
-                if args.arch == "hrl":
-                    high_level_agent.set_epsilon(eps)
-                    for ag in tutor_agents:
-                        ag.set_epsilon(eps)
-                    if tutee_agent is not None:
-                        tutee_agent.set_epsilon(eps)
-                else:
-                    flat_agent.set_epsilon(eps)
+            if args.arch == "hrl":
+                high_level_agent.set_epsilon(eps)
+                for ag in tutor_agents:
+                    ag.set_epsilon(eps)
+                if tutee_agent is not None:
+                    tutee_agent.set_epsilon(eps)
+            else:
+                flat_agent.set_epsilon(eps)
 
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
@@ -850,8 +870,9 @@ def main():
         window_tutee_hl = 0
 
         eps_start = 0.2
-        eps_end = 0.0
+        eps_end = 0.005
         eps_decay_episodes = max(1, args.episodes)
+        # eps_decay_episodes = 1200
 
         rows = []
 
@@ -1018,7 +1039,7 @@ def main():
                     for ag in tutor_agents:
                         ag.set_epsilon(eps)
                     if tutee_agent is not None:
-                        tutee_agent.set_epsilon(eps)
+                        tutee_agent.set_epsilon(eps*0.5)
                 else:
                     flat_agent.set_epsilon(eps)
 
