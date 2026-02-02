@@ -323,19 +323,19 @@ class KDDLearnerConfig:
     # --- tutee (protégé / learning-by-teaching) simulation ---
     # Conservative, bounded mastery bonus with explicit cost.
     # Ablate 0.03 0.06 0.08
-    tutee_bonus_base: float = 0.08
+    tutee_bonus_base: float = 0.05
     tutee_bonus_mastery_low: float = 0.05
     tutee_bonus_mastery_high: float = 0.95
 
     # Per-action multipliers (quiz=retrieval, explain=self-explanation, fix=elaboration)
     tutee_mult_quiz: float = 0.8
-    tutee_mult_explain: float = 1.75
-    tutee_mult_fix: float = 1.75
+    tutee_mult_explain: float = 1.4
+    tutee_mult_fix: float = 1.4
 
     # Explicit effort cost in additional "step units" consumed by tutee actions.
     tutee_step_cost_quiz: float = 1.0
-    tutee_step_cost_explain: float = 1.5
-    tutee_step_cost_fix: float = 1.5
+    tutee_step_cost_explain: float = 2.0
+    tutee_step_cost_fix: float = 2.0
 
     # Duration multipliers (affects time_ema only; env also consumes step units via step_cost)
     tutee_duration_mult_quiz: float = 1.10
@@ -343,11 +343,11 @@ class KDDLearnerConfig:
     tutee_duration_mult_fix: float = 1.20
 
     tutee_ready_quiz: float = 0.60
-    tutee_ready_explain: float = 0.30
-    tutee_ready_fix: float = 0.20
-    tutee_cap_high: float = 0.90
+    tutee_ready_explain: float = 0.20
+    tutee_ready_fix: float = 0.15
+    tutee_cap_high: float = 0.95
 
-    tutee_reward_lambda: float = 0.1  # start at 0, test 0.1 later
+    tutee_reward_lambda: float = 0.0  # start at 0, test 0.1 later
 
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02
@@ -359,12 +359,15 @@ class KDDLearnerConfig:
     inc_norm: float = 5.0
 
     # --- tutee -> future tutor learning boost ---
-    teach_boost_inc_quiz: float = 0.10
-    teach_boost_inc_explain: float = 0.25
-    teach_boost_inc_fix: float = 0.20
+    teach_boost_inc_quiz: float = 0.15
+    teach_boost_inc_explain: float = 0.30
+    teach_boost_inc_fix: float = 0.25
     teach_boost_decay: float = 0.95  # per step
     teach_boost_max: float = 1.0
-    teach_boost_beta_scale: float = 0.50  # tutor update multiplier range: 1 .. 1+0.5
+    teach_boost_beta_scale: float = 1.5  # tutor update multiplier range: 1 .. 1+0.5
+
+    force_end_on_all_complete: bool = True
+    step_penalty: float = 0.002  # start small; tune 0.001..0.01
 
 
 class KDDLearnerModel:
@@ -413,6 +416,7 @@ class KDDLearnerModel:
         self.state.inc_ema[:] = 0.0
         self.state.total_steps = 0
         self._topic_completed[:] = False
+        self.state.teach_boost[:] = 0.0
         return self.state.copy()
 
     def is_done(self) -> bool:
@@ -686,6 +690,8 @@ class KDDLearnerModel:
         if topic_id < 0 or topic_id >= self.cfg.n_topics:
             raise ValueError(f"topic_id must be in [0, {self.cfg.n_topics - 1}]")
 
+        forced_end = False
+
         s = self.state
 
         is_tutee = int(action_meta.action) >= 5
@@ -726,6 +732,22 @@ class KDDLearnerModel:
             # and we do NOT proxy tutee -> tutor for outcome prediction.
             m = float(s.mastery[topic_id])
 
+            # ready = False
+            # if action_meta.action == LowLevelAction.TUTEE_EXPLAIN:
+            #     ready = (self.cfg.tutee_ready_explain <= m <= self.cfg.tutee_cap_high)
+            # elif action_meta.action == LowLevelAction.TUTEE_FIX:
+            #     ready = (self.cfg.tutee_ready_fix <= m <= self.cfg.tutee_cap_high)
+            # elif action_meta.action == LowLevelAction.TUTEE_QUIZ:
+            #     ready = (self.cfg.tutee_ready_quiz <= m <= self.cfg.tutee_cap_high)
+            #
+            # # Apply quality update based on readiness:
+            # if ready:
+            #     quality = "good"  # Teaching when ready = good learning
+            # else:
+            #     quality = "neutral"  # Teaching when not ready = wasted effort
+            #
+            # boost = float(s.teach_boost[topic_id])
+            # self._apply_mastery_quality_update_with_boost(topic_id, quality, boost)
             # Conservative correctness model: no intrinsic boost; the learning gain comes
             # from the tutee mastery bonus below (not from "more correct" outcomes).
             p_correct = _clip01(m)
@@ -738,13 +760,13 @@ class KDDLearnerModel:
             base_dur = float(self.bundle.schema.dur_q50)
             if action_meta.action == LowLevelAction.TUTEE_EXPLAIN:
                 duration = base_dur * float(self.cfg.tutee_duration_mult_explain)
-                step_cost = int(self.cfg.tutee_step_cost_explain)
+                step_cost = float(self.cfg.tutee_step_cost_explain)
             elif action_meta.action == LowLevelAction.TUTEE_FIX:
                 duration = base_dur * float(self.cfg.tutee_duration_mult_fix)
-                step_cost = int(self.cfg.tutee_step_cost_fix)
+                step_cost = float(self.cfg.tutee_step_cost_fix)
             else:
                 duration = base_dur * float(self.cfg.tutee_duration_mult_quiz)
-                step_cost = int(self.cfg.tutee_step_cost_quiz)
+                step_cost = float(self.cfg.tutee_step_cost_quiz)
 
             # Small noise on duration to avoid degenerate constant signals.
             if duration > 1e-6:
@@ -773,7 +795,7 @@ class KDDLearnerModel:
         tutee_bonus = 0.0
         if is_tutee:
             # Neutral quality update (no penalty/reward from tutor-derived leaf qualities)
-            self._apply_mastery_quality_update(topic_id, "neutral")
+            # self._apply_mastery_quality_update(topic_id, "good")
             # Mechanistic bounded bonus
             tutee_bonus = self._apply_tutee_bonus(topic_id, action_meta.action)
             # NEW: increase per-topic teach_boost (protégé / self-explanation effect)
@@ -802,10 +824,13 @@ class KDDLearnerModel:
             step_cost=step_cost,
         )
         # NEW: decay teach_boost over time (short-lived effect)
-        s.teach_boost *= float(self.cfg.teach_boost_decay)
+        s.teach_boost[topic_id] *= float(self.cfg.teach_boost_decay)
 
         # 6) Reward shaping (optional)
         done = self.is_done()
+        if self.cfg.force_end_on_all_complete and all(self._topic_completed):
+            done = True
+            forced_end = True
         # reward = float(self.cfg.step_penalty + (self.cfg.correct_reward if cfa == 1 else 0.0) + (self.cfg.completion_reward if done else 0.0))
         v_next = self._paper_vars(self.state)
         den = np.maximum(np.abs(v_prev), 0.05)  # critical: avoid dividing by ~0
@@ -828,6 +853,8 @@ class KDDLearnerModel:
         reward = r_step + topic_completion_bonus
         # can add a lambda 0.5 or 1 or 2 to tutee bonud -> lambda * tutee_bonus
         reward += float(self.cfg.tutee_reward_lambda) * tutee_bonus
+        reward -= float(self.cfg.step_penalty) * float(step_cost)
+
         info = {
             "p_correct": p_correct,
             "cfa": cfa,
@@ -841,6 +868,7 @@ class KDDLearnerModel:
             "tutee_bonus": float(tutee_bonus),
             "reward": reward,
             "done": done,
+            "forced_end": forced_end,
         }
         return self.state.copy(), info
 

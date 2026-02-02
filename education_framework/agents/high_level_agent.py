@@ -190,6 +190,11 @@ class HighLevelAgent:
             next_q = self.target_net(s2_t).gather(1, next_actions).squeeze(1)
             target = r_t + self.cfg.gamma * (1.0 - d_t) * next_q
 
+        # q_probs = torch.softmax(q_sa, dim=0)
+        # entropy = -(q_probs * torch.log(q_probs + 1e-8)).sum()
+        # entropy_bonus = 0.01 * entropy  # Encourage exploration
+
+        # loss = nn.functional.mse_loss(q_sa, target) - entropy_bonus
         loss = nn.functional.mse_loss(q_sa, target)
 
         self.optimizer.zero_grad(set_to_none=True)

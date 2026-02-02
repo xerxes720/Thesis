@@ -456,7 +456,7 @@ def train_bundle_from_kdd_csv(
             # mechanistically in the simulator via a bounded mastery bonus + explicit cost.
             leaf_quality = dict(tutor_q)
             for a_tutee in (5, 6, 7):
-                leaf_quality[a_tutee] = "neutral"
+                leaf_quality[a_tutee] = "natural"
 
             leaf_to_action_quality[leaf] = leaf_quality
 

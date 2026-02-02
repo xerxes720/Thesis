@@ -15,6 +15,8 @@ from typing import Dict, List, Optional
 import joblib
 import numpy as np
 from tqdm import tqdm
+import random, numpy as np
+import torch
 
 # --- Ensure imports work whether you run:
 #   python -m education_framework.main
@@ -69,9 +71,9 @@ def topic_entropy(topic_ids):
 @dataclass
 class KDDEnvConfig:
     num_topics: int = 7
-    max_steps: int = 500
+    max_steps: int = 200
     initial_mastery: float = 0.2
-    lambda_step: float = 0.005  # NEW: reward penalty per step-cost unit
+    lambda_step: float = 0.02  # NEW: reward penalty per step-cost unit
 
 
 
@@ -204,7 +206,7 @@ class KDDHierEnv:
         step_cost = int(info.get("step_cost", 1))
 
         # reward = base_reward - self.lambda_step * step_cost
-        reward = base_reward - self.lambda_step * step_cost * 0.75
+        reward = base_reward - self.lambda_step * step_cost
 
         info = dict(info)
         info["base_reward"] = base_reward
@@ -317,6 +319,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
     total_reward = 0.0
     steps = 0
 
+    step_topic_count = {}
     tutor_hl_count = 0
     tutee_hl_count = 0
     hl_trace = []
@@ -345,6 +348,8 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
     while not done:
         hl_action_idx = high_level_agent.select_action(obs)
         mode, topic_id = high_level_agent.decode_action(hl_action_idx)
+        step_topic_count[topic_id] = step_topic_count.get(topic_id, 0) + 1
+
         topic_counts[topic_id] += 1
         hl_trace.append(f"{mode}_topic_{topic_id}")
 
@@ -398,6 +403,10 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         # Steps should reflect the simulator's effective step cost (tutee consumes more budget).
         steps += int(info.get("step_cost", 1))
         obs = next_obs
+        # if step_topic_count[topic_id] > 20:
+        #     print(f"WARNING: Topic {topic_id} selected {step_topic_count[topic_id]} times in one episode!")
+
+    # env.model.state.teach_boost *= float(env.model.cfg.teach_boost_decay)
 
     return (
         total_reward,
@@ -449,7 +458,7 @@ def main():
     ap.add_argument("--log_window", type=int, default=100)
     ap.add_argument("--use_tutee", action="store_true", default=False)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--max_steps", type=int, default=300)
+    ap.add_argument("--max_steps", type=int, default=200)
 
     # ---- sensitivity sweep for mechanistic tutee strength ----
     # Example:
@@ -792,6 +801,15 @@ def main():
             tutee_bonus_base: Optional[float],
             out_dir: Path,
     ) -> Dict[str, float]:
+
+        def set_global_seed(seed: int):
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
         """Train once and write a per-episode metrics.csv. Returns end-window summary metrics."""
 
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -799,6 +817,8 @@ def main():
         learner_cfg = KDDLearnerConfig(n_topics=bundle.n_topics)
         if tutee_bonus_base is not None:
             learner_cfg.tutee_bonus_base = float(tutee_bonus_base)
+
+        set_global_seed(seed)
 
         env = KDDHierEnv(
             bundle=bundle,
@@ -871,8 +891,8 @@ def main():
 
         eps_start = 0.2
         eps_end = 0.005
-        eps_decay_episodes = max(1, args.episodes)
-        # eps_decay_episodes = 1200
+        # eps_decay_episodes = max(1, args.episodes)
+        eps_decay_episodes = 1200
 
         rows = []
 
@@ -1033,13 +1053,14 @@ def main():
                 # epsilon schedule
                 progress = min(1.0, episode / eps_decay_episodes)
                 eps = eps_start + (eps_end - eps_start) * progress
-
+                eps = max(0.05, eps)
+                # eps = max(0.02, eps_start + (eps_end - eps_start) * progress)
                 if args.arch == "hrl":
                     high_level_agent.set_epsilon(eps)
                     for ag in tutor_agents:
                         ag.set_epsilon(eps)
                     if tutee_agent is not None:
-                        tutee_agent.set_epsilon(eps*0.5)
+                        tutee_agent.set_epsilon(max(0.08, eps * 0.75))
                 else:
                     flat_agent.set_epsilon(eps)
 
