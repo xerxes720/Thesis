@@ -1,3 +1,6 @@
+# Run with
+# powershell -ExecutionPolicy Bypass -File .\run_all.ps1
+
 $ErrorActionPreference = "Stop"
 
 $bundle   = "education_framework/data/kdd_bundle.joblib"
@@ -14,14 +17,14 @@ $logPath = "logs\run_all_$ts.log"
 Start-Transcript -Path $logPath -Append | Out-Null
 
 try {
-    python -m education_framework.scripts.build_decision_tree `
-      --csv education_framework/data/algebra_2005_2006_train.txt `
-      --out $bundle `
-      --n_topics 7 `
-      --max_depth 7 `
-      --min_leaf 50 `
-      --ema_alpha 0.2 `
-      --seed 0
+#     python -m education_framework.scripts.build_decision_tree `
+#       --csv education_framework/data/algebra_2005_2006_train.txt `
+#       --out $bundle `
+#       --n_topics 7 `
+#       --max_depth 7 `
+#       --min_leaf 50 `
+#       --ema_alpha 0.2 `
+#       --seed 0
 
     foreach ($seed in $seeds) {
         Write-Host "=============================="
@@ -38,25 +41,25 @@ try {
           --share_mode off `
           --seed $seed --run_tag "multi_no_es"
 
-        python -m education_framework.main `
-          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --experience_sharing `
-          --seed $seed --run_tag "multi_weighted_cka"
+#         python -m education_framework.main `
+#           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#           --experience_sharing `
+#           --seed $seed --run_tag "multi_weighted_cka"
 
         python -m education_framework.main `
           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
           --experience_sharing --share_mode mutual `
           --seed $seed --run_tag "multi_mutual"
 
-        python -m education_framework.main `
-          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --share_mode off --use_tutee `
-          --seed $seed --run_tag "tutee_no_es"
+#         python -m education_framework.main `
+#           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#           --share_mode off --use_tutee `
+#           --seed $seed --run_tag "tutee_no_es"
 
-        python -m education_framework.main `
-          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --experience_sharing --use_tutee `
-          --seed $seed --run_tag "tutee_weighted_cka"
+#         python -m education_framework.main `
+#           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#           --experience_sharing --use_tutee `
+#           --seed $seed --run_tag "tutee_weighted_cka"
     }
 
     Write-Host "ALL RUNS DONE."

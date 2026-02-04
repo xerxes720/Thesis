@@ -19,11 +19,10 @@ COND_DIRS = {
 }
 
 COND_FILTERS = {
-    "single-agent": ["arch=flat", "tutee=0"],
-    "multi-agent":  ["arch=hrl", "es=0", "tutee=0"],
-    "weighted transfer": ["arch=hrl", "es=1", "share=weighted_cka", "tutee=0"],
-    # "tutee": ["arch=hrl", "tutee=1", "es=0"]  # you can refine further (es=0 vs es=1)
-    "tutee": ["arch=hrl", "tutee=1", "es=1", "share=weighted_cka"]
+    "single-agent": ["flat_single"],
+    "multi-agent":  ["multi_no_es"],                 # no experience sharing
+    "weighted transfer": ["multi_weighted_cka"],     # experience sharing (weighted CKA)
+    "tutee": ["tutee_weighted_cka"],                 # tutee + (weighted CKA) in your names
 }
 
 # Needed for "average reward over all agents" proxy
@@ -54,6 +53,7 @@ def _find_metrics_csvs(path_or_glob: str):
             os.path.join(path_or_glob, "**", "metrics__*.csv"),
             os.path.join(path_or_glob, "**", "seed_*", "metrics.csv"),
             os.path.join(path_or_glob, "**", "seed_*", "metrics__*.csv"),
+            os.path.join(path_or_glob, "**", "*.csv"),
         ]
         out = []
         for pat in patterns:
@@ -65,13 +65,19 @@ def _find_metrics_csvs(path_or_glob: str):
 
 
 def _load_curves_for_condition(root_dir: str, must_contain=None):
-    """
-    Returns a list of DataFrames, one per seed, each with columns: episode, reward, steps.
-    """
     paths = _find_metrics_csvs(root_dir)
+
     if must_contain:
         must_contain = list(must_contain)
-        paths = [p for p in paths if all(s in os.path.basename(p) for s in must_contain)]
+
+        # def token_match(p: str) -> bool:
+        #     base = os.path.basename(p)
+        #     # strip extension, split your run naming convention
+        #     base = base.replace(".csv", "")
+        #     tokens = set(base.split("__"))
+        #     return all(req in tokens for req in must_contain)
+
+        paths = [p for p in paths if all(s in p for s in must_contain)]
     dfs = []
     for p in sorted(paths):
         df = pd.read_csv(p)
@@ -134,6 +140,29 @@ def _mean_curve(dfs, col: str, cumulative: bool = False):
     x = merged["episode"].to_numpy(dtype=int)
     return x, mean
 
+def _mean_and_std_curve(dfs, col: str, cumulative: bool = False):
+    if not dfs:
+        return None, None, None
+
+    merged = None
+    for i, df in enumerate(dfs):
+        d = df[["episode", col]].copy()
+        y = d[col].to_numpy(dtype=float)
+        if cumulative:
+            y = np.cumsum(y)
+        d[col] = y
+        d = d.rename(columns={col: f"{col}_{i}"})
+        merged = d if merged is None else merged.merge(d, on="episode", how="outer")
+
+    merged = merged.sort_values("episode").reset_index(drop=True)
+    ycols = [c for c in merged.columns if c.startswith(f"{col}_")]
+    mat = merged[ycols].to_numpy(dtype=float)
+
+    mean = np.nanmean(mat, axis=1)
+    std  = np.nanstd(mat, axis=1)
+
+    x = merged["episode"].to_numpy(dtype=int)
+    return x, mean, std
 
 
 # def _representative_curve(dfs, col: str, cumulative: bool = False):
@@ -165,6 +194,7 @@ def plot_fig5_reward_per_episode():
     multi_dfs = _load_curves_for_condition(COND_DIRS["multi-agent"], COND_FILTERS["multi-agent"])
     tutee_dfs = _load_curves_for_condition(COND_DIRS["tutee"], COND_FILTERS["tutee"])
 
+    print("Loaded:", len(single_dfs), len(multi_dfs), len(tutee_dfs))
 
     plt.figure(figsize=(7.2, 4.2))
 
@@ -197,40 +227,42 @@ def plot_fig5_reward_per_episode():
 
 def plot_fig6_steps_per_episode():
     single_dfs = _load_curves_for_condition(COND_DIRS["single-agent"], COND_FILTERS["single-agent"])
-    multi_dfs = _load_curves_for_condition(COND_DIRS["multi-agent"], COND_FILTERS["multi-agent"])
-    tutee_dfs = _load_curves_for_condition(COND_DIRS["tutee"], COND_FILTERS["tutee"])
+    multi_dfs  = _load_curves_for_condition(COND_DIRS["multi-agent"],  COND_FILTERS["multi-agent"])
+    tutee_dfs  = _load_curves_for_condition(COND_DIRS["tutee"],        COND_FILTERS["tutee"])
 
     plt.figure(figsize=(7.2, 4.2))
 
-    # xs, ys = _all_seed_curves(single_dfs, "steps", cumulative=False)
-    # xm, ym = _all_seed_curves(multi_dfs, "steps", cumulative=False)
-    # xt, yt = _all_seed_curves(tutee_dfs, "steps", cumulative=False)
-    # if xs is not None:    plt.plot(xs, ys, alpha=0.25, linewidth=1.0, label="Single-agent")
-    # if xm is not None:    plt.plot(xm, ym, alpha=0.25, linewidth=1.0, label="Multi-agent")
-    # if xt is not None:    plt.plot(xt, yt, alpha=0.25, linewidth=1.0, label="Tutee")
-    # plot all seeds (thin)
-    for x, y in _all_seed_curves(single_dfs, "steps", cumulative=False):
-        plt.plot(x, y, alpha=0.15, linewidth=1.0, label=None)
+    # 1) mean per-episode steps across seeds (NO cumulative here)
+    xs, ys = _mean_curve(single_dfs, "steps", cumulative=False)
+    xm, ym = _mean_curve(multi_dfs,  "steps", cumulative=False)
+    xt, yt = _mean_curve(tutee_dfs,  "steps", cumulative=False)
 
-    for x, y in _all_seed_curves(multi_dfs, "steps", cumulative=False):
-        plt.plot(x, y, alpha=0.15, linewidth=1.0, label=None)
+    # 2) smooth the per-episode signal (this is the right place to smooth)
+    if xs is not None: ys_s = _rolling_mean(ys, SMOOTH_W)
+    if xm is not None: ym_s = _rolling_mean(ym, SMOOTH_W)
+    if xt is not None: yt_s = _rolling_mean(yt, SMOOTH_W)
 
-    for x, y in _all_seed_curves(tutee_dfs, "steps", cumulative=False):
-        plt.plot(x, y, alpha=0.15, linewidth=1.0, label=None)
+    # Choose ONE of these two:
 
-    xs_avg, ys_avg = _mean_curve(single_dfs, "steps", cumulative=False)
-    xm_avg, ym_avg = _mean_curve(multi_dfs, "steps", cumulative=False)
-    xt_avg, yt_avg = _mean_curve(tutee_dfs, "steps", cumulative=False)
+    # A) Paper-style "steps per episode" (recommended)
+    if xs is not None: plt.plot(xs, ys_s, linewidth=2.5, label="Single-agent (Avg)")
+    if xm is not None: plt.plot(xm, ym_s, linewidth=2.5, label="Multi-agent (Avg)")
+    if xt is not None: plt.plot(xt, yt_s, linewidth=2.5, label="Tutee (Avg)")
+    plt.ylabel("Steps per Episode (to completion)")
 
-    if xs_avg is not None: plt.plot(xs_avg, _rolling_mean(ys_avg, SMOOTH_W), linewidth=2.5, label="Single-agent (Avg)")
-    if xm_avg is not None: plt.plot(xm_avg, _rolling_mean(ym_avg, SMOOTH_W), linewidth=2.5, label="Multi-agent (Avg)")
-    if xt_avg is not None: plt.plot(xt_avg, _rolling_mean(yt_avg, SMOOTH_W), linewidth=2.5, label="Tutee (Avg)")
+    # B) If you truly want cumulative over training, cumsum AFTER smoothing:
+    # if xs is not None: plt.plot(xs, np.cumsum(ys_s), linewidth=2.5, label="Single-agent (Avg)")
+    # if xm is not None: plt.plot(xm, np.cumsum(ym_s), linewidth=2.5, label="Multi-agent (Avg)")
+    # if xt is not None: plt.plot(xt, np.cumsum(yt_s), linewidth=2.5, label="Tutee (Avg)")
+    # plt.ylabel("Cumulative Steps (over Training)")
+
 
     plt.xlabel("Training Episode")
-    plt.ylabel("Steps per Episode")  # paper phrasing, but value is per-episode steps
     plt.tight_layout()
     plt.legend()
     plt.show()
+
+
 
 
 

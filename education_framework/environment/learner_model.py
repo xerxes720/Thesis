@@ -328,23 +328,23 @@ class KDDLearnerConfig:
     tutee_bonus_mastery_high: float = 0.95
 
     # Per-action multipliers (quiz=retrieval, explain=self-explanation, fix=elaboration)
-    tutee_mult_quiz: float = 0.8
+    tutee_mult_quiz: float = 1.0
     tutee_mult_explain: float = 1.4
     tutee_mult_fix: float = 1.4
 
     # Explicit effort cost in additional "step units" consumed by tutee actions.
     tutee_step_cost_quiz: float = 1.0
-    tutee_step_cost_explain: float = 1.2
-    tutee_step_cost_fix: float = 1.4
+    tutee_step_cost_explain: float = 1.1
+    tutee_step_cost_fix: float = 1.15
 
     # Duration multipliers (affects time_ema only; env also consumes step units via step_cost)
     tutee_duration_mult_quiz: float = 1.10
     tutee_duration_mult_explain: float = 1.25
     tutee_duration_mult_fix: float = 1.20
 
-    tutee_ready_quiz: float = 0.60
-    tutee_ready_explain: float = 0.20
-    tutee_ready_fix: float = 0.15
+    tutee_ready_quiz: float = 0.50
+    tutee_ready_explain: float = 0.60
+    tutee_ready_fix: float = 0.65
     tutee_cap_high: float = 0.98
 
     tutee_reward_lambda: float = 0.1  # start at 0, test 0.1 later
@@ -367,7 +367,7 @@ class KDDLearnerConfig:
     teach_boost_beta_scale: float = 1.5  # tutor update multiplier range: 1 .. 1+0.5
 
     force_end_on_all_complete: bool = True
-    step_penalty: float = 0.002  # start small; tune 0.001..0.01
+    step_penalty: float = 0.0 # start small; tune 0.001..0.01
 
 
 class KDDLearnerModel:
@@ -558,9 +558,9 @@ class KDDLearnerModel:
         elif quality == "good":
             m2 = m + (float(params.beta_good) * scale) * (1.0 - m)
         elif quality == "bad":
-            m2 = m - (float(params.beta_bad) * scale) * m
+            m2 = m - (float(params.beta_bad)) * m
         elif quality == "very_bad":
-            m2 = m - (float(params.beta_very_bad) * scale) * m
+            m2 = m - (float(params.beta_very_bad)) * m
         else:
             m2 = m
 
@@ -590,20 +590,61 @@ class KDDLearnerModel:
         base = float(cfg.tutee_bonus_base)
         return max(0.0, base * mult * math.sqrt(1.0 - float(mastery)))
 
+    import math
+    import random
+
     def _apply_tutee_bonus(self, topic_id: int, a: LowLevelAction) -> float:
         """Apply tutee bonus and return the applied delta."""
         s = self.state
         m = float(s.mastery[topic_id])
-        b = self._tutee_mastery_bonus(m, a)
-        # if a == LowLevelAction.TUTEE_EXPLAIN:
-        #     s.teach_boost[topic_id] = min(1.0, s.teach_boost[topic_id] + 0.25)
-        # elif a == LowLevelAction.TUTEE_FIX:
-        #     s.teach_boost[topic_id] = min(1.0, s.teach_boost[topic_id] + 0.20)
-        # elif a == LowLevelAction.TUTEE_QUIZ:
-        #     s.teach_boost[topic_id] = min(1.0, s.teach_boost[topic_id] + 0.10)
-        b *= (1.0 - m) * 2.0  # Diminishing: strong early (×2 at m=0), weak late (near 0 at m=0.95+)
+
+        # --- 1) readiness (hard gate or soft gate)
+        # Hard gate (simple & defendable): return 0.0 if not ready
+        if a == LowLevelAction.TUTEE_QUIZ and m < self.cfg.tutee_ready_quiz:
+            return 0.0
+        if a == LowLevelAction.TUTEE_EXPLAIN and m < self.cfg.tutee_ready_explain:
+            return 0.0
+        if a == LowLevelAction.TUTEE_FIX and m < self.cfg.tutee_ready_fix:
+            return 0.0
+
+        # base magnitude from your existing function
+        b = float(self._tutee_mastery_bonus(m, a))
+
+        # --- 2) desirable-difficulty bell (peaks at mid mastery, low at extremes)
+        # You can tune center/width; these are conservative defaults.
+        center = 0.70
+        width = 0.22
+        bell = math.exp(-((m - center) / width) ** 2)
+        b *= bell
+
+        # --- 3) success-conditioned retrieval (quiz)
+        if a == LowLevelAction.TUTEE_QUIZ:
+            # probability of successful retrieval increases with mastery
+            # simple logistic; tune slope if needed
+            k = 10.0
+            m0 = 0.55
+            p_succ = 1.0 / (1.0 + math.exp(-k * (m - m0)))
+            if random.random() > p_succ:
+                return 0.0  # failed retrieval => no mastery gain
+
+        # --- 4) fix only helps when there is "something to fix" (struggle signal)
+        if a == LowLevelAction.TUTEE_FIX:
+            # Use EMAs you already track (values are normalized later; keep it simple)
+            # If you know these EMAs are in raw units, clamp aggressively.
+            struggle = float(s.inc_ema[topic_id] + s.hint_ema[topic_id])
+            struggle = max(0.0, min(1.0, struggle))
+            b *= struggle
+            if b <= 0.0:
+                return 0.0
+
+        # --- 5) keep your diminishing returns (optional)
+        # Your original (1-m)*2 is fine; with bell this becomes "mid-mastery sweet spot".
+        b *= (1.0 - m) * 2.0
+
+        # --- 6) apply
         if b > 0.0:
             s.mastery[topic_id] = _clip01(m + b)
+
         return float(b)
 
     def _apply_observation_updates(
@@ -792,6 +833,8 @@ class KDDLearnerModel:
 
         v_prev = self._paper_vars(self.state)
 
+        m_before = float(s.mastery[topic_id])
+
         tutee_bonus = 0.0
         if is_tutee:
             # Neutral quality update (no penalty/reward from tutor-derived leaf qualities)
@@ -813,6 +856,10 @@ class KDDLearnerModel:
         else:
             boost = float(s.teach_boost[topic_id])
             self._apply_mastery_quality_update_with_boost(topic_id, quality, boost)
+
+        # If topic was already completed earlier this episode, don’t allow mastery to drop
+        if bool(self._topic_completed[topic_id]):
+            s.mastery[topic_id] = max(float(s.mastery[topic_id]), m_before)
 
         # 5) Observational updates (EMAs, opp, steps)
         self._apply_observation_updates(

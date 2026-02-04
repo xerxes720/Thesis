@@ -61,6 +61,14 @@ class LowLevelAgentConfig:
     share_weight_ceiling: float = 1.0
     cka_layers: Tuple[str, ...] = ("h1", "h2")  # which layers to use for similarity
 
+    # --- tutee readiness thresholds (copied from KDDLearnerConfig when building tutee agent) ---
+    tutee_ready_quiz: float = 0.50
+    tutee_ready_explain: float = 0.60
+    tutee_ready_fix: float = 0.65
+
+    # optional: penalty magnitude for "not ready"
+    tutee_not_ready_penalty: float = 0.5
+
 
 # ---------------- Replay Buffer ----------------
 
@@ -389,10 +397,39 @@ class TuteeLowLevelAgent(DQNLowLevelAgent):
         cfg = deepcopy(config)
         cfg.experience_sharing = False
         cfg.share_mode = "off"
-        # optional: smaller buffer & faster updates for tutee
-        # cfg.buffer_size = 20_000
-        # cfg.train_every_steps = 50
         super().__init__(cfg, actions=build_tutee_actions())
+
+    def select_action(self, obs: List[float]) -> int:
+        self._ensure_networks(input_dim=len(obs))
+
+        if random.random() < self.cfg.epsilon:
+            return random.randrange(self.num_actions)
+
+        # --- obs layout (confirmed in main.py):
+        # mastery is first block, topic_id is appended at the end via add_topic()
+        topic_id = int(float(obs[-1]))
+        topic_id = max(0, min(self.cfg.num_topics - 1, topic_id))
+        m = float(obs[topic_id])  # mastery[topic_id]
+
+        with torch.no_grad():
+            obs_np = np.asarray(obs, dtype=np.float32)
+            x = torch.from_numpy(obs_np).unsqueeze(0)
+            q = self.policy_net(x).squeeze(0).detach().cpu().numpy()
+
+        # action order is fixed by build_tutee_actions(): [quiz, explain, fix]
+        idx_quiz, idx_explain, idx_fix = 0, 1, 2
+        pen = float(getattr(self.cfg, "tutee_not_ready_penalty", 0.5))
+
+        if m < self.cfg.tutee_ready_quiz:
+            q[idx_quiz] -= pen
+        if m < self.cfg.tutee_ready_explain:
+            q[idx_explain] -= pen
+        if m < self.cfg.tutee_ready_fix:
+            q[idx_fix] -= pen
+
+        return int(q.argmax())
+
+
 
 def build_tutee_actions() -> List[str]:
     # align 1:1 with learner_model LowLevelAction semantics

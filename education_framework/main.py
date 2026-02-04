@@ -73,7 +73,7 @@ class KDDEnvConfig:
     num_topics: int = 7
     max_steps: int = 200
     initial_mastery: float = 0.2
-    lambda_step: float = 0.02  # NEW: reward penalty per step-cost unit
+    lambda_step: float = 0.03  # NEW: reward penalty per step-cost unit
 
 
 
@@ -147,6 +147,14 @@ class KDDHierEnv:
         global_mastery = float(np.mean(s.mastery))
         total_steps_norm = float(s.total_steps) / max(1.0, float(self.max_steps))
 
+        opp_min = max(1, int(self.model.cfg.opp_min))
+        opp_norm = np.clip(s.opp.astype(np.float32) / float(opp_min), 0.0, 1.0)
+
+        topic_complete = np.array(
+            [1.0 if self.model.is_topic_complete(i) else 0.0 for i in range(self.num_topics)],
+            dtype=np.float32,
+        )
+
         obs = np.concatenate(
             [
                 s.mastery.astype(np.float32),
@@ -154,6 +162,11 @@ class KDDHierEnv:
                 s.hint_ema.astype(np.float32),
                 s.time_ema.astype(np.float32),
                 s.inc_ema.astype(np.float32),
+
+                # NEW blocks:
+                opp_norm,  # length = num_topics
+                topic_complete,  # length = num_topics
+
                 np.array([global_mastery, total_steps_norm], dtype=np.float32),
             ],
             axis=0,
@@ -174,15 +187,16 @@ class KDDHierEnv:
             meta = self._tutor_action_map["quiz"]
 
         _, info = self.model.step(topic_id=topic_id, action_meta=meta)
-        self.step_count += int(info.get("step_cost", 1))
+        self.step_count += float(info.get("step_cost", 1))
 
         done = self._done()
 
         base_reward = float(info.get("reward", 0.0))
-        step_cost = int(info.get("step_cost", 1))
+        step_cost = float(info.get("step_cost", 1))
 
         # NEW: penalize step-cost in the reward signal (what RL learns)
         reward = base_reward - self.lambda_step * step_cost
+        # reward = base_reward
 
         # Optional: keep diagnostics in info
         info = dict(info)
@@ -198,15 +212,16 @@ class KDDHierEnv:
             meta = self._tutee_action_map["tutee_explain"]
 
         _, info = self.model.step(topic_id=topic_id, action_meta=meta)
-        self.step_count += int(info.get("step_cost", 1))
+        self.step_count += float(info.get("step_cost", 1))
 
         done = self._done()
 
         base_reward = float(info.get("reward", 0.0))
-        step_cost = int(info.get("step_cost", 1))
+        step_cost = float(info.get("step_cost", 1))
 
         # reward = base_reward - self.lambda_step * step_cost
         reward = base_reward - self.lambda_step * step_cost
+        # reward = base_reward
 
         info = dict(info)
         info["base_reward"] = base_reward
@@ -251,6 +266,10 @@ def create_agents(
         tutee_cfg = copy.copy(ll_cfg)
         tutee_cfg.experience_sharing = False
         tutee_cfg.share_mode = "off"
+        tutee_cfg.tutee_ready_quiz = 0.50
+        tutee_cfg.tutee_ready_explain = 0.60
+        tutee_cfg.tutee_ready_fix = 0.65
+        tutee_cfg.tutee_not_ready_penalty = 0.5
         tutee_agent = TuteeLowLevelAgent(tutee_cfg)
 
     # --- peers only when multi + sharing enabled ---
@@ -408,7 +427,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 
         total_reward += float(reward)
         # Steps should reflect the simulator's effective step cost (tutee consumes more budget).
-        steps += int(info.get("step_cost", 1))
+        steps += float(info.get("step_cost", 1))
         obs = next_obs
         # if step_topic_count[topic_id] > 20:
         #     print(f"WARNING: Topic {topic_id} selected {step_topic_count[topic_id]} times in one episode!")
@@ -448,7 +467,7 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
             flat_agent.update(obs, a_idx, reward, next_obs, done)
 
         total_reward += float(reward)
-        steps += int(info.get("step_cost", 1))
+        steps += float(info.get("step_cost", 1))
         obs = next_obs
 
     return total_reward, steps
@@ -530,27 +549,33 @@ def main():
     )
     args = ap.parse_args()
 
-    def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
-        # Keep names filesystem-friendly and stable.
-        arch = str(args.arch)
-        ll_mode = str(args.ll_mode) if args.arch == "hrl" else "single"
-        es = int(bool(args.experience_sharing)) if args.arch == "hrl" else 0
-        share_mode = str(args.share_mode) if args.arch == "hrl" else "off"
-        tutee = int(bool(use_tutee))
-
+    # def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
+    #     # Keep names filesystem-friendly and stable.
+    #     arch = str(args.arch)
+    #     ll_mode = str(args.ll_mode) if args.arch == "hrl" else "single"
+    #     es = int(bool(args.experience_sharing)) if args.arch == "hrl" else 0
+    #     share_mode = str(args.share_mode) if args.arch == "hrl" else "off"
+    #     tutee = int(bool(use_tutee))
+    #
+    #     tag = (args.run_tag or "").strip()
+    #     tag_part = f"__tag={tag}" if tag else ""
+    #
+    #     return (
+    #         f"metrics__arch={arch}"
+    #         f"__ll={ll_mode}"
+    #         f"__es={es}"
+    #         f"__share={share_mode}"
+    #         f"__tutee={tutee}"
+    #         f"__seed={int(seed)}"
+    #         f"{tag_part}"
+    #         f".csv"
+    #     )
+    def _metrics_filename(*, seed: int) -> str:
         tag = (args.run_tag or "").strip()
-        tag_part = f"__tag={tag}" if tag else ""
+        if not tag:
+            tag = "run"  # fallback so you never create a blank name
+        return f"{tag}__seed={int(seed)}.csv"
 
-        return (
-            f"metrics__arch={arch}"
-            f"__ll={ll_mode}"
-            f"__es={es}"
-            f"__share={share_mode}"
-            f"__tutee={tutee}"
-            f"__seed={int(seed)}"
-            f"{tag_part}"
-            f".csv"
-        )
     bundle_path = Path(args.bundle).resolve()
     if not bundle_path.exists():
         # also try relative to project root (the folder containing education_framework)
@@ -1087,14 +1112,14 @@ def main():
                 # epsilon schedule
                 progress = min(1.0, episode / eps_decay_episodes)
                 eps = eps_start + (eps_end - eps_start) * progress
-                eps = max(0.05, eps)
+                eps = max(0.01, eps)
                 # eps = max(0.02, eps_start + (eps_end - eps_start) * progress)
                 if args.arch == "hrl":
                     high_level_agent.set_epsilon(eps)
                     for ag in tutor_agents:
                         ag.set_epsilon(eps)
                     if tutee_agent is not None:
-                        tutee_agent.set_epsilon(max(0.08, eps * 0.75))
+                        tutee_agent.set_epsilon(max(0.015, eps * 0.75))
                 else:
                     flat_agent.set_epsilon(eps)
 
@@ -1114,9 +1139,8 @@ def main():
         ]
         header += [f"ll_reward_{i}" for i in range(num_topics)]
         header += ["tutee_reward_total"]
-        metrics_path = out_dir / _metrics_filename(seed=seed, use_tutee=use_tutee)
+        metrics_path = out_dir / _metrics_filename(seed=seed)
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
-        metrics_path = out_dir / _metrics_filename(seed=seed, use_tutee=use_tutee)
         with open(metrics_path, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(header)
