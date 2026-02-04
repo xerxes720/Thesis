@@ -1,0 +1,23 @@
+To build the decision tree run:
+python -m education_framework.scripts.build_decision_tree --csv education_framework/data/algebra_2005_2006_train.txt --out education_framework/data/kdd_bundle.joblib --n_topics 7 --max_depth 7 --min_leaf 50 --ema_alpha 0.2 --seed 0
+
+To run the model in single agent mode:
+python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300 --arch flat --ll_mode single --share_mode off
+
+To run multi agent without experience sharing:
+python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300 --share_mode off
+
+To run multi agent with cfk experience sharing:
+python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300 --experience_sharing
+
+To run multi agent with mutual experience sharing:
+python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300 --experience_sharing --share_mode mutual
+
+To run multi agent with tutee without experience sharing:
+python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300 --share_mode off --use_tutee
+
+To run multi agent with tutee with experience sharing:
+python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300 --experience_sharing --use_tutee
+
+Seeds:
+0, 23, 48

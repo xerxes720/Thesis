@@ -334,8 +334,8 @@ class KDDLearnerConfig:
 
     # Explicit effort cost in additional "step units" consumed by tutee actions.
     tutee_step_cost_quiz: float = 1.0
-    tutee_step_cost_explain: float = 2.0
-    tutee_step_cost_fix: float = 2.0
+    tutee_step_cost_explain: float = 1.2
+    tutee_step_cost_fix: float = 1.4
 
     # Duration multipliers (affects time_ema only; env also consumes step units via step_cost)
     tutee_duration_mult_quiz: float = 1.10
@@ -345,9 +345,9 @@ class KDDLearnerConfig:
     tutee_ready_quiz: float = 0.60
     tutee_ready_explain: float = 0.20
     tutee_ready_fix: float = 0.15
-    tutee_cap_high: float = 0.95
+    tutee_cap_high: float = 0.98
 
-    tutee_reward_lambda: float = 0.0  # start at 0, test 0.1 later
+    tutee_reward_lambda: float = 0.1  # start at 0, test 0.1 later
 
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02

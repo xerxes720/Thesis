@@ -244,7 +244,14 @@ def create_agents(
     else:
         tutor_agents = [TutorLowLevelAgent(ll_cfg) for _ in range(num_topics)]  # per-topic
 
-    tutee_agent = TuteeLowLevelAgent(ll_cfg) if use_tutee else None
+    import copy
+
+    tutee_agent = None
+    if use_tutee:
+        tutee_cfg = copy.copy(ll_cfg)
+        tutee_cfg.experience_sharing = False
+        tutee_cfg.share_mode = "off"
+        tutee_agent = TuteeLowLevelAgent(tutee_cfg)
 
     # --- peers only when multi + sharing enabled ---
     if ll_mode == "multi" and ll_cfg.experience_sharing and ll_cfg.share_mode != "off":
@@ -464,24 +471,24 @@ def main():
     # Example:
     #   python main.py --bundle ... --episodes 2000 --max_steps 300 \
     #     --sweep_bases 0.005,0.01,0.015,0.02,0.03 --sweep_seeds 0,1,2
-    ap.add_argument(
-        "--sweep_bases",
-        type=str,
-        default="",
-        help="Comma-separated list of tutee_bonus_base values to sweep (enables sweep mode).",
-    )
-    ap.add_argument(
-        "--sweep_seeds",
-        type=str,
-        default="",
-        help="Comma-separated list of seeds to run for each sweep setting (default: seed,seed+1,seed+2).",
-    )
-    ap.add_argument(
-        "--sweep_out_dir",
-        type=str,
-        default="runs/sweep",
-        help="Output directory for sweep runs and summary.csv.",
-    )
+    # ap.add_argument(
+    #     "--sweep_bases",
+    #     type=str,
+    #     default="",
+    #     help="Comma-separated list of tutee_bonus_base values to sweep (enables sweep mode).",
+    # )
+    # ap.add_argument(
+    #     "--sweep_seeds",
+    #     type=str,
+    #     default="",
+    #     help="Comma-separated list of seeds to run for each sweep setting (default: seed,seed+1,seed+2).",
+    # )
+    # ap.add_argument(
+    #     "--sweep_out_dir",
+    #     type=str,
+    #     default="runs/sweep",
+    #     help="Output directory for sweep runs and summary.csv.",
+    # )
     ap.add_argument(
         "--eval_window",
         type=int,
@@ -515,8 +522,35 @@ def main():
         choices=["hrl", "flat"],
         help="hrl: High-level + low-level (paper main). flat: single-agent RL baseline (paper exp1).",
     )
+    ap.add_argument(
+        "--run_tag",
+        type=str,
+        default="",
+        help="Optional extra tag appended to metrics filename (e.g., 'ablation1').",
+    )
     args = ap.parse_args()
 
+    def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
+        # Keep names filesystem-friendly and stable.
+        arch = str(args.arch)
+        ll_mode = str(args.ll_mode) if args.arch == "hrl" else "single"
+        es = int(bool(args.experience_sharing)) if args.arch == "hrl" else 0
+        share_mode = str(args.share_mode) if args.arch == "hrl" else "off"
+        tutee = int(bool(use_tutee))
+
+        tag = (args.run_tag or "").strip()
+        tag_part = f"__tag={tag}" if tag else ""
+
+        return (
+            f"metrics__arch={arch}"
+            f"__ll={ll_mode}"
+            f"__es={es}"
+            f"__share={share_mode}"
+            f"__tutee={tutee}"
+            f"__seed={int(seed)}"
+            f"{tag_part}"
+            f".csv"
+        )
     bundle_path = Path(args.bundle).resolve()
     if not bundle_path.exists():
         # also try relative to project root (the folder containing education_framework)
@@ -541,256 +575,256 @@ def main():
             return []
         return [cast_fn(x.strip()) for x in s.split(",") if x.strip()]
 
-    def _run_training(*, seed: int, use_tutee: bool, tutee_bonus_base: float, out_dir: Path):
-        """Run one training job and write per-episode metrics + a compact JSON summary."""
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        env = KDDHierEnv(
-            bundle=bundle,
-            cfg=KDDEnvConfig(num_topics=bundle.n_topics, max_steps=args.max_steps, initial_mastery=0.2),
-            learner_cfg=KDDLearnerConfig(n_topics=bundle.n_topics, tutee_bonus_base=float(tutee_bonus_base)),
-            seed=int(seed),
-        )
-
-        num_topics = env.num_topics
-
-        if args.arch == "hrl":
-            high_level_agent, tutor_agents, tutee_agent = create_agents(
-                num_topics=bundle.n_topics,
-                use_tutee=use_tutee,
-                ll_mode=args.ll_mode,
-                experience_sharing=args.experience_sharing,
-                share_mode=args.share_mode,
-            )
-            flat_agent = None
-        else:
-            # --- flat single-agent RL baseline (no HL/LL decomposition) ---
-            ll_cfg = LowLevelAgentConfig(num_topics=bundle.n_topics)
-            ll_cfg.device = "cpu"
-            ll_cfg.experience_sharing = False
-            ll_cfg.share_mode = "off"
-            flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics, use_tutee=use_tutee)
-
-            high_level_agent, tutor_agents, tutee_agent = None, [], None
-
-        window_rewards: List[float] = []
-        window_steps: List[int] = []
-
-        ep_rewards: List[float] = []
-        ep_steps: List[int] = []
-        ep_mastery_mean: List[float] = []
-        ep_mastery_min: List[float] = []
-        ep_completed: List[int] = []
-
-        eps_start = 0.2
-        eps_end = 0.005
-        # eps_decay_episodes = max(1, args.episodes)
-        eps_decay_episodes = 1200
-
-        rows = []
-        for episode in tqdm(range(1, args.episodes + 1),
-                            desc=f"Training(seed={seed}, tutee={use_tutee}, base={tutee_bonus_base})"):
-            if args.arch == "hrl":
-                (total_reward, steps, topic_counts, tutor_action_counts, tutee_action_counts,
-                 tutor_hl_count, tutee_hl_count, hl_trace, ll_rewards, tutee_reward_total) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
-                flat_agent_reward = 0.0
-                for ag in tutor_agents:
-                    ag.reset_share_stats()
-
-            else:
-                total_reward, steps = run_episode_flat(env, flat_agent, train=True)
-                flat_agent_reward = float(total_reward)
-                ll_rewards = [0.0 for _ in range(num_topics)]
-                tutee_reward_total = 0.0
-                flat_agent.agent.reset_share_stats()
-            m_vec = env.model.state.mastery
-            m_mean = float(np.mean(m_vec))
-            m_min = float(np.min(m_vec))
-            completed = 1 if env.model.is_done() else 0
-
-            # ---- collect sharing diagnostics for this episode ----
-            if args.arch == "hrl":
-                n_ll_agents = len(tutor_agents)
-                share_enabled_eff = int(tutor_agents and tutor_agents[0].cfg.experience_sharing and tutor_agents[0].cfg.share_mode != "off")
-                share_mode_eff = tutor_agents[0].cfg.share_mode if tutor_agents else "off"
-                stats_list = [ag.pop_share_stats() for ag in tutor_agents]
-            else:
-                n_ll_agents = 1
-                share_enabled_eff = 0
-                share_mode_eff = "off"
-                stats_list = [flat_agent.agent.pop_share_stats()]
-
-            share_attempts = sum(s["share_attempts"] for s in stats_list)
-            share_peer_samples = sum(s["peer_samples"] for s in stats_list)
-            peer_weight_sum = sum(s["peer_weight_sum"] for s in stats_list)
-            eligible_peers_sum = sum(s["eligible_peers_sum"] for s in stats_list)
-            selected_peers_sum = sum(s["selected_peers_sum"] for s in stats_list)
-
-            share_mean_peer_weight = (peer_weight_sum / share_peer_samples) if share_peer_samples > 0 else 0.0
-            share_eligible_peers_mean = (eligible_peers_sum / share_attempts) if share_attempts > 0 else 0.0
-            share_selected_peers_mean = (selected_peers_sum / share_attempts) if share_attempts > 0 else 0.0
-
-
-            ep_rewards.append(float(total_reward))
-            ep_steps.append(int(steps))
-            ep_mastery_mean.append(m_mean)
-            ep_mastery_min.append(m_min)
-            ep_completed.append(int(completed))
-            rows.append([
-                episode, float(total_reward), int(steps), m_mean, m_min, completed,
-                float(flat_agent_reward),
-
-                # ---- sharing diagnostics ----
-                int(n_ll_agents),
-                int(share_enabled_eff),
-                str(share_mode_eff),
-                int(share_attempts),
-                int(share_peer_samples),
-                float(share_mean_peer_weight),
-                float(share_eligible_peers_mean),
-                float(share_selected_peers_mean),
-
-                *[float(x) for x in ll_rewards],
-                float(tutee_reward_total),
-            ])
-
-            window_rewards.append(float(total_reward))
-            window_steps.append(int(steps))
-
-            # if episode % args.log_window == 0:
-            progress = min(1.0, episode / eps_decay_episodes)
-            eps = eps_start + (eps_end - eps_start) * progress
-
-            if args.arch == "hrl":
-                high_level_agent.set_epsilon(eps)
-                for ag in tutor_agents:
-                    ag.set_epsilon(eps)
-                if tutee_agent is not None:
-                    tutee_agent.set_epsilon(eps)
-            else:
-                flat_agent.set_epsilon(eps)
-
-        header = [
-            "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
-            "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward",
-
-            # ---- sharing diagnostics ----
-            "n_ll_agents",
-            "share_enabled_eff",
-            "share_mode_eff",
-            "share_attempts",
-            "share_peer_samples",
-            "share_mean_peer_weight",
-            "share_eligible_peers_mean",
-            "share_selected_peers_mean",
-        ]
-        header += [f"ll_reward_{i}" for i in range(num_topics)]
-        header += ["tutee_reward_total"]
-        # write per-episode metrics
-        with open(out_dir / "metrics.csv", "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(header)
-            for row in rows:
-                # row is: [episode, reward, steps, mastery_mean, mastery_min, completed, ll_reward_0.., tutee_reward_total]
-                w.writerow([
-                    args.arch, args.ll_mode, int(args.experience_sharing), args.share_mode, int(use_tutee),
-                    *row
-                ])
-
-        # compute end-window summary
-        w = max(1, int(args.eval_window))
-        r_last = ep_rewards[-w:]
-        s_last = ep_steps[-w:]
-        mm_last = ep_mastery_mean[-w:]
-        mn_last = ep_mastery_min[-w:]
-        c_last = ep_completed[-w:]
-
-        summary = {
-            "seed": int(seed),
-            "arch": str(args.arch),
-            "use_tutee": bool(use_tutee),
-            "tutee_bonus_base": float(tutee_bonus_base),
-            "episodes": int(args.episodes),
-            "max_steps": int(args.max_steps),
-            "eval_window": int(w),
-            "reward_lastW_mean": float(np.mean(r_last)) if r_last else 0.0,
-            "steps_lastW_mean": float(np.mean(s_last)) if s_last else 0.0,
-            "mastery_mean_lastW_mean": float(np.mean(mm_last)) if mm_last else 0.0,
-            "mastery_min_lastW_mean": float(np.mean(mn_last)) if mn_last else 0.0,
-            "completion_rate_lastW": float(np.mean(c_last)) if c_last else 0.0,
-            "ll_mode": str(args.ll_mode) if args.arch == "hrl" else "n/a",
-            "experience_sharing": bool(args.experience_sharing) if args.arch == "hrl" else False,
-            "share_mode": str(args.share_mode) if args.arch == "hrl" else "off",
-        }
-        with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
-            import json
-            json.dump(summary, f, indent=2)
-        return summary
-
-    # ---- Sweep mode ----
-    sweep_bases = _parse_csv_list(args.sweep_bases, float)
-    if sweep_bases:
-        out_root = Path(args.sweep_out_dir)
-        out_root.mkdir(parents=True, exist_ok=True)
-
-        seeds = _parse_csv_list(args.sweep_seeds, int)
-        if not seeds:
-            seeds = [int(args.seed), int(args.seed) + 1, int(args.seed) + 2]
-
-        all_summaries = []
-
-        # baseline: no tutee
-        for sd in seeds:
-            sdir = out_root / f"baseline_no_tutee" / f"seed_{sd}"
-            all_summaries.append(_run_training(seed=sd, use_tutee=False, tutee_bonus_base=0.0, out_dir=sdir))
-
-        # tutee runs per base
-        for base in sweep_bases:
-            for sd in seeds:
-                sdir = out_root / f"tutee_base_{base:.3f}" / f"seed_{sd}"
-                all_summaries.append(_run_training(seed=sd, use_tutee=True, tutee_bonus_base=float(base), out_dir=sdir))
-
-        # write a single sweep summary CSV
-        with open(out_root / "summary.csv", "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow([
-                "seed",
-                'arch',
-                "ll_mode",
-                "experience_sharing",
-                "share_mode",
-                "use_tutee",
-                "tutee_bonus_base",
-                "episodes",
-                "max_steps",
-                "eval_window",
-                "reward_lastW_mean",
-                "steps_lastW_mean",
-                "mastery_mean_lastW_mean",
-                "mastery_min_lastW_mean",
-                "completion_rate_lastW",
-            ])
-            for s in all_summaries:
-                w.writerow([
-                    s["seed"],
-                    s['arch'],
-                    s["ll_mode"],
-                    int(s["experience_sharing"]),
-                    s["share_mode"],
-                    int(s["use_tutee"]),
-                    s["tutee_bonus_base"],
-                    s["episodes"],
-                    s["max_steps"],
-                    s["eval_window"],
-                    f"{s['reward_lastW_mean']:.6f}",
-                    f"{s['steps_lastW_mean']:.3f}",
-                    f"{s['mastery_mean_lastW_mean']:.6f}",
-                    f"{s['mastery_min_lastW_mean']:.6f}",
-                    f"{s['completion_rate_lastW']:.6f}",
-                ])
-
-        print(f"Sweep finished. Wrote: {out_root / 'summary.csv'}")
-        return
+    # def _run_training(*, seed: int, use_tutee: bool, tutee_bonus_base: float, out_dir: Path):
+    #     """Run one training job and write per-episode metrics + a compact JSON summary."""
+    #     out_dir.mkdir(parents=True, exist_ok=True)
+    #
+    #     env = KDDHierEnv(
+    #         bundle=bundle,
+    #         cfg=KDDEnvConfig(num_topics=bundle.n_topics, max_steps=args.max_steps, initial_mastery=0.2),
+    #         learner_cfg=KDDLearnerConfig(n_topics=bundle.n_topics, tutee_bonus_base=float(tutee_bonus_base)),
+    #         seed=int(seed),
+    #     )
+    #
+    #     num_topics = env.num_topics
+    #
+    #     if args.arch == "hrl":
+    #         high_level_agent, tutor_agents, tutee_agent = create_agents(
+    #             num_topics=bundle.n_topics,
+    #             use_tutee=use_tutee,
+    #             ll_mode=args.ll_mode,
+    #             experience_sharing=args.experience_sharing,
+    #             share_mode=args.share_mode,
+    #         )
+    #         flat_agent = None
+    #     else:
+    #         # --- flat single-agent RL baseline (no HL/LL decomposition) ---
+    #         ll_cfg = LowLevelAgentConfig(num_topics=bundle.n_topics)
+    #         ll_cfg.device = "cpu"
+    #         ll_cfg.experience_sharing = False
+    #         ll_cfg.share_mode = "off"
+    #         flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics, use_tutee=use_tutee)
+    #
+    #         high_level_agent, tutor_agents, tutee_agent = None, [], None
+    #
+    #     window_rewards: List[float] = []
+    #     window_steps: List[int] = []
+    #
+    #     ep_rewards: List[float] = []
+    #     ep_steps: List[int] = []
+    #     ep_mastery_mean: List[float] = []
+    #     ep_mastery_min: List[float] = []
+    #     ep_completed: List[int] = []
+    #
+    #     eps_start = 0.2
+    #     eps_end = 0.005
+    #     # eps_decay_episodes = max(1, args.episodes)
+    #     eps_decay_episodes = 1200
+    #
+    #     rows = []
+    #     for episode in tqdm(range(1, args.episodes + 1),
+    #                         desc=f"Training(seed={seed}, tutee={use_tutee}, base={tutee_bonus_base})"):
+    #         if args.arch == "hrl":
+    #             (total_reward, steps, topic_counts, tutor_action_counts, tutee_action_counts,
+    #              tutor_hl_count, tutee_hl_count, hl_trace, ll_rewards, tutee_reward_total) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
+    #             flat_agent_reward = 0.0
+    #             for ag in tutor_agents:
+    #                 ag.reset_share_stats()
+    #
+    #         else:
+    #             total_reward, steps = run_episode_flat(env, flat_agent, train=True)
+    #             flat_agent_reward = float(total_reward)
+    #             ll_rewards = [0.0 for _ in range(num_topics)]
+    #             tutee_reward_total = 0.0
+    #             flat_agent.agent.reset_share_stats()
+    #         m_vec = env.model.state.mastery
+    #         m_mean = float(np.mean(m_vec))
+    #         m_min = float(np.min(m_vec))
+    #         completed = 1 if env.model.is_done() else 0
+    #
+    #         # ---- collect sharing diagnostics for this episode ----
+    #         if args.arch == "hrl":
+    #             n_ll_agents = len(tutor_agents)
+    #             share_enabled_eff = int(tutor_agents and tutor_agents[0].cfg.experience_sharing and tutor_agents[0].cfg.share_mode != "off")
+    #             share_mode_eff = tutor_agents[0].cfg.share_mode if tutor_agents else "off"
+    #             stats_list = [ag.pop_share_stats() for ag in tutor_agents]
+    #         else:
+    #             n_ll_agents = 1
+    #             share_enabled_eff = 0
+    #             share_mode_eff = "off"
+    #             stats_list = [flat_agent.agent.pop_share_stats()]
+    #
+    #         share_attempts = sum(s["share_attempts"] for s in stats_list)
+    #         share_peer_samples = sum(s["peer_samples"] for s in stats_list)
+    #         peer_weight_sum = sum(s["peer_weight_sum"] for s in stats_list)
+    #         eligible_peers_sum = sum(s["eligible_peers_sum"] for s in stats_list)
+    #         selected_peers_sum = sum(s["selected_peers_sum"] for s in stats_list)
+    #
+    #         share_mean_peer_weight = (peer_weight_sum / share_peer_samples) if share_peer_samples > 0 else 0.0
+    #         share_eligible_peers_mean = (eligible_peers_sum / share_attempts) if share_attempts > 0 else 0.0
+    #         share_selected_peers_mean = (selected_peers_sum / share_attempts) if share_attempts > 0 else 0.0
+    #
+    #
+    #         ep_rewards.append(float(total_reward))
+    #         ep_steps.append(int(steps))
+    #         ep_mastery_mean.append(m_mean)
+    #         ep_mastery_min.append(m_min)
+    #         ep_completed.append(int(completed))
+    #         rows.append([
+    #             episode, float(total_reward), int(steps), m_mean, m_min, completed,
+    #             float(flat_agent_reward),
+    #
+    #             # ---- sharing diagnostics ----
+    #             int(n_ll_agents),
+    #             int(share_enabled_eff),
+    #             str(share_mode_eff),
+    #             int(share_attempts),
+    #             int(share_peer_samples),
+    #             float(share_mean_peer_weight),
+    #             float(share_eligible_peers_mean),
+    #             float(share_selected_peers_mean),
+    #
+    #             *[float(x) for x in ll_rewards],
+    #             float(tutee_reward_total),
+    #         ])
+    #
+    #         window_rewards.append(float(total_reward))
+    #         window_steps.append(int(steps))
+    #
+    #         # if episode % args.log_window == 0:
+    #         progress = min(1.0, episode / eps_decay_episodes)
+    #         eps = eps_start + (eps_end - eps_start) * progress
+    #
+    #         if args.arch == "hrl":
+    #             high_level_agent.set_epsilon(eps)
+    #             for ag in tutor_agents:
+    #                 ag.set_epsilon(eps)
+    #             if tutee_agent is not None:
+    #                 tutee_agent.set_epsilon(eps)
+    #         else:
+    #             flat_agent.set_epsilon(eps)
+    #
+    #     header = [
+    #         "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
+    #         "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward",
+    #
+    #         # ---- sharing diagnostics ----
+    #         "n_ll_agents",
+    #         "share_enabled_eff",
+    #         "share_mode_eff",
+    #         "share_attempts",
+    #         "share_peer_samples",
+    #         "share_mean_peer_weight",
+    #         "share_eligible_peers_mean",
+    #         "share_selected_peers_mean",
+    #     ]
+    #     header += [f"ll_reward_{i}" for i in range(num_topics)]
+    #     header += ["tutee_reward_total"]
+    #     # write per-episode metrics
+    #     with open(out_dir / "metrics.csv", "w", newline="") as f:
+    #         w = csv.writer(f)
+    #         w.writerow(header)
+    #         for row in rows:
+    #             # row is: [episode, reward, steps, mastery_mean, mastery_min, completed, ll_reward_0.., tutee_reward_total]
+    #             w.writerow([
+    #                 args.arch, args.ll_mode, int(args.experience_sharing), args.share_mode, int(use_tutee),
+    #                 *row
+    #             ])
+    #
+    #     # compute end-window summary
+    #     w = max(1, int(args.eval_window))
+    #     r_last = ep_rewards[-w:]
+    #     s_last = ep_steps[-w:]
+    #     mm_last = ep_mastery_mean[-w:]
+    #     mn_last = ep_mastery_min[-w:]
+    #     c_last = ep_completed[-w:]
+    #
+    #     summary = {
+    #         "seed": int(seed),
+    #         "arch": str(args.arch),
+    #         "use_tutee": bool(use_tutee),
+    #         "tutee_bonus_base": float(tutee_bonus_base),
+    #         "episodes": int(args.episodes),
+    #         "max_steps": int(args.max_steps),
+    #         "eval_window": int(w),
+    #         "reward_lastW_mean": float(np.mean(r_last)) if r_last else 0.0,
+    #         "steps_lastW_mean": float(np.mean(s_last)) if s_last else 0.0,
+    #         "mastery_mean_lastW_mean": float(np.mean(mm_last)) if mm_last else 0.0,
+    #         "mastery_min_lastW_mean": float(np.mean(mn_last)) if mn_last else 0.0,
+    #         "completion_rate_lastW": float(np.mean(c_last)) if c_last else 0.0,
+    #         "ll_mode": str(args.ll_mode) if args.arch == "hrl" else "n/a",
+    #         "experience_sharing": bool(args.experience_sharing) if args.arch == "hrl" else False,
+    #         "share_mode": str(args.share_mode) if args.arch == "hrl" else "off",
+    #     }
+    #     with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
+    #         import json
+    #         json.dump(summary, f, indent=2)
+    #     return summary
+    #
+    # # ---- Sweep mode ----
+    # sweep_bases = _parse_csv_list(args.sweep_bases, float)
+    # if sweep_bases:
+    #     out_root = Path(args.sweep_out_dir)
+    #     out_root.mkdir(parents=True, exist_ok=True)
+    #
+    #     seeds = _parse_csv_list(args.sweep_seeds, int)
+    #     if not seeds:
+    #         seeds = [int(args.seed), int(args.seed) + 1, int(args.seed) + 2]
+    #
+    #     all_summaries = []
+    #
+    #     # baseline: no tutee
+    #     for sd in seeds:
+    #         sdir = out_root / f"baseline_no_tutee" / f"seed_{sd}"
+    #         all_summaries.append(_run_training(seed=sd, use_tutee=False, tutee_bonus_base=0.0, out_dir=sdir))
+    #
+    #     # tutee runs per base
+    #     for base in sweep_bases:
+    #         for sd in seeds:
+    #             sdir = out_root / f"tutee_base_{base:.3f}" / f"seed_{sd}"
+    #             all_summaries.append(_run_training(seed=sd, use_tutee=True, tutee_bonus_base=float(base), out_dir=sdir))
+    #
+    #     # write a single sweep summary CSV
+    #     with open(out_root / "summary.csv", "w", newline="") as f:
+    #         w = csv.writer(f)
+    #         w.writerow([
+    #             "seed",
+    #             'arch',
+    #             "ll_mode",
+    #             "experience_sharing",
+    #             "share_mode",
+    #             "use_tutee",
+    #             "tutee_bonus_base",
+    #             "episodes",
+    #             "max_steps",
+    #             "eval_window",
+    #             "reward_lastW_mean",
+    #             "steps_lastW_mean",
+    #             "mastery_mean_lastW_mean",
+    #             "mastery_min_lastW_mean",
+    #             "completion_rate_lastW",
+    #         ])
+    #         for s in all_summaries:
+    #             w.writerow([
+    #                 s["seed"],
+    #                 s['arch'],
+    #                 s["ll_mode"],
+    #                 int(s["experience_sharing"]),
+    #                 s["share_mode"],
+    #                 int(s["use_tutee"]),
+    #                 s["tutee_bonus_base"],
+    #                 s["episodes"],
+    #                 s["max_steps"],
+    #                 s["eval_window"],
+    #                 f"{s['reward_lastW_mean']:.6f}",
+    #                 f"{s['steps_lastW_mean']:.3f}",
+    #                 f"{s['mastery_mean_lastW_mean']:.6f}",
+    #                 f"{s['mastery_min_lastW_mean']:.6f}",
+    #                 f"{s['completion_rate_lastW']:.6f}",
+    #             ])
+    #
+    #     print(f"Sweep finished. Wrote: {out_root / 'summary.csv'}")
+    #     return
 
     # ---- Single run mode (original behavior) ----
 
@@ -1080,15 +1114,17 @@ def main():
         ]
         header += [f"ll_reward_{i}" for i in range(num_topics)]
         header += ["tutee_reward_total"]
-        with open(out_dir / "metrics.csv", "w", newline="") as f:
+        metrics_path = out_dir / _metrics_filename(seed=seed, use_tutee=use_tutee)
+        metrics_path.parent.mkdir(parents=True, exist_ok=True)
+        metrics_path = out_dir / _metrics_filename(seed=seed, use_tutee=use_tutee)
+        with open(metrics_path, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(header)
             for row in rows:
-                # row is: [episode, reward, steps, mastery_mean, mastery_min, completed, ll_reward_0.., tutee_reward_total]
-                w.writerow([
-                    args.arch, args.ll_mode, int(args.experience_sharing), args.share_mode, int(use_tutee),
-                    *row
-                ])
+                w.writerow(
+                    [args.arch, args.ll_mode, int(args.experience_sharing), args.share_mode, int(use_tutee), *row])
+
+        print(f"Wrote metrics: {metrics_path}")
 
         # end-window summary
         ew = int(max(1, min(args.eval_window, len(rows))))
