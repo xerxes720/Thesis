@@ -72,7 +72,7 @@ def topic_entropy(topic_ids):
 class KDDEnvConfig:
     num_topics: int = 7
     max_steps: int = 200
-    initial_mastery: float = 0.2
+    initial_mastery: float = 0.1
     lambda_step: float = 0.03  # NEW: reward penalty per step-cost unit
 
 
@@ -885,6 +885,8 @@ def main():
             learner_cfg=learner_cfg,
             seed=seed,
         )
+
+
 
         num_topics = env.num_topics
 

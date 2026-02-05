@@ -40,11 +40,11 @@ class HighLevelAgentConfig:
     epsilon: float = 0.1
 
     buffer_size: int = 50_000
-    batch_size: int = 1024
+    batch_size: int = 256
     min_replay_size: int = 1_000
 
-    target_update_steps: int = 1_000
-    train_every_steps: int = 100
+    train_every_steps: int = 50
+    target_update_steps: int = 5 * train_every_steps
 
     # for numerical stability
     max_grad_norm: float = 10.0

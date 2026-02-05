@@ -347,7 +347,7 @@ class KDDLearnerConfig:
     tutee_ready_fix: float = 0.65
     tutee_cap_high: float = 0.98
 
-    tutee_reward_lambda: float = 0.1  # start at 0, test 0.1 later
+    tutee_reward_lambda: float = 0.3  # start at 0, test 0.1 later
 
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02
@@ -401,7 +401,7 @@ class KDDLearnerModel:
         return cls(cfg=obj["cfg"], bundle=obj["bundle"], seed=seed)
 
     # ---------- env-like API ----------
-    def reset(self, initial_mastery: Union[float, Sequence[float]] = 0.2) -> LearnerState:
+    def reset(self, initial_mastery: Union[float, Sequence[float]] = 0.1) -> LearnerState:
         if isinstance(initial_mastery, (list, tuple, np.ndarray)):
             arr = np.asarray(initial_mastery, dtype=np.float32)
             if arr.shape[0] != self.cfg.n_topics:
@@ -900,7 +900,7 @@ class KDDLearnerModel:
         reward = r_step + topic_completion_bonus
         # can add a lambda 0.5 or 1 or 2 to tutee bonud -> lambda * tutee_bonus
         reward += float(self.cfg.tutee_reward_lambda) * tutee_bonus
-        reward -= float(self.cfg.step_penalty) * float(step_cost)
+        # reward -= float(self.cfg.step_penalty) * float(step_cost)
 
         info = {
             "p_correct": p_correct,
@@ -968,7 +968,7 @@ class KDDTrajectoryBuilder:
             ),
             seed=seed,
         )
-        self.sim.reset(initial_mastery=0.2)
+        self.sim.reset(initial_mastery=0.1)
 
     def _extract_kc(self, row: Mapping[str, Any], kc_col: str) -> Optional[str]:
         raw = row.get(kc_col)
@@ -993,7 +993,7 @@ class KDDTrajectoryBuilder:
     ) -> Iterable[TrainingRow]:
 
         for _sid, seq in rows_by_student:
-            self.sim.reset(initial_mastery=0.2)
+            self.sim.reset(initial_mastery=0.1)
 
             for r in seq:
                 kc = self._extract_kc(r, kc_col)

@@ -38,10 +38,10 @@ class LowLevelAgentConfig:
     epsilon: float = 0.2
 
     buffer_size: int = 50_000
-    batch_size: int = 1024
+    batch_size: int = 256
     min_replay_size: int = 1_000
 
-    train_every_steps: int = 100
+    train_every_steps: int = 20
     # target_update_steps: int = 1_000
     #To be faithful to the original paper: k=5
     target_update_steps: int = 5 * train_every_steps
