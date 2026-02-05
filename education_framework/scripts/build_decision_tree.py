@@ -177,51 +177,96 @@ class TrainConfig:
 #             out[int(a)] = q
 #     return out
 
-def _rank_to_quality(action_ids: List[int], scores: List[float], eps: float = 0.003) -> Dict[int, str]:
-    """Map actions to {very_good, good, neutral, bad, very_bad} using a magnitude-aware hybrid rule.
+# def _rank_to_quality(action_ids: List[int], scores: List[float], eps: float = 0.003) -> Dict[int, str]:
+#     """Map actions to {very_good, good, neutral, bad, very_bad} using a magnitude-aware hybrid rule.
+#
+#     Rationale:
+#       - Avoid labeling empirically positive actions as 'bad/very_bad', because downstream transitions
+#         treat bad/very_bad as mastery decay.
+#       - Preserve the policy-shaping benefit of relative ranking by ranking within the positive set
+#         (and within the negative set), while assigning near-zero effects to 'neutral'.
+#
+#     Rule (per leaf):
+#       - If score >  +eps  => positive set  (eligible for good/very_good)
+#       - If score <  -eps  => negative set  (eligible for bad/very_bad)
+#       - Otherwise         => neutral
+#
+#     Within sets:
+#       - positive: best -> very_good (if ≥2 positives), remaining -> good
+#       - negative: worst -> very_bad (if ≥2 negatives), remaining -> bad
+#
+#     Notes:
+#       - This may yield fewer than 5 labels in a given leaf (e.g., no negatives).
+#       - All actions always receive a label.
+#     """
+#     if len(action_ids) != len(scores):
+#         raise ValueError(f"action_ids and scores must have same length, got {len(action_ids)} and {len(scores)}")
+#
+#     out: Dict[int, str] = {int(a): "neutral" for a in action_ids}
+#
+#     pos = [(int(a), float(s)) for a, s in zip(action_ids, scores) if s > eps]
+#     neg = [(int(a), float(s)) for a, s in zip(action_ids, scores) if s < -eps]
+#
+#     if pos:
+#         pos_sorted = sorted(pos, key=lambda x: x[1])  # ascending; last is best
+#         best_a = pos_sorted[-1][0]
+#         out[best_a] = "very_good" if len(pos_sorted) >= 2 else "good"
+#         for a, _ in pos_sorted[:-1]:
+#             out[a] = "good"
+#
+#     if neg:
+#         neg_sorted = sorted(neg, key=lambda x: x[1])  # ascending; first is worst (most negative)
+#         worst_a = neg_sorted[0][0]
+#         out[worst_a] = "very_bad" if len(neg_sorted) >= 2 else "bad"
+#         for a, _ in neg_sorted[1:]:
+#             out[a] = "bad"
+#
+#     return out
 
-    Rationale:
-      - Avoid labeling empirically positive actions as 'bad/very_bad', because downstream transitions
-        treat bad/very_bad as mastery decay.
-      - Preserve the policy-shaping benefit of relative ranking by ranking within the positive set
-        (and within the negative set), while assigning near-zero effects to 'neutral'.
+def _compute_global_cutoffs(deltas: List[float], *, neutral_eps: float) -> tuple[float, float, float, float]:
+    """Compute global cutoffs for 5-way quality binning.
 
-    Rule (per leaf):
-      - If score >  +eps  => positive set  (eligible for good/very_good)
-      - If score <  -eps  => negative set  (eligible for bad/very_bad)
-      - Otherwise         => neutral
+    Use global quantiles when there is enough data; otherwise fall back to symmetric
+    thresholds around 0 (scaled by neutral_eps).
 
-    Within sets:
-      - positive: best -> very_good (if ≥2 positives), remaining -> good
-      - negative: worst -> very_bad (if ≥2 negatives), remaining -> bad
-
-    Notes:
-      - This may yield fewer than 5 labels in a given leaf (e.g., no negatives).
-      - All actions always receive a label.
+    Returns:
+        (q20, q40, q60, q80)
     """
-    if len(action_ids) != len(scores):
-        raise ValueError(f"action_ids and scores must have same length, got {len(action_ids)} and {len(scores)}")
+    arr = np.asarray(deltas, dtype=np.float32)
+    arr = arr[np.isfinite(arr)]
+    if arr.size >= 200:
+        q20, q40, q60, q80 = np.quantile(arr, [0.2, 0.4, 0.6, 0.8]).tolist()
+        return float(q20), float(q40), float(q60), float(q80)
 
-    out: Dict[int, str] = {int(a): "neutral" for a in action_ids}
+    # Fallback: keep a neutral band around 0, and define tails relative to it.
+    q20 = -3.0 * neutral_eps
+    q40 = -1.0 * neutral_eps
+    q60 = +1.0 * neutral_eps
+    q80 = +3.0 * neutral_eps
+    return float(q20), float(q40), float(q60), float(q80)
 
-    pos = [(int(a), float(s)) for a, s in zip(action_ids, scores) if s > eps]
-    neg = [(int(a), float(s)) for a, s in zip(action_ids, scores) if s < -eps]
 
-    if pos:
-        pos_sorted = sorted(pos, key=lambda x: x[1])  # ascending; last is best
-        best_a = pos_sorted[-1][0]
-        out[best_a] = "very_good" if len(pos_sorted) >= 2 else "good"
-        for a, _ in pos_sorted[:-1]:
-            out[a] = "good"
+def _scores_to_quality_global(action_ids, scores, *, cutoffs, neutral_eps=0.003):
+    q20, q40, q60, q80 = cutoffs
+    out = {}
+    for a, s in zip(action_ids, scores):
+        a = int(a)
+        s = float(s)
 
-    if neg:
-        neg_sorted = sorted(neg, key=lambda x: x[1])  # ascending; first is worst (most negative)
-        worst_a = neg_sorted[0][0]
-        out[worst_a] = "very_bad" if len(neg_sorted) >= 2 else "bad"
-        for a, _ in neg_sorted[1:]:
+        # Neutral only if globally "middle"
+        if q40 <= s <= q60:
+            out[a] = "neutral"
+        elif s <= q20:
+            out[a] = "very_bad"
+        elif s <= q40:
             out[a] = "bad"
-
+        elif s <= q80:
+            out[a] = "good"
+        else:
+            out[a] = "very_good"
     return out
+
+
 
 def train_bundle_from_kdd_csv(
     csv_path: str,
@@ -387,14 +432,25 @@ def train_bundle_from_kdd_csv(
 
     # topic-level fallbacks
     topic_action_mean: Dict[int, Dict[int, float]] = {}
+    # topic-level global cutoffs (for absolute quality labels)
+    topic_cutoffs: Dict[int, tuple[float, float, float, float]] = {}
+
     for k in range(cfg.n_topics):
         topic_action_mean[k] = {}
         if not delta_m[k]:
+            # fallback cutoffs if there is literally no data
+            topic_cutoffs[k] = _compute_global_cutoffs([], neutral_eps=cfg.quality_eps)
             continue
+
+        # existing topic_action_mean computation (keep it)
         for a in range(5):
             vals = [dm for dm, aa in zip(delta_m[k], act_id[k]) if aa == a]
             if vals:
                 topic_action_mean[k][a] = float(np.mean(vals))
+
+        # NEW: global distribution over tutor actions for this topic
+        all_tutor_deltas = [dm for dm, aa in zip(delta_m[k], act_id[k]) if aa in (0, 1, 2, 3, 4)]
+        topic_cutoffs[k] = _compute_global_cutoffs(all_tutor_deltas, neutral_eps=cfg.quality_eps)
         # NOTE: KDD has no explicit tutee interactions; we do not infer tutee effects from data.
         # Keep a neutral (0) topic-level fallback for tutee actions (ids 5..7).
         for a_tutee in (
@@ -449,14 +505,18 @@ def train_bundle_from_kdd_csv(
             # Tutor qualities come from KDD-derived leaf scores.
             tutor_ids = [0, 1, 2, 3, 4]
             tutor_scores = [float(scores[a]) for a in tutor_ids]
-            tutor_q = _rank_to_quality(tutor_ids, tutor_scores, cfg.quality_eps)
-
+            tutor_q = _scores_to_quality_global(
+                tutor_ids,
+                tutor_scores,
+                cutoffs=topic_cutoffs[k],
+                neutral_eps=cfg.quality_eps,
+            )
             # Tutee qualities are NOT derived from KDD (no direct tutee signal).
             # We keep them neutral in the bank; the tutee learning effect is modeled
             # mechanistically in the simulator via a bounded mastery bonus + explicit cost.
             leaf_quality = dict(tutor_q)
             for a_tutee in (5, 6, 7):
-                leaf_quality[a_tutee] = "natural"
+                leaf_quality[a_tutee] = "neutral"
 
             leaf_to_action_quality[leaf] = leaf_quality
 
@@ -480,6 +540,8 @@ def train_bundle_from_kdd_csv(
     beta_pos_by_cat: Dict[str, List[float]] = {"good": [], "very_good": []}
     beta_neg_by_cat: Dict[str, List[float]] = {"bad": [], "very_bad": []}
 
+    neutral_deltas: List[float] = []
+
     for k in range(cfg.n_topics):
         m = qbank.bank.get(k)
         if m is None:
@@ -495,6 +557,8 @@ def train_bundle_from_kdd_csv(
             dm = float(delta_m[k][i])
             mp = float(mastery_pre[k][i])
 
+            if q == "neutral":
+                neutral_deltas.append(dm)
             if q in ("good", "very_good") and dm > 0:
                 denom = max(1e-6, (1.0 - mp))
                 beta_pos_by_cat[q].append(dm / denom)
@@ -510,6 +574,17 @@ def train_bundle_from_kdd_csv(
         arr = arr[(arr >= lo) & (arr <= hi)]
         return float(arr.mean()) if arr.size else float(np.mean(xs))
 
+    def _robust_std(xs: List[float]) -> float:
+        if not xs:
+            return 0.005  # small default
+        arr = np.asarray(xs, dtype=np.float32)
+        lo, hi = np.quantile(arr, [0.10, 0.90])
+        arr = arr[(arr >= lo) & (arr <= hi)]
+        return float(arr.std()) if arr.size else float(np.std(xs))
+
+    neutral_noise_std = float(np.clip(_robust_std(neutral_deltas), 0.001, 0.02))
+
+
     beta_good = _robust_mean(beta_pos_by_cat["good"])
     beta_vgood = _robust_mean(beta_pos_by_cat["very_good"])
     beta_bad = _robust_mean(beta_neg_by_cat["bad"])
@@ -521,13 +596,19 @@ def train_bundle_from_kdd_csv(
     beta_bad = float(np.clip(beta_bad, 0.005, 0.15))
     beta_vbad = float(np.clip(beta_vbad, beta_bad, 0.25))
 
+    # Enforce that "very" is meaningfully stronger than non-very
+    MIN_RATIO = 1.35  # 1.25–1.5 is reasonable; pick one and justify in thesis
+
+    beta_vgood = max(beta_vgood, min(0.25, beta_good * MIN_RATIO))
+    beta_vbad = max(beta_vbad, min(0.25, beta_bad * MIN_RATIO))
+
     qbank.mastery_params = MasteryUpdateParams(
         mastery_jump=0.95,
         beta_good=beta_good,
         beta_very_good=beta_vgood,
         beta_bad=beta_bad,
         beta_very_bad=beta_vbad,
-        neutral_noise_std=0.0,
+        neutral_noise_std=neutral_noise_std,
     )
 
     # ----------------------------
