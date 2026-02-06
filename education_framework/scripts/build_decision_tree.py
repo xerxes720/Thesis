@@ -612,6 +612,47 @@ def train_bundle_from_kdd_csv(
     )
 
     # ----------------------------
+    # NEW: per-topic beta multipliers (data-driven heterogeneity)
+    # ----------------------------
+    def _topic_strength(k: int) -> float:
+        """Return a stable [-1, +1] strength score from tutor-only deltas for topic k.
+        +1 => topic responds well to tutoring (good dominates), -1 => topic is harder / negative dominates.
+        """
+        vals = [dm for dm, aa in zip(delta_m[k], act_id[k]) if aa in (0, 1, 2, 3, 4)]
+        if len(vals) < 200:
+            return 0.0
+        arr = np.asarray(vals, dtype=np.float32)
+        # robust mean / std
+        lo, hi = np.quantile(arr, [0.10, 0.90])
+        arr = arr[(arr >= lo) & (arr <= hi)]
+        mu = float(arr.mean()) if arr.size else float(np.mean(vals))
+        sig = float(arr.std()) if arr.size else float(np.std(vals))
+        sig = max(1e-6, sig)
+        z = mu / sig
+        # squash to [-1, 1]
+        return float(np.tanh(z))
+
+    # Multipliers: good updates stronger on "easy" topics, bad updates stronger on "hard" topics.
+    # Keep within tight bounds so you don't destabilize training.
+    good_lo, good_hi = 0.80, 1.20
+    bad_lo, bad_hi = 0.80, 1.20
+    alpha = 0.20  # sensitivity (0.10-0.30 recommended)
+
+    topic_beta_good_mult = np.ones(cfg.n_topics, dtype=np.float32)
+    topic_beta_very_good_mult = np.ones(cfg.n_topics, dtype=np.float32)
+    topic_beta_bad_mult = np.ones(cfg.n_topics, dtype=np.float32)
+    topic_beta_very_bad_mult = np.ones(cfg.n_topics, dtype=np.float32)
+
+    for k in range(cfg.n_topics):
+        s = _topic_strength(k)  # [-1, 1]
+        # easy (s>0): increase positive betas, decrease negative betas
+        topic_beta_good_mult[k] = np.clip(1.0 + alpha * s, good_lo, good_hi)
+        topic_beta_very_good_mult[k] = np.clip(1.0 + alpha * s, good_lo, good_hi)
+        topic_beta_bad_mult[k] = np.clip(1.0 - alpha * s, bad_lo, bad_hi)
+        topic_beta_very_bad_mult[k] = np.clip(1.0 - alpha * s, bad_lo, bad_hi)
+
+
+    # ----------------------------
     # Save bundle
     # ----------------------------
     bundle = KDDModelBundle(
@@ -627,6 +668,10 @@ def train_bundle_from_kdd_csv(
         ema_alpha=cfg.ema_alpha,
         tutee_outcome_topic=tutee_outcome_topic,
         tutee_outcome_leaf=tutee_outcome_leaf,
+        topic_beta_good_mult=topic_beta_good_mult,
+        topic_beta_very_good_mult=topic_beta_very_good_mult,
+        topic_beta_bad_mult=topic_beta_bad_mult,
+        topic_beta_very_bad_mult=topic_beta_very_bad_mult,
     )
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)

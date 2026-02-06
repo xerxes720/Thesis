@@ -30,7 +30,7 @@ def _to_i64_batch(x) -> np.ndarray:
     return np.ascontiguousarray(arr, dtype=np.int64)
 @dataclass
 class LowLevelAgentConfig:
-    num_topics: int
+    num_topics: int = 7
 
     # DQN hyperparameters
     gamma: float = 0.95
@@ -39,7 +39,7 @@ class LowLevelAgentConfig:
 
     buffer_size: int = 50_000
     batch_size: int = 256
-    min_replay_size: int = 1_000
+    min_replay_size: int = 1_000 // num_topics
 
     train_every_steps: int = 20
     # target_update_steps: int = 1_000
@@ -57,7 +57,7 @@ class LowLevelAgentConfig:
     max_peers_per_update: int = 4  # sample up to this many peers each train step (for speed)
     peer_batch_size: int = 128  # how many transitions to sample from each peer
     min_peer_replay_size: int = 500  # peers must have at least this many samples to participate
-    share_weight_floor: float = 0.0  # clamp similarity weights
+    share_weight_floor: float = 0.2  # clamp similarity weights
     share_weight_ceiling: float = 1.0
     cka_layers: Tuple[str, ...] = ("h1", "h2")  # which layers to use for similarity
 
@@ -395,8 +395,8 @@ class TutorLowLevelAgent(DQNLowLevelAgent):
 class TuteeLowLevelAgent(DQNLowLevelAgent):
     def __init__(self, config: LowLevelAgentConfig):
         cfg = deepcopy(config)
-        cfg.experience_sharing = False
-        cfg.share_mode = "off"
+        # cfg.experience_sharing = False
+        # cfg.share_mode = "off"
         super().__init__(cfg, actions=build_tutee_actions())
 
     def select_action(self, obs: List[float]) -> int:

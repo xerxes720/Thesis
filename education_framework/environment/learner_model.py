@@ -250,6 +250,8 @@ class LearnerState:
     inc_ema: np.ndarray = None  # type: ignore
     total_steps: float = 0.0
     teach_boost: np.ndarray = None  # type: ignore
+    last_practice_step: np.ndarray = None  # type: ignore
+    retention: np.ndarray = None  # type: ignore
 
     def __post_init__(self) -> None:
         n = int(self.n_topics)
@@ -261,6 +263,8 @@ class LearnerState:
         self.inc_ema = np.zeros(n, dtype=np.float32)
         self.total_steps = 0
         self.teach_boost = np.zeros(n, dtype=np.float32)  # new
+        self.last_practice_step = np.zeros(n, dtype=np.int32)
+        self.retention = np.zeros(n, dtype=np.float32)  # 0..1
 
     def copy(self) -> "LearnerState":
         s = LearnerState(n_topics=self.n_topics)
@@ -272,6 +276,8 @@ class LearnerState:
         s.inc_ema = self.inc_ema.copy()
         s.total_steps = int(self.total_steps)
         s.teach_boost = self.teach_boost.copy()
+        s.last_practice_step = self.last_practice_step.copy()
+        s.retention = self.retention.copy()
 
         return s
 
@@ -308,6 +314,12 @@ class KDDModelBundle:
     # topic_id -> leaf_id -> action_id(5..7) -> stats dict
     tutee_outcome_leaf: Optional[Dict[int, Dict[int, Dict[int, Dict[str, float]]]]] = None
 
+    # --- NEW: per-topic beta multipliers (data-driven heterogeneity) ---
+    topic_beta_good_mult: Optional[np.ndarray] = None  # shape (n_topics,)
+    topic_beta_very_good_mult: Optional[np.ndarray] = None  # shape (n_topics,)
+    topic_beta_bad_mult: Optional[np.ndarray] = None  # shape (n_topics,)
+    topic_beta_very_bad_mult: Optional[np.ndarray] = None  # shape (n_topics,)
+
 
 # ----------------------------
 # Learner simulator
@@ -317,8 +329,19 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.95
-    opp_min: int = 2
+    mastery_threshold: float = 0.75
+    opp_min: int = 1
+
+    # --- Topic heterogeneity / clustering (enables weighted transfer to beat mutual) ---
+    # Example for 7 topics: 3 clusters {0,1,2}, {3,4}, {5,6}
+
+    # Per-topic learning difficulty (tutor updates scaled by this)
+    # <1.0 = easier, >1.0 = harder. If None, all 1.0
+
+    from dataclasses import field
+    topic_cluster_ids: List[int] = field(default_factory=lambda: [0, 0, 0, 1, 1, 2, 2])
+    topic_difficulty: List[float] = field(default_factory=lambda: [1.10, 1.05, 1.15, 1.0, 1.0, 1.20, 1.15])
+
 
     # --- tutee (protégé / learning-by-teaching) simulation ---
     # Conservative, bounded mastery bonus with explicit cost.
@@ -342,16 +365,16 @@ class KDDLearnerConfig:
     tutee_duration_mult_explain: float = 1.25
     tutee_duration_mult_fix: float = 1.20
 
-    tutee_ready_quiz: float = 0.50
-    tutee_ready_explain: float = 0.60
-    tutee_ready_fix: float = 0.65
+    tutee_ready_quiz: float = 0.40
+    tutee_ready_explain: float = 0.50
+    tutee_ready_fix: float = 0.55
     tutee_cap_high: float = 0.98
 
-    tutee_reward_lambda: float = 0.3  # start at 0, test 0.1 later
+    tutee_reward_lambda: float = 0.1  # start at 0, test 0.1 later
 
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02
-    completion_reward: float = 0.3
+    completion_reward: float = 1.0
 
     opp_norm: float = 20.0
     time_norm: float = 120.0
@@ -368,6 +391,18 @@ class KDDLearnerConfig:
 
     force_end_on_all_complete: bool = True
     step_penalty: float = 0.0 # start small; tune 0.001..0.01
+
+
+
+    # Per-topic observation noise scale (affects neutral noise and/or cfa sampling jitter if you want)
+    topic_noise: Optional[List[float]] = None
+
+    # --- Forgetting / spacing ---
+    forget_rate: float = 0.0002      # per "step unit" since last practice
+    forget_floor: float = 0.1      # don't forget below this baseline mastery
+    retention_from_tutee: float = 0.10  # tutee increases retention (0..1)
+    retention_decay: float = 0.999  # per step
+    retention_init: float = 0.10
 
 
 class KDDLearnerModel:
@@ -387,6 +422,7 @@ class KDDLearnerModel:
         # Per-topic one-time completion flags (reset each episode).
         self._topic_completed = np.zeros(self.cfg.n_topics, dtype=np.bool_)
 
+
     # ---------- persistence ----------
     def save(self, path: str) -> None:
         if joblib is None:
@@ -401,7 +437,7 @@ class KDDLearnerModel:
         return cls(cfg=obj["cfg"], bundle=obj["bundle"], seed=seed)
 
     # ---------- env-like API ----------
-    def reset(self, initial_mastery: Union[float, Sequence[float]] = 0.1) -> LearnerState:
+    def reset(self, initial_mastery: Union[float, Sequence[float]] = 0.2) -> LearnerState:
         if isinstance(initial_mastery, (list, tuple, np.ndarray)):
             arr = np.asarray(initial_mastery, dtype=np.float32)
             if arr.shape[0] != self.cfg.n_topics:
@@ -417,6 +453,9 @@ class KDDLearnerModel:
         self.state.total_steps = 0
         self._topic_completed[:] = False
         self.state.teach_boost[:] = 0.0
+        self.state.last_practice_step[:] = 0
+        self.state.retention[:] = float(self.cfg.retention_init)  # whatever you define as init, e.g. 0.1
+
         return self.state.copy()
 
     def is_done(self) -> bool:
@@ -433,6 +472,50 @@ class KDDLearnerModel:
             (s.opp[topic_id] >= self.cfg.opp_min)
         )
 
+    def _apply_forgetting_all_except(self, practiced_topic: int, step_cost: float) -> None:
+        s = self.state
+        cfg = self.cfg
+
+        # decay retention slightly every step
+        s.retention *= float(cfg.retention_decay)
+
+        # apply forgetting to all other topics based on time since last practice
+        now = int(s.total_steps + max(1, int(step_cost)))
+        for k in range(cfg.n_topics):
+            if k == practiced_topic:
+                continue
+            if bool(self._topic_completed[k]):
+                continue  # NEW: don't forget completed topics
+            dt = max(0, now - int(s.last_practice_step[k]))
+            if dt == 0:
+                continue
+
+            # retention reduces forgetting (tutee can improve retention)
+            r = float(s.retention[k])  # 0..1
+            eff_forget = float(cfg.forget_rate) * (1.0 - 0.7 * r)
+
+            m = float(s.mastery[k])
+            m2 = m - eff_forget * float(dt) * max(0.0, m - float(cfg.forget_floor))
+            s.mastery[k] = _clip01(m2)
+
+    def _topic_scalar(self, arr: Optional[List[float]], topic_id: int, default: float) -> float:
+        if not arr:
+            return float(default)
+        if topic_id < 0 or topic_id >= len(arr):
+            return float(default)
+        return float(arr[topic_id])
+
+    def _beta_mult(self, name: str, topic_id: int) -> float:
+        b = self.bundle
+        if b is None:
+            return 1.0
+        arr = getattr(b, name, None)
+        if arr is None:
+            return 1.0
+        try:
+            return float(arr[int(topic_id)])
+        except Exception:
+            return 1.0
     # ---------- feature engineering ----------
     def _state_features(self, s: LearnerState, topic_id: int) -> np.ndarray:
         """Features used by the routing quality tree: state only (no action, no outcomes)."""
@@ -524,13 +607,17 @@ class KDDLearnerModel:
             params = MasteryUpdateParams()  # type: ignore
 
         if quality == "very_good":
-            m2 = max(m, float(params.mastery_jump))
+            beta = float(params.beta_very_good) * self._beta_mult("topic_beta_very_good_mult", topic_id)
+            m2 = max(m, m + beta * (1.0 - m))
         elif quality == "good":
-            m2 = m + float(params.beta_good) * (1.0 - m)
+            beta = float(params.beta_good) * self._beta_mult("topic_beta_good_mult", topic_id)
+            m2 = m + beta * (1.0 - m)
         elif quality == "bad":
-            m2 = m - float(params.beta_bad) * m
+            beta = float(params.beta_bad) * self._beta_mult("topic_beta_bad_mult", topic_id)
+            m2 = m - beta * m
         elif quality == "very_bad":
-            m2 = m - float(params.beta_very_bad) * m
+            beta = float(params.beta_very_bad) * self._beta_mult("topic_beta_very_bad_mult", topic_id)
+            m2 = m - beta * m
         else:
             # neutral
             if float(getattr(params, "neutral_noise_std", 0.0)) > 0.0:
@@ -551,16 +638,26 @@ class KDDLearnerModel:
             params = MasteryUpdateParams()  # type: ignore
 
         # scale factor: 1 .. 1 + teach_boost_beta_scale
-        scale = 1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)
+        # scale = 1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)
+
+        diff = self._topic_scalar(self.cfg.topic_difficulty, topic_id, 1.0)
+        # Harder topic => smaller effective update
+        diff_scale = 1.0 / max(0.2, diff)
+
+        scale = (1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)) * diff_scale
 
         if quality == "very_good":
-            m2 = max(m, float(params.mastery_jump))
+            beta = float(params.beta_very_good) * self._beta_mult("topic_beta_very_good_mult", topic_id)
+            m2 = max(m, m + beta * scale * (1.0 - m))
         elif quality == "good":
-            m2 = m + (float(params.beta_good) * scale) * (1.0 - m)
+            beta = float(params.beta_good) * self._beta_mult("topic_beta_good_mult", topic_id)
+            m2 = m + beta * scale * (1.0 - m)
         elif quality == "bad":
-            m2 = m - (float(params.beta_bad)) * m
+            beta = float(params.beta_bad) * self._beta_mult("topic_beta_bad_mult", topic_id)
+            m2 = m - beta * scale * m
         elif quality == "very_bad":
-            m2 = m - (float(params.beta_very_bad)) * m
+            beta = float(params.beta_very_bad) * self._beta_mult("topic_beta_very_bad_mult", topic_id)
+            m2 = m - beta * scale * m
         else:
             m2 = m
 
@@ -612,8 +709,8 @@ class KDDLearnerModel:
 
         # --- 2) desirable-difficulty bell (peaks at mid mastery, low at extremes)
         # You can tune center/width; these are conservative defaults.
-        center = 0.70
-        width = 0.22
+        center = 0.65
+        width = 0.28
         bell = math.exp(-((m - center) / width) ** 2)
         b *= bell
 
@@ -624,18 +721,19 @@ class KDDLearnerModel:
             k = 10.0
             m0 = 0.55
             p_succ = 1.0 / (1.0 + math.exp(-k * (m - m0)))
-            if random.random() > p_succ:
-                return 0.0  # failed retrieval => no mastery gain
+            # if random.random() > p_succ:
+            #     return 0.0  # failed retrieval => no mastery gain
+
 
         # --- 4) fix only helps when there is "something to fix" (struggle signal)
-        if a == LowLevelAction.TUTEE_FIX:
-            # Use EMAs you already track (values are normalized later; keep it simple)
-            # If you know these EMAs are in raw units, clamp aggressively.
-            struggle = float(s.inc_ema[topic_id] + s.hint_ema[topic_id])
-            struggle = max(0.0, min(1.0, struggle))
-            b *= struggle
-            if b <= 0.0:
-                return 0.0
+        # if a == LowLevelAction.TUTEE_FIX:
+        #     # Use EMAs you already track (values are normalized later; keep it simple)
+        #     # If you know these EMAs are in raw units, clamp aggressively.
+        #     struggle = float(s.inc_ema[topic_id] + s.hint_ema[topic_id])
+        #     struggle = max(0.0, min(1.0, struggle))
+        #     b *= struggle
+        #     if b <= 0.0:
+        #         return 0.0
 
         # --- 5) keep your diminishing returns (optional)
         # Your original (1-m)*2 is fine; with bell this becomes "mid-mastery sweet spot".
@@ -766,6 +864,8 @@ class KDDLearnerModel:
                                                default=self.bundle.schema.dur_q50)
 
             step_cost = 1
+            self._apply_forgetting_all_except(topic_id, step_cost=float(step_cost))
+
 
         else:
             # Tutee actions: simulated metacognitive intervention.
@@ -809,6 +909,8 @@ class KDDLearnerModel:
                 duration = base_dur * float(self.cfg.tutee_duration_mult_quiz)
                 step_cost = float(self.cfg.tutee_step_cost_quiz)
 
+            self._apply_forgetting_all_except(topic_id, step_cost=float(step_cost))
+
             # Small noise on duration to avoid degenerate constant signals.
             if duration > 1e-6:
                 duration = max(0.0, float(self.np_rng.normal(duration, 0.05 * duration)))
@@ -851,6 +953,9 @@ class KDDLearnerModel:
                 inc = float(cfg.teach_boost_inc_quiz)
 
             s.teach_boost[topic_id] = min(float(cfg.teach_boost_max), float(s.teach_boost[topic_id]) + inc)
+            # NEW: tutee increases retention for this topic (reduces future forgetting)
+            s.retention[topic_id] = _clip01(float(s.retention[topic_id]) + float(self.cfg.retention_from_tutee))
+
 
 
         else:
@@ -861,6 +966,7 @@ class KDDLearnerModel:
         if bool(self._topic_completed[topic_id]):
             s.mastery[topic_id] = max(float(s.mastery[topic_id]), m_before)
 
+
         # 5) Observational updates (EMAs, opp, steps)
         self._apply_observation_updates(
             topic_id,
@@ -870,6 +976,8 @@ class KDDLearnerModel:
             duration=duration,
             step_cost=step_cost,
         )
+        self.state.last_practice_step[topic_id] = int(self.state.total_steps)
+
         # NEW: decay teach_boost over time (short-lived effect)
         s.teach_boost[topic_id] *= float(self.cfg.teach_boost_decay)
 
@@ -968,7 +1076,7 @@ class KDDTrajectoryBuilder:
             ),
             seed=seed,
         )
-        self.sim.reset(initial_mastery=0.1)
+        self.sim.reset(initial_mastery=0.2)
 
     def _extract_kc(self, row: Mapping[str, Any], kc_col: str) -> Optional[str]:
         raw = row.get(kc_col)
@@ -993,7 +1101,7 @@ class KDDTrajectoryBuilder:
     ) -> Iterable[TrainingRow]:
 
         for _sid, seq in rows_by_student:
-            self.sim.reset(initial_mastery=0.1)
+            self.sim.reset(initial_mastery=0.2)
 
             for r in seq:
                 kc = self._extract_kc(r, kc_col)

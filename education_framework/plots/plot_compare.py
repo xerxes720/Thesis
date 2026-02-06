@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 
 COND_DIRS = {
     "single-agent": "../runs",
+    "single-ll": "../runs",
     "multi-agent": "../runs",
     "weighted transfer": "../runs",
     "tutee": "../runs",
@@ -20,6 +21,7 @@ COND_DIRS = {
 
 COND_FILTERS = {
     "single-agent": ["flat_single"],
+    "single-ll": ["single_ll"],
     "multi-agent":  ["multi_no_es"],                 # no experience sharing
     "weighted transfer": ["multi_weighted_cka"],     # experience sharing (weighted CKA)
     "tutee": ["tutee_weighted_cka"],                 # tutee + (weighted CKA) in your names
@@ -91,7 +93,17 @@ def _load_curves_for_condition(root_dir: str, must_contain=None):
             continue
 
         ll_cols = [c for c in df.columns if c.startswith("ll_reward_")]
+
         keep = ["episode", "reward", "steps"] + ll_cols
+
+        # keep arch if present (needed to detect flat correctly)
+        if "arch" in df.columns:
+            keep = ["arch"] + keep
+        # NEW: keep these if present
+        if "tutee_reward_total" in df.columns:
+            keep.append("tutee_reward_total")
+        if "avg_agent_reward" in df.columns:
+            keep.append("avg_agent_reward")
 
         df = df[keep].copy()
         df = df.sort_values("episode").reset_index(drop=True)
@@ -200,19 +212,19 @@ def plot_fig5_reward_per_episode():
 
     # representative raw (one seed)
     # plot all seeds (thin)
-    for x, y in _all_seed_curves(single_dfs, "reward", cumulative=True):
+    for x, y in _all_seed_curves(single_dfs, "reward", cumulative=False):
         plt.plot(x, y, alpha=0.15, linewidth=1.0, label=None)
 
-    for x, y in _all_seed_curves(multi_dfs, "reward", cumulative=True):
+    for x, y in _all_seed_curves(multi_dfs, "reward", cumulative=False):
         plt.plot(x, y, alpha=0.15, linewidth=1.0, label=None)
 
-    for x, y in _all_seed_curves(tutee_dfs, "reward", cumulative=True):
+    for x, y in _all_seed_curves(tutee_dfs, "reward", cumulative=False):
         plt.plot(x, y, alpha=0.15, linewidth=1.0, label=None)
 
     # mean across seeds + smoothing
-    xs_avg, ys_avg = _mean_curve(single_dfs, "reward", cumulative=True)
-    xm_avg, ym_avg = _mean_curve(multi_dfs, "reward", cumulative=True)
-    xt_avg, yt_avg = _mean_curve(tutee_dfs, "reward", cumulative=True)
+    xs_avg, ys_avg = _mean_curve(single_dfs, "reward", cumulative=False)
+    xm_avg, ym_avg = _mean_curve(multi_dfs, "reward", cumulative=False)
+    xt_avg, yt_avg = _mean_curve(tutee_dfs, "reward", cumulative=False)
 
     if xs_avg is not None: plt.plot(xs_avg, _rolling_mean(ys_avg, SMOOTH_W), linewidth=2.5, label="Single-agent (Avg)")
     if xm_avg is not None: plt.plot(xm_avg, _rolling_mean(ym_avg, SMOOTH_W), linewidth=2.5, label="Multi-agent (Avg)")
@@ -267,32 +279,40 @@ def plot_fig6_steps_per_episode():
 
 
 def plot_average_reward_over_all_agents():
-    single_dfs = _load_curves_for_condition(COND_DIRS["single-agent"], COND_FILTERS["single-agent"])
+    single_dfs = _load_curves_for_condition(COND_DIRS["single-ll"], COND_FILTERS["single-ll"])
     multi_dfs = _load_curves_for_condition(COND_DIRS["multi-agent"], COND_FILTERS["multi-agent"])
     tutee_dfs = _load_curves_for_condition(COND_DIRS["tutee"], COND_FILTERS["tutee"])
     dfs_weighted = _load_curves_for_condition(COND_DIRS["weighted transfer"], COND_FILTERS["weighted transfer"])
 
-    def avg_agent_reward_curve(dfs, *, single_agent: bool):
+    def avg_agent_reward_curve(dfs):
         """
-        HRL: mean(ll_reward_*) per episode  (already averaged over agents)
-        Flat/single-agent logging: df["reward"] is team/episode reward -> normalize by NUM_TOPICS
+        Comparable signal across ALL conditions (Option A):
+          y = total_reward_per_episode / NUM_TOPICS
+
+        We infer NUM_TOPICS from ll_reward_* columns when available,
+        otherwise fall back to a configured constant.
         """
         ys = []
-        for df in dfs:
+
+        # infer num_topics robustly
+        def infer_num_topics(df):
             ll_cols = [c for c in df.columns if c.startswith("ll_reward_")]
+            if ll_cols:
+                return len(ll_cols)
+            # fallback: use your global constant if you have one
+            # e.g., NUM_TOPICS = 7
+            return NUM_TOPICS
 
-            if single_agent:
-                # team episodic reward -> average over 8 topic-agents for Fig.7 comparability
-                y = df["reward"].to_numpy(dtype=float) / float(NUM_TOPICS)
-
-            elif ll_cols:
-                # already "average over agents"
-                y = df[ll_cols].to_numpy(dtype=float)
-                y = np.nanmean(y, axis=1)
-
-            else:
+        for df in dfs:
+            if "reward" not in df.columns:
+                # nothing sensible to plot
                 continue
 
+            num_topics = infer_num_topics(df)
+            if num_topics <= 0:
+                continue
+
+            y = df["reward"].to_numpy(dtype=float) / float(num_topics)
             ys.append(y)
 
         mat = _pad_stack(ys)
@@ -305,10 +325,10 @@ def plot_average_reward_over_all_agents():
 
     plt.figure(figsize=(7.2, 4.2))
 
-    x1, y1 = avg_agent_reward_curve(single_dfs, single_agent=True)
-    x2, y2 = avg_agent_reward_curve(multi_dfs, single_agent=False)
-    x3, y3 = avg_agent_reward_curve(dfs_weighted, single_agent=False)
-    x4, y4 = avg_agent_reward_curve(tutee_dfs, single_agent=False)
+    x1, y1 = avg_agent_reward_curve(single_dfs)
+    x2, y2 = avg_agent_reward_curve(multi_dfs)
+    x3, y3 = avg_agent_reward_curve(dfs_weighted)
+    x4, y4 = avg_agent_reward_curve(tutee_dfs)
 
     if x1 is not None: plt.plot(x1, y1, linewidth=2.0, label="Single-agent")
     if x2 is not None: plt.plot(x2, y2, linewidth=2.0, label="Multi-agent")

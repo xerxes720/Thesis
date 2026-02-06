@@ -4,9 +4,9 @@
 $ErrorActionPreference = "Stop"
 
 $bundle   = "education_framework/data/kdd_bundle.joblib"
-$episodes = 2000
+$episodes = 100
 $maxSteps = 300
-$seeds    = @(0, 23, 48)
+$seeds    = @(0) #23 48
 
 $ts = Get-Date -Format "yyyyMMdd_HHmmss"
 New-Item -ItemType Directory -Force -Path "logs" | Out-Null
@@ -38,6 +38,11 @@ try {
 
         python -m education_framework.main `
           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+          --arch hrl --ll_mode single --share_mode off `
+          --seed $seed --run_tag "single_ll"
+
+        python -m education_framework.main `
+          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
           --share_mode off `
           --seed $seed --run_tag "multi_no_es"
 
@@ -46,10 +51,10 @@ try {
            --experience_sharing `
            --seed $seed --run_tag "multi_weighted_cka"
 
-        python -m education_framework.main `
-          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --experience_sharing --share_mode mutual `
-          --seed $seed --run_tag "multi_mutual"
+#        python -m education_framework.main `
+#          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#          --experience_sharing --share_mode mutual `
+#          --seed $seed --run_tag "multi_mutual"
 
 #         python -m education_framework.main `
 #           --bundle $bundle --episodes $episodes --max_steps $maxSteps `

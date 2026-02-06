@@ -72,7 +72,7 @@ def topic_entropy(topic_ids):
 class KDDEnvConfig:
     num_topics: int = 7
     max_steps: int = 200
-    initial_mastery: float = 0.1
+    initial_mastery: float = 0.2
     lambda_step: float = 0.03  # NEW: reward penalty per step-cost unit
 
 
@@ -249,6 +249,16 @@ def create_agents(
     ll_cfg = LowLevelAgentConfig(num_topics=num_topics)
     ll_cfg.device = "cpu"
 
+    # --- make min_replay_size smaller ONLY for multi-agent (data-starved per-topic buffers) ---
+    BASE_MIN_REPLAY = 1000
+
+    if ll_mode == "multi":
+        # each topic agent gets fewer transitions; start learning earlier
+        ll_cfg.min_replay_size = max(200, BASE_MIN_REPLAY // num_topics)  # e.g., max(200, 142)=200
+    else:
+        # single shared LL agent sees all topics; can afford larger warmup
+        ll_cfg.min_replay_size = BASE_MIN_REPLAY
+
     # --- sharing config (applies to tutor agents only) ---
     ll_cfg.experience_sharing = bool(experience_sharing) and (ll_mode == "multi")
     ll_cfg.share_mode = share_mode if ll_cfg.experience_sharing else "off"
@@ -264,8 +274,8 @@ def create_agents(
     tutee_agent = None
     if use_tutee:
         tutee_cfg = copy.copy(ll_cfg)
-        tutee_cfg.experience_sharing = False
-        tutee_cfg.share_mode = "off"
+        # tutee_cfg.experience_sharing = False
+        # tutee_cfg.share_mode = "off"
         tutee_cfg.tutee_ready_quiz = 0.50
         tutee_cfg.tutee_ready_explain = 0.60
         tutee_cfg.tutee_ready_fix = 0.65
@@ -1017,10 +1027,47 @@ def main():
             share_eligible_peers_mean = (eligible_peers_sum / share_attempts) if share_attempts > 0 else 0.0
             share_selected_peers_mean = (selected_peers_sum / share_attempts) if share_attempts > 0 else 0.0
 
+            # --- Fig.7 signal: average episodic reward per agent (unbiased) ---
+            if args.arch != "hrl":
+                # flat baseline: there is exactly 1 learning agent
+                avg_agent_reward = float(total_reward)
+            else:
+                n_tutor_agents = len(ll_rewards)  # 1 if shared-LL, else num_topics
+                n_agents = n_tutor_agents + (1 if (use_tutee and tutee_agent is not None) else 0)
 
+                # Sum of per-agent episodic rewards:
+                # - tutor LL agents: ll_rewards already holds their episodic totals
+                # - tutee agent: tutee_reward_total is its episodic total
+                # IMPORTANT: this is NOT the same as env total_reward in general (because HL also learns),
+                # but Fig.7 is "reward over agents" => per-agent rewards, not team total.
+                agent_reward_sum = float(np.sum(ll_rewards))
+                if use_tutee and tutee_agent is not None:
+                    agent_reward_sum += float(tutee_reward_total)
+
+                avg_agent_reward = agent_reward_sum / max(1, n_agents)
+
+            # --- ensure ll_rewards always matches header length (num_topics) ---
+            ll_rewards_full = list(ll_rewards) + [0.0] * (num_topics - len(ll_rewards))
+            ll_rewards_full = ll_rewards_full[:num_topics]  # safety
+
+            # --- tutee reward should be 0 if tutee disabled ---
+            tutee_r = float(tutee_reward_total) if use_tutee else 0.0
+
+            # --- effective agent count for Fig.7 ---
+            n_ll_eff = 1 if (args.arch == "hrl" and args.ll_mode == "single") else (
+                num_topics if args.arch == "hrl" else 1)
+            n_agents_eff = n_ll_eff + (1 if use_tutee else 0)
+
+            # --- average reward over all agents (paper Fig.7 signal) ---
+            if args.arch == "flat":
+                avg_agent_reward = float(total_reward)  # only one agent
+            else:
+                ll_sum_eff = float(sum(ll_rewards_full[:n_ll_eff]))
+                avg_agent_reward = (ll_sum_eff + tutee_r) / float(n_agents_eff)
             rows.append([
-                episode, float(total_reward), int(steps), mean_mastery, min_mastery, completed,
+                episode, float(total_reward), float(steps), mean_mastery, min_mastery, completed,
                 float(flat_agent_reward),
+                float(avg_agent_reward),  # NEW: correct Fig.7 signal
 
                 # ---- sharing diagnostics ----
                 int(n_ll_agents),
@@ -1128,6 +1175,7 @@ def main():
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
             "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward",
+            "avg_agent_reward",
 
             # ---- sharing diagnostics ----
             "n_ll_agents",
