@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 $bundle   = "education_framework/data/kdd_bundle.joblib"
-$episodes = 100
+$episodes = 2000
 $maxSteps = 300
 $seeds    = @(0) #23 48
 
@@ -51,10 +51,10 @@ try {
            --experience_sharing `
            --seed $seed --run_tag "multi_weighted_cka"
 
-#        python -m education_framework.main `
-#          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-#          --experience_sharing --share_mode mutual `
-#          --seed $seed --run_tag "multi_mutual"
+        python -m education_framework.main `
+          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+          --experience_sharing --share_mode mutual `
+          --seed $seed --run_tag "multi_mutual"
 
 #         python -m education_framework.main `
 #           --bundle $bundle --episodes $episodes --max_steps $maxSteps `

@@ -274,8 +274,8 @@ def create_agents(
     tutee_agent = None
     if use_tutee:
         tutee_cfg = copy.copy(ll_cfg)
-        # tutee_cfg.experience_sharing = False
-        # tutee_cfg.share_mode = "off"
+        tutee_cfg.experience_sharing = False
+        tutee_cfg.share_mode = "off"
         tutee_cfg.tutee_ready_quiz = 0.50
         tutee_cfg.tutee_ready_explain = 0.60
         tutee_cfg.tutee_ready_fix = 0.65
@@ -396,13 +396,23 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             else:
                 tutor_agent = tutor_agents[topic_id]  # per-topic agent
 
-            tutor_obs = add_topic(obs, topic_id)
+            if len(tutor_agents) == 1:
+                # single shared LL tutor needs topic_id to disambiguate
+                tutor_obs = add_topic(obs, topic_id)
+            else:
+                # per-topic LL tutor must NOT include topic_id (keeps sharing “in-topic”)
+                tutor_obs = np.asarray(obs, dtype=np.float32)
             ll_action_idx = tutor_agent.select_action(tutor_obs)
             ll_action_str = tutor_agent.get_action_meanings()[ll_action_idx]
             tutor_action_counts[ll_action_str] += 1
 
             next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
-            next_tutor_obs = add_topic(next_obs, topic_id)
+            if len(tutor_agents) == 1:
+                # single shared LL tutor needs topic_id to disambiguate
+                next_tutor_obs = add_topic(next_obs, topic_id)
+            else:
+                # per-topic LL tutor must NOT include topic_id (keeps sharing “in-topic”)
+                next_tutor_obs = np.asarray(next_obs, dtype=np.float32)
 
             # per-agent reward attribution:
             # - multi-agent: reward belongs to that topic’s LL agent
@@ -1079,7 +1089,7 @@ def main():
                 float(share_eligible_peers_mean),
                 float(share_selected_peers_mean),
 
-                *[float(x) for x in ll_rewards],
+                *[float(x) for x in ll_rewards_full],
                 float(tutee_reward_total),
             ])
             window_rewards.append(float(total_reward))
