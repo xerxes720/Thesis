@@ -5,14 +5,13 @@
       <sourceFolder url="file://$MODULE_DIR$/education_framework" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
     </content>
-    <orderEntry type="inheritedJdk" />
+    <orderEntry type="jdk" jdkName="Python 3.10 (Thesis)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyNamespacePackagesService">
     <option name="namespacePackageFolders">
       <list>
         <option value="$MODULE_DIR$/education_framework/utils" />
-        <option value="$MODULE_DIR$/education_framework/runs" />
       </list>
     </option>
   </component>

@@ -299,6 +299,35 @@ def add_topic(obs, topic_id: int) -> np.ndarray:
     obs_np = np.asarray(obs, dtype=np.float32)
     return np.concatenate([obs_np, np.array([topic_id], dtype=np.float32)])
 
+def canonicalize_obs(obs, topic_id: int, num_topics: int) -> np.ndarray:
+    """
+    Reorders per-topic blocks so that the active topic_id is always at index 0.
+    This makes experiences from different topics share the same semantics, enabling safe sharing.
+
+    Expected env obs layout (from get_observation()):
+      [mastery, cfa_ema, hint_ema, time_ema, inc_ema, opp_norm, topic_complete] each length=num_topics
+      + [global_mastery, total_steps_norm] length=2
+    """
+    x = np.asarray(obs, dtype=np.float32)
+
+    n_blocks = 7
+    tail = 2
+    expected = n_blocks * num_topics + tail
+    if x.shape[0] != expected:
+        # Fallback: do nothing if obs layout changed
+        return x
+
+    perm = np.array([topic_id] + [i for i in range(num_topics) if i != topic_id], dtype=np.int64)
+
+    blocks = []
+    for b in range(n_blocks):
+        start = b * num_topics
+        end = start + num_topics
+        blocks.append(x[start:end][perm])
+
+    tail_vec = x[n_blocks * num_topics:]
+    return np.concatenate(blocks + [tail_vec], axis=0)
+
 
 class FlatAgent:
     """
@@ -399,9 +428,10 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             if len(tutor_agents) == 1:
                 # single shared LL tutor needs topic_id to disambiguate
                 tutor_obs = add_topic(obs, topic_id)
+
             else:
                 # per-topic LL tutor must NOT include topic_id (keeps sharing “in-topic”)
-                tutor_obs = np.asarray(obs, dtype=np.float32)
+                tutor_obs = canonicalize_obs(obs, topic_id, num_topics)
             ll_action_idx = tutor_agent.select_action(tutor_obs)
             ll_action_str = tutor_agent.get_action_meanings()[ll_action_idx]
             tutor_action_counts[ll_action_str] += 1
@@ -412,7 +442,8 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
                 next_tutor_obs = add_topic(next_obs, topic_id)
             else:
                 # per-topic LL tutor must NOT include topic_id (keeps sharing “in-topic”)
-                next_tutor_obs = np.asarray(next_obs, dtype=np.float32)
+                next_tutor_obs = canonicalize_obs(next_obs, topic_id, num_topics)
+
 
             # per-agent reward attribution:
             # - multi-agent: reward belongs to that topic’s LL agent

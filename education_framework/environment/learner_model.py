@@ -37,6 +37,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import math
 import random
+from dataclasses import field
 
 import numpy as np
 
@@ -332,6 +333,10 @@ class KDDLearnerConfig:
     mastery_threshold: float = 0.75
     opp_min: int = 1
 
+    topic_mastery_thresholds: Optional[List[float]] = field(
+        default_factory=lambda: [0.70, 0.72, 0.75, 0.78, 0.80, 0.83, 0.85]
+    )
+
     # --- Topic heterogeneity / clustering (enables weighted transfer to beat mutual) ---
     # Example for 7 topics: 3 clusters {0,1,2}, {3,4}, {5,6}
 
@@ -505,6 +510,13 @@ class KDDLearnerModel:
             return float(default)
         return float(arr[topic_id])
 
+    def _topic_threshold(self, topic_id: int) -> float:
+        t = getattr(self.cfg, "topic_mastery_thresholds", None)
+        if not t:
+            return float(self.cfg.mastery_threshold)
+        if topic_id < 0 or topic_id >= len(t):
+            return float(self.cfg.mastery_threshold)
+        return float(t[topic_id])
     def _beta_mult(self, name: str, topic_id: int) -> float:
         b = self.bundle
         if b is None:
@@ -994,6 +1006,7 @@ class KDDLearnerModel:
 
         # optional but recommended for stability
         r_step = float(np.clip(r_step, -0.05, 0.05))
+
 
         # reward = r_step + (self.cfg.completion_reward if done else 0.0)
         # One-time completion reward per topic/subtask:
