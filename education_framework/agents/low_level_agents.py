@@ -57,16 +57,23 @@ class LowLevelAgentConfig:
     share_mode: str = "weighted_cka"  # options: "off", "mutual", "weighted_cka"
 
     # NEW: fixed-size batch mixing
-    share_frac: float = 0.15  # fraction of each batch coming from peers
-    share_warmup_updates: int = 1500  # don't share until this many gradient updates
+    share_frac: float = 0.40  # fraction of each batch coming from peers
+    share_warmup_updates: int = 200  # don't share until this many gradient updates
 
-    max_peers_per_update: int = 1  # sample up to this many peers each train step (for speed)
-    peer_batch_size: int = 32  # how many transitions to sample from each peer
-    min_peer_replay_size: int = 2000  # peers must have at least this many samples to participate
+    max_peers_per_update: int = 4  # sample up to this many peers each train step (for speed)
+    peer_batch_size: int = 64  # how many transitions to sample from each peer
+    min_peer_replay_size: int = 300  # peers must have at least this many samples to participate
+
+    # share_weight_ema_alpha: float = 0.90  # 0.85–0.95
+    # share_cka_every_updates: int = 20  # recompute CKA every N updates
+    # share_min_peer_per_update: int = 1  # keep at least 1 peer if any passes gating
 
     share_weight_floor: float = 0.0  # clamp similarity weights
     share_weight_ceiling: float = 1.5
-    share_similarity_threshold: float = 0.00  # CRITICAL: if below this, do not use peer samples
+    share_similarity_threshold: float = 0.15  # CRITICAL: if below this, do not use peer samples
+
+    # NEW: make high-sim peers matter more
+    share_weight_power: float = 2.0  # sharpen similarity weights (>=1.0)
 
     cka_layers: Tuple[str, ...] = ("h1", "h2")  # which layers to use for similarity
 
@@ -82,7 +89,7 @@ class LowLevelAgentConfig:
     tutee_not_ready_penalty: float = 0.5
 
     # --- Paper-style experience sharing (Algorithm 1) ---
-    paper_style_sharing: bool = True  # if True, ignore share_frac / max_peers_per_update caps
+    paper_style_sharing: bool = False  # if True, ignore share_frac / max_peers_per_update caps
     paper_peer_batch_size: int = 256  # usually == batch_size (b in paper)
     paper_use_all_peers: bool = True  # loop over all j != i
 
@@ -268,8 +275,7 @@ class DQNLowLevelAgent:
             return
 
         # -------- Build training batch: own + shared --------
-        batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w = self._build_shared_batch()
-
+        batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w = self._build_shared_batch(self.cfg.batch_size)
 
         s_np = _to_f32_batch(batch_s)
         s2_np = _to_f32_batch(batch_s2)
@@ -285,6 +291,13 @@ class DQNLowLevelAgent:
         d_t = torch.from_numpy(d_np)
         w_t = torch.from_numpy(w_np)
 
+        s_t = s_t.to(self.device)
+        s2_t = s2_t.to(self.device)
+        a_t = a_t.to(self.device)
+        r_t = r_t.to(self.device)
+        d_t = d_t.to(self.device)
+        w_t = w_t.to(self.device)
+
         # Q(s,a)
         q_sa = self.policy_net(s_t).gather(1, a_t).squeeze(1)
 
@@ -294,9 +307,14 @@ class DQNLowLevelAgent:
             next_q = self.target_net(s2_t).gather(1, next_actions).squeeze(1)
             target = r_t + self.cfg.gamma * (1.0 - d_t) * next_q
 
+        w_t = w_t.clamp(0.0, 2.0)  # or 1.5 if you want strict
+        w_t = w_t / w_t.mean().clamp_min(1e-8)
+
         # Weighted TD loss
         td = (q_sa - target)
         loss = (w_t * (td ** 2)).sum() / (w_t.sum().clamp_min(1e-8))
+        # loss_per = torch.nn.functional.smooth_l1_loss(q_sa, target, reduction="none")  # Huber
+        # loss = (w_t * loss_per).sum() / w_t.sum().clamp_min(1e-8)
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.cfg.max_grad_norm)
@@ -305,53 +323,201 @@ class DQNLowLevelAgent:
         self.num_updates += 1
 
         # target net update
-        if self.total_steps % self.cfg.target_update_steps == 0:
+        if self.num_updates % max(1, int(self.cfg.target_update_steps)) == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
 
     # -------- internals --------
 
-    def _build_shared_batch(self):
-        B = int(self.cfg.batch_size)
+    def _build_shared_batch(self, B: int):
+        """
+        Build a minibatch with (optional) experience sharing.
 
-        # No sharing or warmup => pure own batch
-        if (not self.cfg.experience_sharing) or self.cfg.share_mode == "off":
+        Returns:
+            s, a, r, s2, d, w
+            where w is a per-sample weight (float) applied to TD error / loss.
+        """
+        # -----------------------------
+        # Fast path: no sharing
+        # -----------------------------
+        if (not getattr(self.cfg, "experience_sharing", False)) or getattr(self.cfg, "share_mode", "off") == "off":
             s, a, r, s2, d = self.replay.sample(B)
-            return s, a, r, s2, d, [1.0] * B
+            w = [1.0] * len(s)
+            return s, a, r, s2, d, w
 
-        if self.num_updates < int(self.cfg.share_warmup_updates):
+        # -----------------------------
+        # Warmup gate (in update-count space)
+        # -----------------------------
+        if int(self.num_updates) < int(getattr(self.cfg, "share_warmup_updates", 0)):
             s, a, r, s2, d = self.replay.sample(B)
-            return s, a, r, s2, d, [1.0] * B
+            w = [1.0] * len(s)
+            return s, a, r, s2, d, w
 
-        # ---- diagnostics ----
+        # -----------------------------
+        # Find eligible peers
+        # -----------------------------
         self._share_attempts += 1
 
-        # Eligible peers
-        eligible = [
-            p for p in self._peers
-            if len(p.replay) >= max(int(self.cfg.min_peer_replay_size), int(self.cfg.peer_batch_size))
-               and p.policy_net is not None
-        ]
+        peers_all = list(self._peers)
+        if not peers_all:
+            s, a, r, s2, d = self.replay.sample(B)
+            w = [1.0] * len(s)
+            return s, a, r, s2, d, w
+
+        min_peer_size = int(getattr(self.cfg, "min_peer_replay_size", 0))
+        eligible = []
+        for p in peers_all:
+            # must have a replay large enough and a network initialized
+            if getattr(p, "replay", None) is None:
+                continue
+            if len(p.replay) < max(min_peer_size, 1):
+                continue
+            if getattr(p, "policy_net", None) is None:
+                continue
+            eligible.append(p)
+
         self._share_eligible_peers_sum += len(eligible)
 
         if not eligible:
             s, a, r, s2, d = self.replay.sample(B)
-            return s, a, r, s2, d, [1.0] * B
+            w = [1.0] * len(s)
+            return s, a, r, s2, d, w
 
-        # Limit number of peers per update (prevents homogenization)
-        k = min(int(self.cfg.max_peers_per_update), len(eligible))
-        peers = random.sample(eligible, k)
-        self._share_selected_peers_sum += k
+        # -----------------------------
+        # Config knobs
+        # -----------------------------
+        share_mode = str(getattr(self.cfg, "share_mode", "off"))
+        thr = float(getattr(self.cfg, "share_similarity_threshold", 0.0))
+        power = float(getattr(self.cfg, "share_weight_power", 1.0))
+        w_floor = float(getattr(self.cfg, "share_weight_floor", 0.0))
+        w_ceil = float(getattr(self.cfg, "share_weight_ceiling", 1.0))
+        cka_layers = tuple(getattr(self.cfg, "cka_layers", ("h1", "h2")))
 
-        peer_total = int(round(B * float(self.cfg.share_frac)))
+        # paper-style mode (optional)
+        paper_style = bool(getattr(self.cfg, "paper_style_sharing", False))
+        paper_peer_batch = int(getattr(self.cfg, "paper_peer_batch_size", B))
+        paper_use_all = bool(getattr(self.cfg, "paper_use_all_peers", True))
+
+        # Choose candidate peers
+        if paper_style and paper_use_all:
+            candidates = eligible
+        else:
+            k = min(int(getattr(self.cfg, "max_peers_per_update", 1)), len(eligible))
+            candidates = random.sample(eligible, k)
+
+        # -----------------------------
+        # Helper: compute a peer weight
+        # -----------------------------
+        def _peer_weight(peer) -> float:
+            if share_mode == "mutual":
+                return 1.0
+
+            if share_mode != "weighted_cka":
+                return 0.0
+
+            # probe for similarity (small, stable)
+            probe_n = min(int(getattr(self.cfg, "peer_batch_size", 32)), 64)
+            ps_probe, _, _, _, _ = peer.replay.sample(max(1, probe_n))
+            ps_np = _to_f32_batch(ps_probe)
+            states_t = torch.from_numpy(ps_np).to(self.device)
+
+            w = float(avg_layer_cka(self.policy_net, peer.policy_net, states_t, cka_layers))
+            w = max(w_floor, min(w_ceil, w))
+
+            # sharpen similarity distribution
+            if power != 1.0:
+                w = float(max(0.0, w) ** power)
+
+            return w
+
+        # -----------------------------
+        # Compute gated peer infos
+        # -----------------------------
+        peer_infos = []  # list of (peer, weight)
+        for p in candidates:
+            wi = _peer_weight(p)
+            if wi < thr:
+                continue
+            peer_infos.append((p, float(wi)))
+
+        # IMPORTANT diagnostics: count actually-used peers (post-gating)
+        self._share_selected_peers_sum += len(peer_infos)
+
+        # If nobody survived gating, fall back to own batch
+        if not peer_infos:
+            s, a, r, s2, d = self.replay.sample(B)
+            w = [1.0] * len(s)
+            return s, a, r, s2, d, w
+
+        # =========================================================
+        # Mode A: "paper_style_sharing"
+        #   - sample b from self
+        #   - for each gated peer, sample b from peer, weight by similarity
+        #   - then SUBSAMPLE down to B if we exceeded, or FILL if short
+        # =========================================================
+        if paper_style:
+            b = max(1, min(B, int(paper_peer_batch)))
+
+            # own chunk
+            s, a, r, s2, d = self.replay.sample(b)
+            w = [1.0] * len(s)
+
+            added = 0
+            peer_weight_sum = 0.0
+
+            for p, wi in peer_infos:
+                ps, pa, pr, ps2, pd = p.replay.sample(b)
+                s.extend(ps);
+                a.extend(pa);
+                r.extend(pr);
+                s2.extend(ps2);
+                d.extend(pd)
+                w.extend([wi] * len(ps))
+
+                added += len(ps)
+                peer_weight_sum += wi * len(ps)
+
+            self._share_peer_samples += added
+            self._share_peer_weight_sum += peer_weight_sum
+
+            # If we overshot B, subsample uniformly back to B (keeps mixture unbiased)
+            if len(s) > B:
+                idx = np.random.choice(len(s), size=B, replace=False)
+                s = [s[i] for i in idx]
+                a = [a[i] for i in idx]
+                r = [r[i] for i in idx]
+                s2 = [s2[i] for i in idx]
+                d = [d[i] for i in idx]
+                w = [w[i] for i in idx]
+
+            # If short, fill remainder with own
+            if len(s) < B:
+                missing = B - len(s)
+                ps, pa, pr, ps2, pd = self.replay.sample(missing)
+                s.extend(ps);
+                a.extend(pa);
+                r.extend(pr);
+                s2.extend(ps2);
+                d.extend(pd)
+                w.extend([1.0] * len(ps))
+
+            return s, a, r, s2, d, w
+
+        # =========================================================
+        # Mode B: True weighted transfer (recommended)
+        #   - keep batch size fixed at B
+        #   - allocate peer_total = round(B*share_frac) across peers by weight
+        #   - sample that many from each peer
+        # =========================================================
+        peer_total = int(round(B * float(getattr(self.cfg, "share_frac", 0.15))))
         peer_total = max(0, min(B, peer_total))
         own_n = B - peer_total
 
-        # Start with own samples
+        # own samples
         s, a, r, s2, d = self.replay.sample(own_n)
-        w = [1.0] * own_n
+        w = [1.0] * len(s)
 
-        if peer_total == 0:
-            # Fill to B with own defensively
+        if peer_total <= 0:
+            # fill to B if needed
             missing = B - len(s)
             if missing > 0:
                 ps, pa, pr, ps2, pd = self.replay.sample(missing)
@@ -363,51 +529,45 @@ class DQNLowLevelAgent:
                 w.extend([1.0] * len(ps))
             return s, a, r, s2, d, w
 
-        # Allocate peer_total across k peers
-        remaining = peer_total
+        weights = np.asarray([wi for _, wi in peer_infos], dtype=np.float64)
+        wsum = float(weights.sum())
+        if wsum <= 1e-12:
+            probs = np.ones_like(weights) / max(1, len(weights))
+        else:
+            probs = weights / wsum
+
+        # alloc = np.random.multinomial(peer_total, probs).tolist()
+        # NEW: deterministic allocation (much smoother)
+        expected = probs * peer_total
+        alloc = np.floor(expected).astype(int)
+
+        rem = peer_total - int(alloc.sum())
+        if rem > 0:
+            # distribute remainder to highest fractional parts
+            frac = expected - alloc
+            idx = np.argsort(-frac)[:rem]
+            alloc[idx] += 1
+
+        alloc = alloc.tolist()
+
         added = 0
         peer_weight_sum = 0.0
 
-        for p in peers:
-            if remaining <= 0:
-                break
-
-            n_i = min(int(self.cfg.peer_batch_size), remaining)
-            remaining -= n_i
-
-            ps, pa, pr, ps2, pd = p.replay.sample(n_i)
-
-            # Compute similarity weight
-            if self.cfg.share_mode == "mutual":
-                weight = 1.0
-            elif self.cfg.share_mode == "weighted_cka":
-                ps_np = _to_f32_batch(ps)
-                states_t = torch.from_numpy(ps_np).to(self.device)
-                weight = float(avg_layer_cka(self.policy_net, p.policy_net, states_t, self.cfg.cka_layers))
-            else:
-                weight = 0.0
-
-            # Clamp
-            weight = max(float(self.cfg.share_weight_floor),
-                         min(float(self.cfg.share_weight_ceiling), float(weight)))
-
-            # Similarity gate (FAIL-SAFE)
-            thr = float(getattr(self.cfg, "share_similarity_threshold", 0.0))
-            if self.cfg.share_mode == "weighted_cka" and weight < thr:
-                continue  # skip this peer entirely
-
-            # Add peer samples
+        for (p, wi), n_i in zip(peer_infos, alloc):
+            if n_i <= 0:
+                continue
+            ps, pa, pr, ps2, pd = p.replay.sample(int(n_i))
             s.extend(ps);
             a.extend(pa);
             r.extend(pr);
             s2.extend(ps2);
             d.extend(pd)
-            w.extend([weight] * len(ps))
+            w.extend([wi] * len(ps))
 
             added += len(ps)
-            peer_weight_sum += weight * len(ps)
+            peer_weight_sum += wi * len(ps)
 
-        # If gating removed too much, fill remainder with own
+        # fill remainder with own if short
         missing = B - len(s)
         if missing > 0:
             ps, pa, pr, ps2, pd = self.replay.sample(missing)
@@ -418,7 +578,6 @@ class DQNLowLevelAgent:
             d.extend(pd)
             w.extend([1.0] * len(ps))
 
-        # ---- diagnostics ----
         self._share_peer_samples += added
         self._share_peer_weight_sum += peer_weight_sum
 

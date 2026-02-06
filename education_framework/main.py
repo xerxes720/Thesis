@@ -302,7 +302,13 @@ def create_agents(
     # --- sharing config (applies to tutor agents only) ---
     ll_cfg.experience_sharing = bool(experience_sharing) and (ll_mode == "multi")
     ll_cfg.share_mode = share_mode if ll_cfg.experience_sharing else "off"
-
+    if ll_cfg.experience_sharing and ll_cfg.share_mode == "weighted_cka":
+        ll_cfg.share_frac = 0.30
+        ll_cfg.max_peers_per_update = 3
+        ll_cfg.peer_batch_size = 64
+        ll_cfg.min_peer_replay_size = 500
+        ll_cfg.share_similarity_threshold = 0.10
+        ll_cfg.share_weight_power = 2.0
     # --- build tutor agents: single vs multi ---
     if ll_mode == "single":
         tutor_agents = [TutorLowLevelAgent(ll_cfg)]  # one shared tutor DQN

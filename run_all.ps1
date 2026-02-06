@@ -36,10 +36,10 @@ try {
 #          --arch flat --ll_mode single --share_mode off `
 #          --seed $seed --run_tag "flat_single"
 
-        python -m education_framework.main `
-          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --arch hrl --ll_mode single --share_mode off `
-          --seed $seed --run_tag "single_ll"
+#        python -m education_framework.main `
+#          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#          --arch hrl --ll_mode single --share_mode off `
+#          --seed $seed --run_tag "single_ll"
 #
 #        python -m education_framework.main `
 #          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
