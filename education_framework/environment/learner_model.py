@@ -334,7 +334,7 @@ class KDDLearnerConfig:
     opp_min: int = 1
 
     topic_mastery_thresholds: Optional[List[float]] = field(
-        default_factory=lambda: [0.70, 0.72, 0.75, 0.78, 0.80, 0.83, 0.85]
+        default_factory=lambda: [0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82]
     )
 
     # --- Topic heterogeneity / clustering (enables weighted transfer to beat mutual) ---
@@ -345,7 +345,7 @@ class KDDLearnerConfig:
 
     from dataclasses import field
     topic_cluster_ids: List[int] = field(default_factory=lambda: [0, 0, 0, 1, 1, 2, 2])
-    topic_difficulty: List[float] = field(default_factory=lambda: [1.10, 1.05, 1.15, 1.0, 1.0, 1.20, 1.15])
+    topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
 
 
     # --- tutee (protégé / learning-by-teaching) simulation ---
@@ -379,7 +379,7 @@ class KDDLearnerConfig:
 
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02
-    completion_reward: float = 1.0
+    completion_reward: float = 0.4
 
     opp_norm: float = 20.0
     time_norm: float = 120.0
@@ -465,18 +465,17 @@ class KDDLearnerModel:
 
     def is_done(self) -> bool:
         s = self.state
-        mastered = (s.mastery >= self.cfg.mastery_threshold).astype(np.int32)
-        enough_opp = (s.opp >= self.cfg.opp_min).astype(np.int32)
-        return bool(np.all((mastered * enough_opp) > 0))
+        for k in range(self.cfg.n_topics):
+            if not (float(s.mastery[k]) >= self._topic_threshold(k) and int(s.opp[k]) >= int(self.cfg.opp_min)):
+                return False
+        return True
 
     def is_topic_complete(self, topic_id: int) -> bool:
-        """Topic/subtask is complete when mastery >= threshold AND opp >= opp_min."""
         s = self.state
         return bool(
-            (s.mastery[topic_id] >= self.cfg.mastery_threshold) and
-            (s.opp[topic_id] >= self.cfg.opp_min)
+            (float(s.mastery[topic_id]) >= self._topic_threshold(topic_id)) and
+            (int(s.opp[topic_id]) >= int(self.cfg.opp_min))
         )
-
     def _apply_forgetting_all_except(self, practiced_topic: int, step_cost: float) -> None:
         s = self.state
         cfg = self.cfg
@@ -654,7 +653,7 @@ class KDDLearnerModel:
 
         diff = self._topic_scalar(self.cfg.topic_difficulty, topic_id, 1.0)
         # Harder topic => smaller effective update
-        diff_scale = 1.0 / max(0.2, diff)
+        diff_scale = 1.0 / max(0.6, diff)
 
         scale = (1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)) * diff_scale
 
@@ -835,6 +834,10 @@ class KDDLearnerModel:
 
         return cfa, hints, incorrects, duration
 
+    def _refresh_topic_completed_flags(self) -> None:
+        for k in range(self.cfg.n_topics):
+            if (not bool(self._topic_completed[k])) and self.is_topic_complete(k):
+                self._topic_completed[k] = True
     def step(self, topic_id: int, action_meta: ActionMeta) -> Tuple[LearnerState, Dict[str, Any]]:
         if self.bundle is None:
             raise RuntimeError("KDDLearnerModel.bundle is None; provide a trained KDDModelBundle")
@@ -868,12 +871,31 @@ class KDDLearnerModel:
 
             resp_model = self.bundle.response_models.get(topic_id)
             p_correct = float(s.mastery[topic_id]) if resp_model is None else self._predict_proba_1(resp_model, x_base)
+
+            # NEW: difficulty warps correctness (diff>1 => harder => lower p_correct)
+            diff = self._topic_scalar(self.cfg.topic_difficulty, topic_id, 1.0)
+            # Use exponent warp: stable + simple + monotonic
+            p_correct = _clip01(p_correct ** diff)
+
             cfa = 1 if self.rng.random() < p_correct else 0
 
             hints = self._predict_aux_int(topic_id, x_base, self.bundle.hints_models, default=0)
             incorrects = self._predict_aux_int(topic_id, x_base, self.bundle.inc_models, default=(0 if cfa == 1 else 1))
             duration = self._predict_aux_float(topic_id, x_base, self.bundle.time_models,
                                                default=self.bundle.schema.dur_q50)
+
+            # NEW: difficulty scales auxiliary outcomes to widen topic differences
+            diff = self._topic_scalar(self.cfg.topic_difficulty, topic_id, 1.0)
+
+            # harder => longer
+            duration = float(duration) * (diff ** 0.5)
+
+            # harder => more struggle signals (cap to avoid crazy values)
+            hints = int(round(float(hints) * diff))
+            hints = min(hints, 10)
+
+            incorrects = int(round(float(incorrects) * diff))
+            incorrects = min(incorrects, 10)
 
             step_cost = 1
             self._apply_forgetting_all_except(topic_id, step_cost=float(step_cost))
@@ -978,6 +1000,13 @@ class KDDLearnerModel:
         if bool(self._topic_completed[topic_id]):
             s.mastery[topic_id] = max(float(s.mastery[topic_id]), m_before)
 
+        # --- Intrinsic (topic-local) progress signal for low-level learning ---
+        # Keep the paper-style global reward for the HIGH-level agent, but provide a topic-local
+        # signal for LOW-level agents to reduce credit-assignment noise in multi-agent HRL.
+        m_after = float(s.mastery[topic_id])
+        den_local = max(abs(m_before), 0.05)
+        r_local = (m_after - m_before) / den_local
+        r_local = float(np.clip(r_local, -0.05, 0.05))
 
         # 5) Observational updates (EMAs, opp, steps)
         self._apply_observation_updates(
@@ -1018,10 +1047,16 @@ class KDDLearnerModel:
             # info["topic_completion_bonus"] = float(topic_completion_bonus)
             # info["topic_completed"] = bool(self._topic_completed[topic_id])
 
-        reward = r_step + topic_completion_bonus
-        # can add a lambda 0.5 or 1 or 2 to tutee bonud -> lambda * tutee_bonus
-        reward += float(self.cfg.tutee_reward_lambda) * tutee_bonus
+        # reward = r_step + topic_completion_bonus
+        # # can add a lambda 0.5 or 1 or 2 to tutee bonud -> lambda * tutee_bonus
+        # reward += float(self.cfg.tutee_reward_lambda) * tutee_bonus
         # reward -= float(self.cfg.step_penalty) * float(step_cost)
+
+        reward_global = r_step + topic_completion_bonus
+        reward_global += float(self.cfg.tutee_reward_lambda) * tutee_bonus
+
+        reward_local_total = r_local + topic_completion_bonus
+        reward_local_total += float(self.cfg.tutee_reward_lambda) * tutee_bonus
 
         info = {
             "p_correct": p_correct,
@@ -1029,14 +1064,19 @@ class KDDLearnerModel:
             "hints": hints,
             "incorrects": incorrects,
             "duration": duration,
-            "step_cost": int(step_cost),
+            "step_cost": float(step_cost),
             "generation_mode": generation_mode,
             "quality": quality,
             "leaf": leaf_id,
             "tutee_bonus": float(tutee_bonus),
-            "reward": reward,
+            # "reward": reward,
+            "reward_global": float(reward_global),
+            "reward_local": float(reward_local_total),
+            "reward": float(reward_global),
             "done": done,
             "forced_end": forced_end,
+            "diff": float(self._topic_scalar(self.cfg.topic_difficulty, topic_id, 1.0)),
+            "topic_threshold": float(self._topic_threshold(topic_id)),
         }
         return self.state.copy(), info
 

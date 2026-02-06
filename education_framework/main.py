@@ -76,7 +76,6 @@ class KDDEnvConfig:
     lambda_step: float = 0.03  # NEW: reward penalty per step-cost unit
 
 
-
 class KDDHierEnv:
     """
     Thin wrapper so your existing main/run_episode can stay mostly unchanged.
@@ -128,7 +127,7 @@ class KDDHierEnv:
             'tutee_quiz': ActionMeta(action=LowLevelAction.TUTEE_QUIZ, is_tutee=True, force_generation=False),
             'tutee_explain': ActionMeta(action=LowLevelAction.TUTEE_EXPLAIN, is_tutee=True, force_generation=False),
             'tutee_fix': ActionMeta(action=LowLevelAction.TUTEE_FIX, is_tutee=True,
-                                                   force_generation=False),
+                                    force_generation=False),
         }
 
     def reset(self) -> List[float]:
@@ -191,20 +190,36 @@ class KDDHierEnv:
 
         done = self._done()
 
-        base_reward = float(info.get("reward", 0.0))
+        base_reward_global = float(info.get("reward_global", info.get("reward", 0.0)))
+        base_reward_local = float(info.get("reward_local", base_reward_global))
         step_cost = float(info.get("step_cost", 1))
 
-        # NEW: penalize step-cost in the reward signal (what RL learns)
-        reward = base_reward - self.lambda_step * step_cost
-        # reward = base_reward
+        reward_hl = base_reward_global - self.lambda_step * step_cost
+        reward_ll = base_reward_local - self.lambda_step * step_cost
 
-        # Optional: keep diagnostics in info
         info = dict(info)
-        info["base_reward"] = base_reward
+        info["base_reward_global"] = base_reward_global
+        info["base_reward_local"] = base_reward_local
         info["step_penalty"] = float(self.lambda_step * step_cost)
-        info["reward_after_penalty"] = float(reward)
+        info["reward_hl"] = float(reward_hl)
+        info["reward_ll"] = float(reward_ll)
 
-        return self.get_observation(), reward, done, {"mode": "tutor", **info}
+        return self.get_observation(), reward_hl, done, {"mode": "tutor", **info}
+
+        # base_reward = float(info.get("reward", 0.0))
+        # step_cost = float(info.get("step_cost", 1))
+        #
+        # # NEW: penalize step-cost in the reward signal (what RL learns)
+        # reward = base_reward - self.lambda_step * step_cost
+        # # reward = base_reward
+        #
+        # # Optional: keep diagnostics in info
+        # info = dict(info)
+        # info["base_reward"] = base_reward
+        # info["step_penalty"] = float(self.lambda_step * step_cost)
+        # info["reward_after_penalty"] = float(reward)
+        #
+        # return self.get_observation(), reward, done, {"mode": "tutor", **info}
 
     def step_tutee(self, topic_id: int, action: str):
         meta = self._tutee_action_map.get(action)
@@ -216,19 +231,24 @@ class KDDHierEnv:
 
         done = self._done()
 
-        base_reward = float(info.get("reward", 0.0))
+        base_reward_global = float(info.get("reward_global", info.get("reward", 0.0)))
+        base_reward_local = float(info.get("reward_local", base_reward_global))
         step_cost = float(info.get("step_cost", 1))
 
         # reward = base_reward - self.lambda_step * step_cost
-        reward = base_reward - self.lambda_step * step_cost
+        # reward = base_reward - self.lambda_step * step_cost
         # reward = base_reward
+        reward_hl = base_reward_global - self.lambda_step * step_cost
+        reward_ll = base_reward_local - self.lambda_step * step_cost
 
         info = dict(info)
-        info["base_reward"] = base_reward
+        info["base_reward_global"] = base_reward_global
+        info["base_reward_local"] = base_reward_local
         info["step_penalty"] = float(self.lambda_step * step_cost)
-        info["reward_after_penalty"] = float(reward)
+        info["reward_hl"] = float(reward_hl)
+        info["reward_ll"] = float(reward_ll)
 
-        return self.get_observation(), reward, done, {"mode": "tutee", **info}
+        return self.get_observation(), reward_hl, done, {"mode": "tutee", **info}
 
 
 # ----------------------------
@@ -248,6 +268,26 @@ def create_agents(
 
     ll_cfg = LowLevelAgentConfig(num_topics=num_topics)
     ll_cfg.device = "cpu"
+
+    # --- Fairness: equalize LL update budget across modes ---
+    # Base config assumed tuned for "multi" specialists. For a single shared LL, scale down update frequency
+    # so it doesn't get an implicit sample-efficiency advantage.
+    if ll_mode == "single":
+        n = max(1, num_topics)
+        ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
+        ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
+        ll_cfg.buffer_size = max(5_000, int(ll_cfg.buffer_size) // max(1, num_topics))
+        ll_cfg.min_replay_size = int(ll_cfg.min_replay_size) * max(1, num_topics)
+
+    # --- compensate multi-agent data starvation ---
+    # In multi-agent, each topic policy sees fewer transitions; increase update frequency.
+    if ll_mode == "multi":
+        base_te = int(ll_cfg.train_every_steps)
+        ll_cfg.train_every_steps = max(1, base_te // max(1, num_topics))
+        ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep your k=5 rule
+
+        # Sharing warmup expressed in gradient updates; if we update more often, warmup should shrink.
+        ll_cfg.share_warmup_updates = max(200, int(ll_cfg.share_warmup_updates) // max(1, num_topics))
 
     # --- make min_replay_size smaller ONLY for multi-agent (data-starved per-topic buffers) ---
     BASE_MIN_REPLAY = 1000
@@ -299,6 +339,7 @@ def add_topic(obs, topic_id: int) -> np.ndarray:
     obs_np = np.asarray(obs, dtype=np.float32)
     return np.concatenate([obs_np, np.array([topic_id], dtype=np.float32)])
 
+
 def canonicalize_obs(obs, topic_id: int, num_topics: int) -> np.ndarray:
     """
     Reorders per-topic blocks so that the active topic_id is always at index 0.
@@ -340,23 +381,17 @@ class FlatAgent:
         self.use_tutee = bool(use_tutee)
 
         tutor_actions = build_tutor_actions()
-        self.actions = []
-        for t in range(self.num_topics):
-            for a in tutor_actions:
-                self.actions.append(("tutor", t, a))
+        self.actions = [("tutor", a) for a in tutor_actions]
 
         if self.use_tutee:
             tutee_actions = build_tutee_actions()
-            for t in range(self.num_topics):
-                for a in tutee_actions:
-                    self.actions.append(("tutee", t, a))
+            self.actions += [("tutee", a) for a in tutee_actions]
 
-        # Use the same DQN backbone
         self.agent = DQNLowLevelAgent(cfg, actions=[self._encode(x) for x in self.actions])
 
     def _encode(self, tpl):
-        mode, t, a = tpl
-        return f"{mode}|{t}|{a}"
+        mode, a = tpl
+        return f"{mode}|{a}"
 
     def decode_action(self, idx: int):
         return self.actions[int(idx)]
@@ -425,34 +460,35 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             else:
                 tutor_agent = tutor_agents[topic_id]  # per-topic agent
 
-            if len(tutor_agents) == 1:
-                # single shared LL tutor needs topic_id to disambiguate
-                tutor_obs = add_topic(obs, topic_id)
+            # Always provide the active-topic-first view.
+            # - For multi-LL: keeps “in-topic” semantics stable
+            # - For single-LL: avoids giving a raw topic_id while keeping it Markov
+            tutor_obs = canonicalize_obs(obs, topic_id, num_topics)
 
-            else:
-                # per-topic LL tutor must NOT include topic_id (keeps sharing “in-topic”)
-                tutor_obs = canonicalize_obs(obs, topic_id, num_topics)
             ll_action_idx = tutor_agent.select_action(tutor_obs)
             ll_action_str = tutor_agent.get_action_meanings()[ll_action_idx]
             tutor_action_counts[ll_action_str] += 1
 
-            next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
-            if len(tutor_agents) == 1:
-                # single shared LL tutor needs topic_id to disambiguate
-                next_tutor_obs = add_topic(next_obs, topic_id)
-            else:
-                # per-topic LL tutor must NOT include topic_id (keeps sharing “in-topic”)
-                next_tutor_obs = canonicalize_obs(next_obs, topic_id, num_topics)
-
+            # next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
+            next_obs, reward_hl, done, info = env.step_tutor(topic_id, ll_action_str)
+            reward_ll = float(info.get("reward_ll", reward_hl))
+            # if len(tutor_agents) == 1:
+            #     # single shared LL tutor needs topic_id to disambiguate
+            #     next_tutor_obs = add_topic(next_obs, topic_id)
+            # else:
+            #     # per-topic LL tutor must NOT include topic_id (keeps sharing “in-topic”)
+            #     next_tutor_obs = canonicalize_obs(next_obs, topic_id, num_topics)
+            next_tutor_obs = canonicalize_obs(next_obs, topic_id, num_topics)
 
             # per-agent reward attribution:
             # - multi-agent: reward belongs to that topic’s LL agent
             # - single-agent: reward belongs to the single shared LL agent (index 0)
             ll_idx = 0 if len(tutor_agents) == 1 else int(topic_id)
-            ll_rewards[ll_idx] += float(reward)
+            ll_rewards[ll_idx] += reward_ll
+
             if train:
-                high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
-                tutor_agent.update(tutor_obs, ll_action_idx, reward, next_tutor_obs, done)
+                high_level_agent.update(obs, hl_action_idx, reward_hl, next_obs, done)
+                tutor_agent.update(tutor_obs, ll_action_idx, reward_ll, next_tutor_obs, done)
 
         elif mode == "tutee" and tutee_agent is not None:
             tutee_hl_count += 1
@@ -462,21 +498,31 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             ll_action_str = tutee_agent.get_action_meanings()[ll_action_idx]
             tutee_action_counts[ll_action_str] += 1
 
-            next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
+            next_obs, reward_hl, done, info = env.step_tutee(topic_id, ll_action_str)
+            reward_ll = float(info.get("reward_ll", reward_hl))
             next_tutee_obs = add_topic(next_obs, topic_id)
-            tutee_reward_total += float(reward)
+
+            tutee_reward_total += reward_ll
 
             if train:
-                high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
-                tutee_agent.update(tutee_obs, ll_action_idx, reward, next_tutee_obs, done)
+                high_level_agent.update(obs, hl_action_idx, reward_hl, next_obs, done)
+                tutee_agent.update(tutee_obs, ll_action_idx, reward_ll, next_tutee_obs, done)
+
+            # next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
+            # next_tutee_obs = add_topic(next_obs, topic_id)
+            # tutee_reward_total += float(reward)
+            #
+            # if train:
+            #     high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
+            #     tutee_agent.update(tutee_obs, ll_action_idx, reward, next_tutee_obs, done)
 
         else:
             # Safety fallback
-            next_obs, reward, done, info = env.step_tutor(topic_id, "no_help")
+            next_obs, reward_hl, done, info = env.step_tutor(topic_id, "no_help")
             if train:
-                high_level_agent.update(obs, hl_action_idx, reward, next_obs, done)
+                high_level_agent.update(obs, hl_action_idx, reward_hl, next_obs, done)
 
-        total_reward += float(reward)
+        total_reward += float(reward_hl)
         # Steps should reflect the simulator's effective step cost (tutee consumes more budget).
         steps += float(info.get("step_cost", 1))
         obs = next_obs
@@ -494,9 +540,19 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         tutor_hl_count,
         tutee_hl_count,
         hl_trace,
-        ll_rewards,            # NEW
-        tutee_reward_total,    # NEW
+        ll_rewards,  # NEW
+        tutee_reward_total,  # NEW
     )
+
+
+def _sample_topic_for_case2(env) -> int:
+    # simplest: pick among incomplete topics; fallback uniform
+    m = env.model.state.mastery
+    thresh = getattr(env.model.cfg, "mastery_done_threshold", 0.95)
+    candidates = [i for i, mi in enumerate(m) if float(mi) < float(thresh)]
+    if not candidates:
+        candidates = list(range(env.num_topics))
+    return int(np.random.choice(candidates))
 
 
 def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
@@ -505,21 +561,35 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
     total_reward = 0.0
     steps = 0
 
+    topic_id = _sample_topic_for_case2(env)
+
     while not done:
-        a_idx = flat_agent.select_action(obs)
-        mode, topic_id, ll_action_str = flat_agent.decode_action(a_idx)
+        obs_t = add_topic(obs, topic_id)  # topic is part of state (OK)
+        a_idx = flat_agent.select_action(obs_t)
+        mode, ll_action_str = flat_agent.decode_action(a_idx)
 
         if mode == "tutee":
             next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
         else:
             next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
 
+        # keep next state on the same topic for a valid transition
+        next_topic_id = topic_id
+
+        # optionally switch topics only sometimes (reduces handicap, still realistic)
+        # switch if topic complete OR with small probability
+        if env.model.is_topic_complete(topic_id) or random.random() < 0.10:
+            next_topic_id = _sample_topic_for_case2(env)
+
+        next_obs_t = add_topic(next_obs, next_topic_id)
+
         if train:
-            flat_agent.update(obs, a_idx, reward, next_obs, done)
+            flat_agent.update(obs_t, a_idx, reward, next_obs_t, done)
 
         total_reward += float(reward)
         steps += float(info.get("step_cost", 1))
         obs = next_obs
+        topic_id = next_topic_id
 
     return total_reward, steps
 
@@ -920,6 +990,7 @@ def main():
                 torch.cuda.manual_seed_all(seed)
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
+
         """Train once and write a per-episode metrics.csv. Returns end-window summary metrics."""
 
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -936,8 +1007,6 @@ def main():
             learner_cfg=learner_cfg,
             seed=seed,
         )
-
-
 
         num_topics = env.num_topics
 
@@ -1049,7 +1118,8 @@ def main():
             # ---- collect sharing diagnostics for this episode ----
             if args.arch == "hrl":
                 n_ll_agents = len(tutor_agents)
-                share_enabled_eff = int(tutor_agents and tutor_agents[0].cfg.experience_sharing and tutor_agents[0].cfg.share_mode != "off")
+                share_enabled_eff = int(
+                    tutor_agents and tutor_agents[0].cfg.experience_sharing and tutor_agents[0].cfg.share_mode != "off")
                 share_mode_eff = tutor_agents[0].cfg.share_mode if tutor_agents else "off"
                 stats_list = [ag.pop_share_stats() for ag in tutor_agents]
             else:

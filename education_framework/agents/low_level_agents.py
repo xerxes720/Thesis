@@ -66,7 +66,7 @@ class LowLevelAgentConfig:
 
     share_weight_floor: float = 0.0  # clamp similarity weights
     share_weight_ceiling: float = 1.5
-    share_similarity_threshold: float = 0.85  # CRITICAL: if below this, do not use peer samples
+    share_similarity_threshold: float = 0.00  # CRITICAL: if below this, do not use peer samples
 
     cka_layers: Tuple[str, ...] = ("h1", "h2")  # which layers to use for similarity
 
