@@ -57,28 +57,28 @@ class LowLevelAgentConfig:
     share_mode: str = "weighted_cka"  # options: "off", "mutual", "weighted_cka"
 
     # NEW: fixed-size batch mixing
-    share_frac: float = 0.40  # fraction of each batch coming from peers
-    share_warmup_updates: int = 200  # don't share until this many gradient updates
+    share_frac: float = 0.70  # fraction of each batch coming from peers
+    share_warmup_updates: int = 300  # don't share until this many gradient updates
 
-    max_peers_per_update: int = 4  # sample up to this many peers each train step (for speed)
-    peer_batch_size: int = 64  # how many transitions to sample from each peer
-    min_peer_replay_size: int = 300  # peers must have at least this many samples to participate
+    max_peers_per_update: int = 6  # sample up to this many peers each train step (for speed)
+    peer_batch_size: int = 256  # how many transitions to sample from each peer
+    min_peer_replay_size: int = 150  # peers must have at least this many samples to participate
 
     # share_weight_ema_alpha: float = 0.90  # 0.85–0.95
     # share_cka_every_updates: int = 20  # recompute CKA every N updates
     # share_min_peer_per_update: int = 1  # keep at least 1 peer if any passes gating
 
-    share_weight_floor: float = 0.0  # clamp similarity weights
+    share_weight_floor: float = 0.25  # clamp similarity weights
     share_weight_ceiling: float = 1.5
-    share_similarity_threshold: float = 0.15  # CRITICAL: if below this, do not use peer samples
+    share_similarity_threshold: float = 0.0  # CRITICAL: if below this, do not use peer samples
 
     # NEW: make high-sim peers matter more
-    share_weight_power: float = 2.0  # sharpen similarity weights (>=1.0)
+    share_weight_power: float = 4.0  # sharpen similarity weights (>=1.0)
 
     cka_layers: Tuple[str, ...] = ("h1", "h2")  # which layers to use for similarity
 
     # NEW: normalize peer weights per update (makes CKA differences matter more)
-    normalize_peer_weights: bool = False
+    normalize_peer_weights: bool = True
 
     # --- tutee readiness thresholds (copied from KDDLearnerConfig when building tutee agent) ---
     tutee_ready_quiz: float = 0.50
@@ -397,12 +397,11 @@ class DQNLowLevelAgent:
         paper_peer_batch = int(getattr(self.cfg, "paper_peer_batch_size", B))
         paper_use_all = bool(getattr(self.cfg, "paper_use_all_peers", True))
 
+        # -----------------------------
         # Choose candidate peers
-        if paper_style and paper_use_all:
-            candidates = eligible
-        else:
-            k = min(int(getattr(self.cfg, "max_peers_per_update", 1)), len(eligible))
-            candidates = random.sample(eligible, k)
+        # -----------------------------
+        # A: for teacher selection, we want to score all eligible peers (topics are few).
+        candidates = eligible
 
         # -----------------------------
         # Helper: compute a peer weight
@@ -410,37 +409,40 @@ class DQNLowLevelAgent:
         def _peer_weight(peer) -> float:
             if share_mode == "mutual":
                 return 1.0
-
             if share_mode != "weighted_cka":
                 return 0.0
 
-            # probe for similarity (small, stable)
-            probe_n = min(int(getattr(self.cfg, "peer_batch_size", 32)), 64)
-            ps_probe, _, _, _, _ = peer.replay.sample(max(1, probe_n))
-            ps_np = _to_f32_batch(ps_probe)
-            states_t = torch.from_numpy(ps_np).to(self.device)
-
-            w = float(avg_layer_cka(self.policy_net, peer.policy_net, states_t, cka_layers))
-            w = max(w_floor, min(w_ceil, w))
-
-            # sharpen similarity distribution
+            w = float(avg_layer_cka(self.policy_net, peer.policy_net, anchor_states, cka_layers))
             if power != 1.0:
                 w = float(max(0.0, w) ** power)
-
+            w = max(w_floor, min(w_ceil, w))
             return w
 
+        probe_n = min(64, len(self.replay))
+        probe_n = max(1, probe_n)
+        ps_anchor, _, _, _, _ = self.replay.sample(probe_n)
+        anchor_np = _to_f32_batch(ps_anchor)
+        anchor_states = torch.from_numpy(anchor_np).to(self.device)
+
         # -----------------------------
-        # Compute gated peer infos
+        # A: Teacher selection (always pick best peer)
         # -----------------------------
-        peer_infos = []  # list of (peer, weight)
+        scored = []
         for p in candidates:
             wi = _peer_weight(p)
-            if wi < thr:
-                continue
-            peer_infos.append((p, float(wi)))
+            scored.append((p, float(wi)))
 
-        # IMPORTANT diagnostics: count actually-used peers (post-gating)
-        self._share_selected_peers_sum += len(peer_infos)
+        # if something went wrong / all zero, fall back to uniform teacher choice
+        best_peer, best_w = max(scored, key=lambda t: t[1])
+        if best_w <= 1e-12:
+            best_peer = random.choice(candidates)
+            best_w = 1.0
+
+        peer_infos = [(best_peer, float(best_w))]
+
+        # diagnostics
+        self._share_selected_peers_sum += 1
+
 
         # If nobody survived gating, fall back to own batch
         if not peer_infos:
@@ -510,6 +512,11 @@ class DQNLowLevelAgent:
         # =========================================================
         peer_total = int(round(B * float(getattr(self.cfg, "share_frac", 0.15))))
         peer_total = max(0, min(B, peer_total))
+
+        min_w = 0.35  # tune 0.25–0.45
+        if best_w < min_w:
+            peer_total = int(round(B * 0.20))  # only 20% peer this update
+
         own_n = B - peer_total
 
         # own samples
