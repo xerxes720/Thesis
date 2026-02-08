@@ -345,8 +345,8 @@ class KDDLearnerConfig:
 
     from dataclasses import field
     topic_cluster_ids: List[int] = field(default_factory=lambda: [0, 0, 0, 1, 1, 2, 2])
-    # topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
-    topic_difficulty: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.00, 1.0, 1.0, 1.0, 1.0])
+    topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
+    # topic_difficulty: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.00, 1.0, 1.0, 1.0, 1.0])
 
 
     # --- tutee (protégé / learning-by-teaching) simulation ---
@@ -431,6 +431,115 @@ class KDDLearnerModel:
         # Per-topic one-time completion flags (reset each episode).
         self._topic_completed = np.zeros(self.cfg.n_topics, dtype=np.bool_)
 
+    QUALITY_RANK = {"very_bad": 0, "bad": 1, "neutral": 2, "good": 3, "very_good": 4}
+
+    def _min_quality(self, q1: str, q2: str) -> str:
+        """Return the worse (lower-rank) quality."""
+        return q1 if self.QUALITY_RANK[q1] <= self.QUALITY_RANK[q2] else q2
+
+    def _quality_from_outcomes(self, topic_id: int, action: int, cfa: int, hints: int, incorrects: int,
+                               duration: float) -> str:
+        schema = self.bundle.schema
+        dur_q50 = float(schema.dur_q50)
+        dur_q75 = float(schema.dur_q75)
+
+        # Normalize time buckets
+        fast = duration <= dur_q50
+        ok_time = duration <= dur_q75
+
+        # Action-aware grading
+        if action == LowLevelAction.TUTOR_QUIZ:
+            if cfa == 1 and hints == 0 and incorrects == 0 and fast:
+                return "very_good"
+            if cfa == 1:
+                return "good"
+            return "bad" if incorrects <= 1 else "very_bad"
+
+        if action == LowLevelAction.TUTOR_HINT:
+            if cfa == 1 and incorrects == 0 and ok_time:
+                return "good"
+            if cfa == 1:
+                return "neutral"
+            return "bad" if incorrects <= 1 else "very_bad"
+
+        if action == LowLevelAction.TUTOR_WORKED_EXAMPLE:
+            # slower is fine
+            if cfa == 1 and incorrects == 0:
+                return "very_good"
+            if cfa == 1:
+                return "good"
+            return "bad"
+
+        if action == LowLevelAction.TUTOR_REVIEW:
+            # review is slow by design; treat clean correctness as good
+            if cfa == 1 and incorrects == 0:
+                return "good"
+            return "bad"
+
+        if action == LowLevelAction.TUTOR_REMEDIATION:
+            # remediation occurs when struggling; don't punish merely for being used
+            # reward improvement: correct even after struggle -> good
+            if cfa == 1:
+                return "good"
+            return "neutral"  # not auto-bad
+
+        return "neutral"
+
+    def _enforce_action_consistency(
+            self,
+            action: LowLevelAction,
+            *,
+            cfa: int,
+            hints: int,
+            incorrects: int,
+            duration: float,
+    ) -> Tuple[int, int, float]:
+        """
+        Make outcomes consistent with the semantics of the chosen tutor action.
+        This prevents 'action label cheating' where a hint action yields hints=0, etc.
+        """
+        schema = self.bundle.schema  # KDDActionSchema with dur quantiles
+
+        # Always keep basic bounds
+        hints = int(max(0, min(10, hints)))
+        incorrects = int(max(0, min(10, incorrects)))
+        duration = float(max(0.0, duration))
+
+        if action == LowLevelAction.TUTOR_HINT:
+            # A hint action should imply at least one hint and usually some time cost
+            hints = max(hints, 1)
+            duration = max(duration, float(schema.dur_q50))
+
+        elif action == LowLevelAction.TUTOR_REMEDIATION:
+            # Remediation is usually triggered by struggle
+            incorrects = max(incorrects, 1)
+            duration = max(duration, float(schema.dur_q75))
+
+        elif action == LowLevelAction.TUTOR_REVIEW:
+            # Review is “slow but clean”
+            duration = max(duration, float(schema.dur_q75))
+            # Often implies fewer struggle signals (optional conservative clamp)
+            hints = min(hints, 1)
+            incorrects = min(incorrects, 1)
+
+        elif action == LowLevelAction.TUTOR_QUIZ:
+            # Quiz should not have hints by definition
+            hints = 0
+            # Usually faster
+            duration = min(duration, float(schema.dur_q50))
+            # If correct, it shouldn't have incorrect attempts
+            if cfa == 1:
+                incorrects = 0
+            else:
+                incorrects = max(incorrects, 1)
+
+        elif action == LowLevelAction.TUTOR_WORKED_EXAMPLE:
+            # Worked example is typically not super fast
+            duration = max(duration, float(schema.dur_q50))
+            # Can have some hints-like assistance but shouldn’t be “zero-time”
+            # (leave hints/incorrects as-is)
+
+        return hints, incorrects, duration
 
     # ---------- persistence ----------
     def save(self, path: str) -> None:
@@ -533,6 +642,8 @@ class KDDLearnerModel:
             return float(arr[int(topic_id)])
         except Exception:
             return 1.0
+
+
     # ---------- feature engineering ----------
     def _state_features(self, s: LearnerState, topic_id: int) -> np.ndarray:
         """Features used by the routing quality tree: state only (no action, no outcomes)."""
@@ -934,6 +1045,18 @@ class KDDLearnerModel:
             incorrects = int(round(float(incorrects) * diff))
             incorrects = min(incorrects, 10)
 
+            hints, incorrects, duration = self._enforce_action_consistency(
+                action_meta.action,
+                cfa=cfa,
+                hints=hints,
+                incorrects=incorrects,
+                duration=duration,
+            )
+
+            # if self.rng.random() < 0.001:
+            #     print(
+            #         f"[CONSIST] a={int(action_meta.action)} cfa={cfa} hints={hints} inc={incorrects} dur={duration:.1f}")
+
             step_cost = 1
             self._apply_forgetting_all_except(topic_id, step_cost=float(step_cost))
 
@@ -990,20 +1113,58 @@ class KDDLearnerModel:
         generation_mode = 1 if (action_meta.force_generation or action_meta.action == LowLevelAction.TUTEE_EXPLAIN) else 0
 
         # 4) Quality lookup and mastery update
+        # 4) Quality lookup and mastery update
         qbank = self.bundle.quality_bank
-        if qbank is None:
-            quality = "good" if cfa == 1 else "bad"
-            leaf_id = -1
-        else:
+        quality_outcome = self._quality_from_outcomes(topic_id, action_meta.action, cfa, hints, incorrects, duration)
+
+        quality_bank = "neutral"
+        leaf_id = -1
+        score_mean = 0.0
+
+        if qbank is not None:
             x_state = self._state_features(s, topic_id)
             leaf_id = qbank.apply_leaf(topic_id, x_state)
-            # For tutee actions, do not use the quality bank (which was learned from tutor-labelled KDD).
-            quality = "neutral" if is_tutee else qbank.predict_quality(
-                topic_id=topic_id,
-                action_id=int(action_meta.action),
-                x_state=x_state,
-            )
+            if not is_tutee:
+                quality_bank = qbank.predict_quality(
+                    topic_id=topic_id,
+                    action_id=int(action_meta.action),
+                    x_state=x_state,
+                )
+                # confidence proxy: do we have non-trivial per-leaf action signal?
+                try:
+                    leaf_model = qbank.bank[topic_id]
+                    score_mean = float(
+                        leaf_model.leaf_to_action_score_mean
+                        .get(int(leaf_id), {})
+                        .get(int(action_meta.action), 0.0)
+                    )
+                except Exception:
+                    score_mean = 0.0
 
+        # --- Choose ONE mastery driver ---
+        # Default: outcome-driven quality (stable, directly tied to the simulated student response)
+        quality_final = quality_outcome
+
+        # Optional: allow bank override ONLY if it has real signal (avoid fighting noise)
+        if (not is_tutee) and (qbank is not None) and (leaf_id != -1) and (quality_bank != "neutral"):
+            quality_final = quality_bank
+
+        quality = "neutral" if is_tutee else quality_final
+
+        # if (not is_tutee) and action_meta.action == LowLevelAction.TUTOR_QUIZ and float(
+        #         self.state.cfa_ema[topic_id]) < 0.85:
+        #     quality = self._min_quality(quality, "good")  # ensure no very_good before stable success
+
+        info = {}
+        if (not is_tutee) and (quality_bank != quality_outcome):
+            info["dbg_quality_bank"] = quality_bank
+            info["dbg_quality_outcome"] = quality_outcome
+            info["dbg_quality_final"] = quality
+
+        info["bank_used"] = int(
+            (not is_tutee) and (qbank is not None) and (leaf_id != -1) and (quality_bank != "neutral"))
+        info["quality_bank"] = quality_bank
+        info["quality_outcome"] = quality_outcome
         v_prev = self._paper_vars(self.state)
 
         m_before = float(s.mastery[topic_id])
@@ -1029,9 +1190,14 @@ class KDDLearnerModel:
 
 
 
+
         else:
+
             boost = float(s.teach_boost[topic_id])
+
             self._apply_mastery_quality_update_with_boost(topic_id, quality, boost)
+
+
 
         # If topic was already completed earlier this episode, don’t allow mastery to drop
         if bool(self._topic_completed[topic_id]):
@@ -1043,6 +1209,15 @@ class KDDLearnerModel:
         m_after = float(s.mastery[topic_id])
         den_local = max(abs(m_before), 0.05)
         r_local = (m_after - m_before) / den_local
+        r_local = float(np.clip(r_local, -0.05, 0.05))
+        schema = self.bundle.schema
+        dur_q50 = float(getattr(schema, "dur_q50", 30.0))
+        time_pen = max(0.0, (float(duration) / max(dur_q50, 1e-6)) - 1.0)  # only penalize if slower than median
+
+        r_local -= 0.005 * float(hints)
+        r_local -= 0.003 * float(incorrects)
+        r_local -= 0.002 * float(time_pen)
+
         r_local = float(np.clip(r_local, -0.05, 0.05))
 
         # 5) Observational updates (EMAs, opp, steps)

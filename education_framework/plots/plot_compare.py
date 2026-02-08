@@ -312,7 +312,10 @@ def plot_average_reward_over_all_agents():
             if num_topics <= 0:
                 continue
 
-            y = df["reward"].to_numpy(dtype=float) / float(num_topics)
+            if "avg_agent_reward" in df.columns:
+                y = df["avg_agent_reward"].to_numpy(dtype=float)
+            else:
+                y = df["reward"].to_numpy(dtype=float) / NUM_TOPICS
             ys.append(y)
 
         mat = _pad_stack(ys)

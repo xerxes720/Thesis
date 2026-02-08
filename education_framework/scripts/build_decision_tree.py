@@ -253,8 +253,8 @@ def _scores_to_quality_global(action_ids, scores, *, cutoffs, neutral_eps=0.003)
         a = int(a)
         s = float(s)
 
-        # Neutral only if globally "middle"
-        if q40 <= s <= q60:
+        # NEW: neutral means "close to zero advantage"
+        if abs(s) <= neutral_eps:
             out[a] = "neutral"
         elif s <= q20:
             out[a] = "very_bad"
@@ -267,6 +267,15 @@ def _scores_to_quality_global(action_ids, scores, *, cutoffs, neutral_eps=0.003)
     return out
 
 
+
+# --- NEW: quality capping helpers (bank-side guardrails) ---
+_QUALITY_RANK = {"very_bad": 0, "bad": 1, "neutral": 2, "good": 3, "very_good": 4}
+
+def _cap_quality(q: str, cap: str) -> str:
+    """Return q capped to at most 'cap'."""
+    if _QUALITY_RANK.get(q, 2) <= _QUALITY_RANK.get(cap, 2):
+        return q
+    return cap
 
 def train_bundle_from_kdd_csv(
     csv_path: str,
@@ -442,15 +451,31 @@ def train_bundle_from_kdd_csv(
             topic_cutoffs[k] = _compute_global_cutoffs([], neutral_eps=cfg.quality_eps)
             continue
 
-        # existing topic_action_mean computation (keep it)
+        # NEW: center topic action means so missing-action fallbacks don't bias toward globally "easy" actions
+        topic_tutor_vals = [dm for dm, aa in zip(delta_m[k], act_id[k]) if aa in (0, 1, 2, 3, 4)]
+        topic_mean = float(np.mean(topic_tutor_vals)) if topic_tutor_vals else 0.0
+
+        # Centered topic baseline (tutor-labelled only)
+        all_tutor_deltas = [dm for dm, aa in zip(delta_m[k], act_id[k]) if aa in (0, 1, 2, 3, 4)]
+        topic_mu = float(np.mean(all_tutor_deltas)) if all_tutor_deltas else 0.0
+
+        # Topic-level fallback action means are now centered advantages
         for a in range(5):
             vals = [dm for dm, aa in zip(delta_m[k], act_id[k]) if aa == a]
             if vals:
-                topic_action_mean[k][a] = float(np.mean(vals))
+                topic_action_mean[k][a] = float(np.mean(vals) - topic_mu)
+
+        # Cutoffs computed on centered deltas (consistent with centered scoring)
+        all_tutor_centered = [float(dm - topic_mu) for dm in all_tutor_deltas]
+        topic_cutoffs[k] = _compute_global_cutoffs(all_tutor_centered, neutral_eps=cfg.quality_eps)
 
         # NEW: global distribution over tutor actions for this topic
+        # NEW: cutoffs on centered deltas for this topic
         all_tutor_deltas = [dm for dm, aa in zip(delta_m[k], act_id[k]) if aa in (0, 1, 2, 3, 4)]
-        topic_cutoffs[k] = _compute_global_cutoffs(all_tutor_deltas, neutral_eps=cfg.quality_eps)
+        mu = float(np.mean(all_tutor_deltas)) if all_tutor_deltas else 0.0
+        all_tutor_deltas_centered = [float(dm - mu) for dm in all_tutor_deltas]
+        topic_cutoffs[k] = _compute_global_cutoffs(all_tutor_deltas_centered, neutral_eps=cfg.quality_eps)
+
         # NOTE: KDD has no explicit tutee interactions; we do not infer tutee effects from data.
         # Keep a neutral (0) topic-level fallback for tutee actions (ids 5..7).
         for a_tutee in (
@@ -479,41 +504,49 @@ def train_bundle_from_kdd_csv(
         leaf_to_action_quality: Dict[int, Dict[int, str]] = {}
 
         for leaf, idxs in idx_by_leaf.items():
-            # action scores for 0..4 (tutor-labelled)
-            scores: Dict[int, float] = {}
+            # --- NEW: leaf baseline (tutor-only) ---
+            leaf_tutor_vals = [delta_m[k][i] for i in idxs if act_id[k][i] in (0, 1, 2, 3, 4)]
+            leaf_mean = float(np.mean(leaf_tutor_vals)) if len(leaf_tutor_vals) > 0 else 0.0
+
+            # --- NEW: leaf baseline (tutor-labelled only) ---
+            leaf_tutor_vals = [delta_m[k][i] for i in idxs if act_id[k][i] in (0, 1, 2, 3, 4)]
+            leaf_mu = float(np.mean(leaf_tutor_vals)) if len(leaf_tutor_vals) > 0 else 0.0
+
+            # Supported per-action advantages (only if enough samples)
+            supported_adv: Dict[int, float] = {}
             for a in range(5):
                 vals = [delta_m[k][i] for i in idxs if act_id[k][i] == a]
                 if len(vals) >= cfg.min_leaf_action_count:
-                    scores[a] = float(np.mean(vals))
+                    supported_adv[a] = float(np.mean(vals) - leaf_mu)
 
-            # NOTE: KDD has no explicit tutee interactions; we do not infer tutee effects from data.
-            # Keep neutral (0) scores for the three tutee actions in the QualityTreeBank.
-            scores[int(LowLevelAction.TUTEE_QUIZ)] = 0.0
-            scores[int(LowLevelAction.TUTEE_EXPLAIN)] = 0.0
-            scores[int(LowLevelAction.TUTEE_FIX)] = 0.0
+            # Full scores stored in bank: supported advantage else topic fallback else 0
+            scores_full: Dict[int, float] = {}
+            for a in range(5):
+                if a in supported_adv:
+                    scores_full[a] = supported_adv[a]
+                else:
+                    scores_full[a] = float(topic_action_mean.get(k, {}).get(a, 0.0))
 
-            # fill missing actions with topic-level means (or 0)
-            for a in range(8):
-                if a in scores:
-                    continue
-                scores[a] = float(topic_action_mean.get(k, {}).get(a, 0.0))
+            # Tutee actions remain neutral score (no dataset signal)
+            scores_full[int(LowLevelAction.TUTEE_QUIZ)] = 0.0
+            scores_full[int(LowLevelAction.TUTEE_EXPLAIN)] = 0.0
+            scores_full[int(LowLevelAction.TUTEE_FIX)] = 0.0
 
-            # store scores for all actions (unchanged)
+            # store scores for all actions
             action_ids = list(range(8))
-            leaf_to_action_score[leaf] = {a: float(scores[a]) for a in action_ids}
+            leaf_to_action_score[leaf] = {a: float(scores_full[a]) for a in action_ids}
 
-            # Tutor qualities come from KDD-derived leaf scores.
+            # --- NEW: qualities are computed ONLY from supported leaf evidence.
+            # Missing/low-support actions get score 0 => neutral by construction.
             tutor_ids = [0, 1, 2, 3, 4]
-            tutor_scores = [float(scores[a]) for a in tutor_ids]
+            tutor_scores = [float(scores_full.get(a, 0.0)) for a in tutor_ids]
             tutor_q = _scores_to_quality_global(
                 tutor_ids,
                 tutor_scores,
                 cutoffs=topic_cutoffs[k],
                 neutral_eps=cfg.quality_eps,
             )
-            # Tutee qualities are NOT derived from KDD (no direct tutee signal).
-            # We keep them neutral in the bank; the tutee learning effect is modeled
-            # mechanistically in the simulator via a bounded mastery bonus + explicit cost.
+
             leaf_quality = dict(tutor_q)
             for a_tutee in (5, 6, 7):
                 leaf_quality[a_tutee] = "neutral"
