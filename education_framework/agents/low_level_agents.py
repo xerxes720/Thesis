@@ -72,9 +72,14 @@ class LowLevelAgentConfig:
     # shared_loss_weight: float = 1.0  # base weight multiplier for shared samples
 
     # --- Experience sharing speed controls ---
-    max_peers_per_update: int = 2  # limit how many peers you sample per update
     cka_every_updates: int = 50  # recompute similarity only every N updates
-    cka_probe_n: int = 32  # use only 32 states to compute CKA (not full B)
+    # --- experience sharing knobs ---
+    share_frac: float = 0.10
+    max_peers_per_update: int = 1
+    min_peer_replay_size: int = 300
+    share_similarity_threshold: float = 0.75
+    cka_probe_n: int = 64
+    share_stop_updates: int = 10 ** 9
 
 
 # ---------------- Replay Buffer ----------------
@@ -325,6 +330,11 @@ class DQNLowLevelAgent:
         a_t = torch.from_numpy(a_np).unsqueeze(1)
         r_t = torch.from_numpy(r_np)
         d_t = torch.from_numpy(d_np)
+        if isinstance(batch_w, np.ndarray):
+            w_np = np.ascontiguousarray(batch_w.astype(np.float32, copy=False))
+        else:
+            w_np = np.ascontiguousarray(np.asarray(batch_w, dtype=np.float32))
+
         w_t = torch.from_numpy(w_np)
 
         s_t = s_t.to(self.device)
@@ -367,79 +377,168 @@ class DQNLowLevelAgent:
     def _build_shared_batch(self, B: int):
         mode = str(getattr(self.cfg, "share_mode", "off"))
 
-        # off / no sharing
+        # --- helpers ---
+        def _cat2(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+            # concatenate along batch dimension
+            if x.size == 0:
+                return y
+            if y.size == 0:
+                return x
+            return np.concatenate([x, y], axis=0)
+
+        # --- no sharing / warmup ---
         if (mode == "off") or (not getattr(self.cfg, "experience_sharing", False)):
             s, a, r, s2, d = self.replay.sample(B)
             w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
-        # warmup
         if int(self.num_updates) < int(getattr(self.cfg, "share_warmup_updates", 0)):
             s, a, r, s2, d = self.replay.sample(B)
             w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
         peers = list(getattr(self, "_peers", []) or [])
-        if len(peers) == 0 or self.policy_net is None or mode not in ("mutual", "weighted_cka"):
+        if len(peers) == 0:
             s, a, r, s2, d = self.replay.sample(B)
             w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
-        # own batch (numpy arrays)
-        s, a, r, s2, d = self.replay.sample(B)
-        w = np.ones((B,), dtype=np.float32)
+        # ----- fixed batch budget -----
+        share_frac = float(getattr(self.cfg, "share_frac", 0.25))
+        share_B = int(round(B * share_frac))
+        share_B = max(0, min(B, share_B))
+        own_B = B - share_B
 
-        # attempt sharing counters
+        # sample own portion
+        s, a, r, s2, d = self.replay.sample(own_B)
+        w = np.ones((own_B,), dtype=np.float32)
+
+        # if can't share for some reason, pad with own
+        if (self.policy_net is None) or (mode not in ("mutual", "weighted_cka")) or (share_B <= 0):
+            if own_B < B:
+                ps, pa, pr, ps2, pd = self.replay.sample(B - own_B)
+                s = _cat2(s, ps)
+                a = _cat2(a, pa)
+                r = _cat2(r, pr)
+                s2 = _cat2(s2, ps2)
+                d = _cat2(d, pd)
+                w = _cat2(w, np.ones((B - own_B,), dtype=np.float32))
+            return s, a, r, s2, d, w
+
+        # ----- compute sims, pick top-k -----
+        cka_layers = tuple(getattr(self.cfg, "cka_layers", ("h1", "h2")))
+        raw_tau = float(getattr(self.cfg, "share_similarity_threshold", 0.30))
+        raw_tau = max(0.0, min(0.999, raw_tau))
+        power = float(getattr(self.cfg, "cka_power", 2.0))
+
+        kmax = int(getattr(self.cfg, "max_peers_per_update", 1))
+        min_peer = int(getattr(self.cfg, "min_peer_replay_size", B))
+
+        eligible = [p for p in peers if (p.policy_net is not None) and (len(p.replay) >= min_peer)]
+        if not eligible:
+            # pad with own
+            if own_B < B:
+                ps, pa, pr, ps2, pd = self.replay.sample(B - own_B)
+                s = _cat2(s, ps)
+                a = _cat2(a, pa)
+                r = _cat2(r, pr)
+                s2 = _cat2(s2, ps2)
+                d = _cat2(d, pd)
+                w = _cat2(w, np.ones((B - own_B,), dtype=np.float32))
+            return s, a, r, s2, d, w
+
+        scored = []
+        if mode == "mutual":
+            random.shuffle(eligible)
+            chosen = eligible[:kmax]
+            scored = [(1.0, p) for p in chosen]
+        else:
+            cka_layers = tuple(getattr(self.cfg, "cka_layers", ("h1", "h2")))
+            raw_tau = float(getattr(self.cfg, "share_similarity_threshold", 0.75))
+            raw_tau = max(0.0, min(0.999, raw_tau))
+            power = float(getattr(self.cfg, "cka_power", 4.0))
+
+            for p in eligible:
+                probe_n = int(getattr(self.cfg, "cka_probe_n", 64))
+                probe_n = max(8, min(probe_n, B))
+
+                # probe on SELF distribution
+                if isinstance(s, np.ndarray) and s.shape[0] >= probe_n:
+                    probe_states = s[:probe_n]
+                else:
+                    probe_states, *_ = self.replay.sample(probe_n)
+
+                q_np = np.ascontiguousarray(probe_states, dtype=np.float32)
+                q_t = torch.from_numpy(q_np).to(self.device)
+
+                sim = float(avg_layer_cka(self.policy_net, p.policy_net, q_t, cka_layers))
+                sim = max(0.0, min(1.0, sim))
+                if sim < raw_tau:
+                    continue
+
+                sim01 = (sim - raw_tau) / max(1e-6, (1.0 - raw_tau))  # [tau,1] -> [0,1]
+                sim_w = float(sim01 ** power)
+                scored.append((sim_w, p))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            scored = scored[:kmax]
+
+        # No eligible peers -> pad with own
+        if not scored:
+            if own_B < B:
+                ps, pa, pr, ps2, pd = self.replay.sample(B - own_B)
+                s = _cat2(s, ps)
+                a = _cat2(a, pa)
+                r = _cat2(r, pr)
+                s2 = _cat2(s2, ps2)
+                d = _cat2(d, pd)
+                w = _cat2(w, np.ones((B - own_B,), dtype=np.float32))
+            return s, a, r, s2, d, w
+
+        # ----- allocate share_B across selected peers -----
         self._share_attempts += 1
         self._share_eligible_peers_sum += len(peers)
 
-        # choose only a few peers (important)
-        max_peers = int(getattr(self.cfg, "max_peers_per_update", 2))
-        if len(peers) > max_peers:
-            peers = random.sample(peers, k=max_peers)
+        per_peer = max(1, share_B // len(scored))
+        remaining = share_B
 
-        # build output arrays incrementally in lists, stack once
-        Ss  = [s]
-        As  = [a]
-        Rs  = [r]
-        S2s = [s2]
-        Ds  = [d]
-        Ws  = [w]
+        for sim_w, p in scored:
+            take = min(per_peer, remaining)
+            if take <= 0:
+                break
 
-        probe_n = int(getattr(self.cfg, "cka_probe_n", 32))
-
-        for p in peers:
-            if (p.policy_net is None) or (len(p.replay) < B):
-                continue
-
-            ps, pa, pr, ps2, pd = p.replay.sample(B)
-
-            # probe subset for similarity (tiny!)
-            if mode == "weighted_cka":
-                n = min(probe_n, ps.shape[0])
-                # choose first n (fast) or random indices if you prefer
-                probe = ps[:n]
-                sim_w = self._get_peer_weight(p, probe)
-            else:
-                sim_w = 1.0
+            ps, pa, pr, ps2, pd = p.replay.sample(take)
 
             self._share_selected_peers_sum += 1
-            self._share_peer_samples += B
-            self._share_peer_weight_sum += float(sim_w) * B
+            self._share_peer_samples += take
+            self._share_peer_weight_sum += float(sim_w) * take
 
-            Ss.append(ps);  As.append(pa);  Rs.append(pr);  S2s.append(ps2);  Ds.append(pd)
-            Ws.append(np.full((B,), float(sim_w), dtype=np.float32))
+            s = _cat2(s, ps)
+            a = _cat2(a, pa)
+            r = _cat2(r, pr)
+            s2 = _cat2(s2, ps2)
+            d = _cat2(d, pd)
+            w = _cat2(w, np.full((take,), float(sim_w), dtype=np.float32))
 
-        # concatenate once (fast)
-        out_s  = np.ascontiguousarray(np.concatenate(Ss,  axis=0), dtype=np.float32)
-        out_a  = np.ascontiguousarray(np.concatenate(As,  axis=0), dtype=np.int64)
-        out_r  = np.ascontiguousarray(np.concatenate(Rs,  axis=0), dtype=np.float32)
-        out_s2 = np.ascontiguousarray(np.concatenate(S2s, axis=0), dtype=np.float32)
-        out_d  = np.ascontiguousarray(np.concatenate(Ds,  axis=0), dtype=np.float32)
-        out_w  = np.ascontiguousarray(np.concatenate(Ws,  axis=0), dtype=np.float32)
+            remaining -= take
 
-        return out_s, out_a, out_r, out_s2, out_d, out_w
+        # pad if rounding left us short
+        cur = s.shape[0]
+        if cur < B:
+            ps, pa, pr, ps2, pd = self.replay.sample(B - cur)
+            s = _cat2(s, ps)
+            a = _cat2(a, pa)
+            r = _cat2(r, pr)
+            s2 = _cat2(s2, ps2)
+            d = _cat2(d, pd)
+            w = _cat2(w, np.ones((B - cur,), dtype=np.float32))
 
+        # final safety
+        assert s.shape[0] == B and a.shape[0] == B and r.shape[0] == B and s2.shape[0] == B and d.shape[0] == B, \
+            f"Batch size mismatch: s={s.shape}, a={a.shape}, r={r.shape}, s2={s2.shape}, d={d.shape}"
+        assert w.shape[0] == B, f"Weight size mismatch: w={w.shape}, expected {B}"
+
+        return s, a, r, s2, d, w
 
     def _ensure_networks(self, input_dim: int) -> None:
         if self.policy_net is not None:

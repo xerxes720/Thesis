@@ -18,6 +18,7 @@ from education_framework.environment.learner_model import (
     ActionMeta,
     LowLevelAction,
 )
+import itertools
 
 import argparse
 import csv
@@ -290,9 +291,10 @@ class KDDHierEnv:
 def create_agents(
         num_topics: int,
         use_tutee: bool,
-        ll_mode: str = "multi",  # NEW
-        experience_sharing: bool = False,  # NEW
-        share_mode: str = "weighted_cka",  # NEW
+        ll_mode: str = "multi",
+        experience_sharing: bool = False,
+        share_mode: str = "weighted_cka",
+        topic_cluster_ids=None,   # NEW
 ):
     hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
     hl_cfg.device = "cpu"
@@ -304,19 +306,21 @@ def create_agents(
     # --- Fairness: equalize LL update budget across modes ---
     # Base config assumed tuned for "multi" specialists. For a single shared LL, scale down update frequency
     # so it doesn't get an implicit sample-efficiency advantage.
-    if ll_mode == "single":
-        n = max(1, num_topics)
-        ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
-        ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
-        ll_cfg.buffer_size = max(5_000, int(ll_cfg.buffer_size) // max(1, num_topics))
-        ll_cfg.min_replay_size = int(ll_cfg.min_replay_size) * max(1, num_topics)
+    ll_cfg.train_every_steps = 20
+    ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # paper-ish
+    # if ll_mode == "single":
+    #     n = max(1, num_topics)
+    #     ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
+    #     ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
+        # ll_cfg.buffer_size = max(5_000, int(ll_cfg.buffer_size) // max(1, num_topics))
+        # ll_cfg.min_replay_size = int(ll_cfg.min_replay_size) * max(1, num_topics)
 
     # --- compensate multi-agent data starvation ---
     # In multi-agent, each topic policy sees fewer transitions; increase update frequency.
     if ll_mode == "multi":
-        base_te = int(ll_cfg.train_every_steps)
-        ll_cfg.train_every_steps = max(1, base_te // max(1, num_topics))
-        ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep your k=5 rule
+        # base_te = int(ll_cfg.train_every_steps)
+        # ll_cfg.train_every_steps = max(1, base_te // max(1, num_topics))
+        # ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep your k=5 rule
 
         # Sharing warmup expressed in gradient updates; if we update more often, warmup should shrink.
         ll_cfg.share_warmup_updates = max(200, int(ll_cfg.share_warmup_updates) // max(1, num_topics))
@@ -326,7 +330,7 @@ def create_agents(
 
     if ll_mode == "multi":
         # each topic agent gets fewer transitions; start learning earlier
-        ll_cfg.min_replay_size = max(200, BASE_MIN_REPLAY // num_topics)  # e.g., max(200, 142)=200
+        ll_cfg.min_replay_size = 200
     else:
         # single shared LL agent sees all topics; can afford larger warmup
         ll_cfg.min_replay_size = BASE_MIN_REPLAY
@@ -334,13 +338,27 @@ def create_agents(
     # --- sharing config (applies to tutor agents only) ---
     ll_cfg.experience_sharing = bool(experience_sharing) and (ll_mode == "multi")
     ll_cfg.share_mode = share_mode if ll_cfg.experience_sharing else "off"
-    # if ll_cfg.experience_sharing and ll_cfg.share_mode == "weighted_cka":
-    #     ll_cfg.share_frac = 0.30
-    #     ll_cfg.max_peers_per_update = 3
-    #     ll_cfg.peer_batch_size = 64
-    #     ll_cfg.min_peer_replay_size = 500
-    #     ll_cfg.share_similarity_threshold = 0.10
-    #     ll_cfg.share_weight_power = 2.0
+
+    if ll_cfg.experience_sharing:
+        if ll_cfg.share_mode == "mutual":
+            # Conservative, early-only, cluster-local bootstrap
+            ll_cfg.share_frac = 0.05
+            ll_cfg.max_peers_per_update = 1
+            ll_cfg.share_warmup_updates = 200
+            ll_cfg.share_stop_updates = 700  # STOP mutual later to avoid harming specialists
+            ll_cfg.min_peer_replay_size = 300
+
+        elif ll_cfg.share_mode == "weighted_cka":
+            # More selective + longer lasting than mutual
+            ll_cfg.share_frac = 0.10
+            ll_cfg.max_peers_per_update = 1
+            ll_cfg.cka_probe_n = 64
+            ll_cfg.share_similarity_threshold = 0.75
+            ll_cfg.cka_power = 4.0
+            ll_cfg.share_warmup_updates = 300
+            ll_cfg.share_stop_updates = 10 ** 9  # effectively "no stop"
+            ll_cfg.min_peer_replay_size = 300
+
     # --- build tutor agents: single vs multi ---
     if ll_mode == "single":
         tutor_agents = [TutorLowLevelAgent(ll_cfg)]  # one shared tutor DQN
@@ -362,11 +380,15 @@ def create_agents(
 
     # --- peers only when multi + sharing enabled ---
     if ll_mode == "multi" and ll_cfg.experience_sharing and ll_cfg.share_mode != "off":
+        clusters = topic_cluster_ids
         for i, agent in enumerate(tutor_agents):
-            peers = [p for j, p in enumerate(tutor_agents) if j != i]
+            if clusters is not None and len(clusters) == len(tutor_agents):
+                ci = clusters[i]
+                peers = [p for j, p in enumerate(tutor_agents) if j != i and clusters[j] == ci]
+            else:
+                peers = [p for j, p in enumerate(tutor_agents) if j != i]
             agent.set_peers(peers)
     else:
-        # make sure no peer sampling occurs
         for a in tutor_agents:
             a.set_peers([])
 
@@ -677,6 +699,367 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
 
     return total_reward, steps
 
+# ----------------------------
+# Policy-collapse diagnostics
+# ----------------------------
+
+def _entropy_from_counts(counts: Dict[int, int]) -> float:
+    total = sum(counts.values())
+    if total <= 0:
+        return 0.0
+    ps = [c / total for c in counts.values() if c > 0]
+    return float(-sum(p * math.log(p + 1e-12) for p in ps))
+
+def _js_divergence(p: np.ndarray, q: np.ndarray, eps: float = 1e-12) -> float:
+    # p, q are probability vectors summing to 1
+    p = np.clip(p, eps, 1.0)
+    q = np.clip(q, eps, 1.0)
+    p = p / p.sum()
+    q = q / q.sum()
+    m = 0.5 * (p + q)
+    kl_pm = float(np.sum(p * (np.log(p) - np.log(m))))
+    kl_qm = float(np.sum(q * (np.log(q) - np.log(m))))
+    return 0.5 * (kl_pm + kl_qm)
+
+def _collect_state_bank(
+    env: "KDDHierEnv",
+    high_level_agent: "HighLevelAgent",
+    tutor_agents: List["TutorLowLevelAgent"],
+    tutee_agent: Optional["TuteeLowLevelAgent"],
+    *,
+    per_topic_target: int = 2000,
+    max_episodes: int = 200,
+) -> Dict[int, List[List[float]]]:
+    """
+    Collect LL observations actually encountered during eval rollouts.
+    bank[topic] = list of tutor_obs vectors.
+    """
+    T = env.num_topics
+    bank: Dict[int, List[List[float]]] = {t: [] for t in range(T)}
+
+    # make evaluation deterministic-ish
+    old_eps = []
+    for ag in tutor_agents:
+        old_eps.append(ag.cfg.epsilon)
+        ag.set_epsilon(0.0)
+    if tutee_agent is not None:
+        old_t_eps = tutee_agent.cfg.epsilon
+        tutee_agent.set_epsilon(0.0)
+    else:
+        old_t_eps = None
+
+    try:
+        for _ep in range(max_episodes):
+            obs = env.reset()
+            done = False
+            while not done:
+                hl_a = high_level_agent.select_action(obs)
+                mode, topic_id = high_level_agent.decode_action(hl_a)
+
+                if mode == "tutor":
+                    tutor_obs = env.get_ll_observation(topic_id)
+                    bank[int(topic_id)].append(tutor_obs)
+
+                    # take an action just to advance env (eval; no learning)
+                    if len(tutor_agents) == 1:
+                        ag = tutor_agents[0]
+                    else:
+                        ag = tutor_agents[int(topic_id)]
+                    a_idx = ag.select_action(tutor_obs)
+                    a_str = ag.get_action_meanings()[a_idx]
+                    next_obs, r_hl, done, info = env.step_tutor(topic_id, a_str)
+
+                elif mode == "tutee" and tutee_agent is not None:
+                    t_obs = env.get_ll_observation(topic_id)
+                    a_idx = tutee_agent.select_action(t_obs)
+                    a_str = tutee_agent.get_action_meanings()[a_idx]
+                    next_obs, r_hl, done, info = env.step_tutee(topic_id, a_str)
+
+                else:
+                    next_obs, r_hl, done, info = env.step_tutor(topic_id, "no_help")
+
+                obs = next_obs
+
+                # stop early if full
+                if all(len(bank[t]) >= per_topic_target for t in range(T)):
+                    return bank
+        return bank
+    finally:
+        # restore epsilons
+        for ag, e in zip(tutor_agents, old_eps):
+            ag.set_epsilon(e)
+        if tutee_agent is not None and old_t_eps is not None:
+            tutee_agent.set_epsilon(old_t_eps)
+
+def _eval_swap_episode(
+    env: "KDDHierEnv",
+    high_level_agent: "HighLevelAgent",
+    tutor_agents: List["TutorLowLevelAgent"],
+    tutee_agent: Optional["TuteeLowLevelAgent"],
+    topic_to_agent: Optional[List[int]],
+) -> (float, float, int):
+    """
+    Evaluate 1 episode with optional topic->agent permutation (swap test).
+    Returns: (total_reward, steps_cost, completed_flag)
+    """
+    obs = env.reset()
+    done = False
+    total_reward = 0.0
+    steps = 0.0
+
+    while not done:
+        hl_a = high_level_agent.select_action(obs)
+        mode, topic_id = high_level_agent.decode_action(hl_a)
+
+        if mode == "tutor":
+            tutor_obs = env.get_ll_observation(topic_id)
+
+            if len(tutor_agents) == 1:
+                ag = tutor_agents[0]
+            else:
+                if topic_to_agent is None:
+                    ag = tutor_agents[int(topic_id)]
+                else:
+                    ag = tutor_agents[int(topic_to_agent[int(topic_id)])]
+
+            a_idx = ag.select_action(tutor_obs)
+            a_str = ag.get_action_meanings()[a_idx]
+            next_obs, r_hl, done, info = env.step_tutor(topic_id, a_str)
+
+        elif mode == "tutee" and tutee_agent is not None:
+            t_obs = env.get_ll_observation(topic_id)
+            a_idx = tutee_agent.select_action(t_obs)
+            a_str = tutee_agent.get_action_meanings()[a_idx]
+            next_obs, r_hl, done, info = env.step_tutee(topic_id, a_str)
+
+        else:
+            next_obs, r_hl, done, info = env.step_tutor(topic_id, "no_help")
+
+        total_reward += float(r_hl)
+        steps += float(info.get("step_cost", 1))
+        obs = next_obs
+
+    completed = 1 if env.model.is_done() else 0
+    return float(total_reward), float(steps), int(completed)
+
+def run_policy_collapse_diagnostics(
+    env: "KDDHierEnv",
+    high_level_agent: "HighLevelAgent",
+    tutor_agents: List["TutorLowLevelAgent"],
+    tutee_agent: Optional["TuteeLowLevelAgent"],
+    *,
+    state_bank_per_topic: int = 2000,
+    eval_episodes: int = 200,
+    cka_states_per_topic: int = 512,
+    seed: int = 0,
+) -> None:
+    """
+    Prints:
+      - swap test results
+      - action entropy + pairwise JS divergence between action distributions
+      - greedy action agreement on fixed state bank
+      - pairwise CKA(h1/h2) between agents
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    # ---- force greedy eval for LL ----
+    old_eps = []
+    for ag in tutor_agents:
+        old_eps.append(ag.cfg.epsilon)
+        ag.set_epsilon(0.0)
+    if tutee_agent is not None:
+        old_t_eps = tutee_agent.cfg.epsilon
+        tutee_agent.set_epsilon(0.0)
+    else:
+        old_t_eps = None
+
+    try:
+        T = env.num_topics
+        n_ll = len(tutor_agents)
+
+        print("\n=== Policy Collapse Diagnostics ===")
+        print(f"- num_topics: {T}")
+        print(f"- n_ll_agents: {n_ll} (1 => shared-LL)")
+        print(f"- eval_episodes: {eval_episodes}")
+        print(f"- state_bank_per_topic: {state_bank_per_topic}")
+
+        # ----------------------------
+        # 1) Swap test (only meaningful if per-topic LL agents exist)
+        # ----------------------------
+        if n_ll == 1:
+            print("\n[Swap test] Skipped (shared single LL agent).")
+        else:
+            # baseline mapping: topic t -> agent t
+            base_rewards, base_steps, base_done = [], [], []
+            for _ in range(eval_episodes):
+                r, s, d = _eval_swap_episode(env, high_level_agent, tutor_agents, tutee_agent, topic_to_agent=None)
+                base_rewards.append(r); base_steps.append(s); base_done.append(d)
+
+            # random permutation mapping
+            perm = list(range(T))
+            random.shuffle(perm)
+            swap_rewards, swap_steps, swap_done = [], [], []
+            for _ in range(eval_episodes):
+                r, s, d = _eval_swap_episode(env, high_level_agent, tutor_agents, tutee_agent, topic_to_agent=perm)
+                swap_rewards.append(r); swap_steps.append(s); swap_done.append(d)
+
+            print("\n[Swap test]")
+            print(f"- perm mapping (topic->agent): {perm}")
+            print(f"- baseline: mean_reward={_safe_mean(base_rewards):.4f}  mean_steps={_safe_mean(base_steps):.2f}  completion={_safe_mean(base_done):.3f}")
+            print(f"- swapped : mean_reward={_safe_mean(swap_rewards):.4f}  mean_steps={_safe_mean(swap_steps):.2f}  completion={_safe_mean(swap_done):.3f}")
+            print("  Interpretation: if swapped ≈ baseline, agents are interchangeable (little specialization).")
+
+        # ----------------------------
+        # 2) Collect state bank (real visited tutor states)
+        # ----------------------------
+        bank = _collect_state_bank(
+            env, high_level_agent, tutor_agents, tutee_agent,
+            per_topic_target=state_bank_per_topic,
+            max_episodes=max(200, eval_episodes),
+        )
+        sizes = {t: len(bank[t]) for t in range(T)}
+        print("\n[State bank]")
+        print(f"- collected per topic: {sizes}")
+
+        # ----------------------------
+        # 3) Action distributions, entropy, JS divergence
+        # ----------------------------
+        if n_ll == 1:
+            # single shared agent: just compute entropy over all topics pooled
+            ag = tutor_agents[0]
+            counts = Counter()
+            for t in range(T):
+                for s in bank[t]:
+                    a = ag.select_action(s)
+                    counts[int(a)] += 1
+            ent = _entropy_from_counts(dict(counts))
+            print("\n[Actions] shared-LL")
+            print(f"- greedy action entropy (pooled over topics): {ent:.4f}  (lower => near-deterministic policy)")
+        else:
+            # per-topic: each agent evaluated on its own topic bank
+            action_probs = []
+            entropies = []
+            for t in range(T):
+                ag = tutor_agents[t]
+                counts = np.zeros(ag.num_actions, dtype=np.float64)
+                for s in bank[t]:
+                    a = ag.select_action(s)
+                    counts[int(a)] += 1.0
+                probs = counts / max(1.0, counts.sum())
+                action_probs.append(probs)
+                entropies.append(_entropy_from_counts({i: int(counts[i]) for i in range(len(counts))}))
+
+            # pairwise JS divergence
+            js_vals = []
+            for i, j in itertools.combinations(range(T), 2):
+                js_vals.append(_js_divergence(action_probs[i], action_probs[j]))
+
+            print("\n[Actions] per-topic LL")
+            print(f"- mean greedy entropy across topics: {float(np.mean(entropies)):.4f}")
+            print(f"- min/max greedy entropy across topics: {float(np.min(entropies)):.4f} / {float(np.max(entropies)):.4f}")
+            print(f"- mean pairwise JS divergence between agents’ action distributions: {float(np.mean(js_vals)):.6f}")
+            print("  Interpretation: very low entropy + JS≈0 => policies collapsed to near-identical behavior.")
+
+        # ----------------------------
+        # 4) Greedy action agreement + Q-vector similarity on same states
+        # ----------------------------
+        # Use topic 0 bank as common reference states (or first non-empty topic)
+        ref_topic = next((t for t in range(T) if len(bank[t]) > 0), 0)
+        ref_states = bank[ref_topic]
+        if len(ref_states) == 0:
+            print("\n[Agreement] Skipped (empty state bank).")
+        else:
+            # sample a fixed subset
+            M = min(1024, len(ref_states))
+            idx = np.random.choice(len(ref_states), size=M, replace=False)
+            S = np.asarray([ref_states[i] for i in idx], dtype=np.float32)
+            S_t = torch.from_numpy(S)
+
+            def greedy_actions(agent: "TutorLowLevelAgent") -> np.ndarray:
+                agent._ensure_networks(input_dim=S.shape[1])  # type: ignore
+                with torch.no_grad():
+                    q = agent.policy_net(S_t)  # type: ignore
+                    return q.argmax(dim=1).cpu().numpy()
+
+            def q_vectors(agent: "TutorLowLevelAgent") -> np.ndarray:
+                agent._ensure_networks(input_dim=S.shape[1])  # type: ignore
+                with torch.no_grad():
+                    q = agent.policy_net(S_t).cpu().numpy()  # type: ignore
+                    return q
+
+            if n_ll == 1:
+                acts = greedy_actions(tutor_agents[0])
+                # agreement with itself is trivial; report determinism via unique actions
+                print("\n[Agreement] shared-LL")
+                print(f"- unique greedy actions on ref states: {len(set(map(int, acts)))} / {tutor_agents[0].num_actions}")
+            else:
+                acts_list = [greedy_actions(tutor_agents[i]) for i in range(T)]
+                agree_vals = []
+                for i, j in itertools.combinations(range(T), 2):
+                    agree = float(np.mean(acts_list[i] == acts_list[j]))
+                    agree_vals.append(agree)
+
+                # q cosine similarity (mean over states)
+                q_cos_vals = []
+                q_list = [q_vectors(tutor_agents[i]) for i in range(T)]
+                for i, j in itertools.combinations(range(T), 2):
+                    qi = q_list[i].reshape(M, -1)
+                    qj = q_list[j].reshape(M, -1)
+                    num = np.sum(qi * qj, axis=1)
+                    den = (np.linalg.norm(qi, axis=1) * np.linalg.norm(qj, axis=1) + 1e-12)
+                    q_cos_vals.append(float(np.mean(num / den)))
+
+                print("\n[Agreement] on same ref-state batch")
+                print(f"- mean pairwise greedy-action agreement: {float(np.mean(agree_vals)):.4f}")
+                print(f"- mean pairwise Q-vector cosine similarity: {float(np.mean(q_cos_vals)):.4f}")
+                print("  Interpretation: agreement→1 and cosine→1 => agents are essentially the same policy.")
+
+        # ----------------------------
+        # 5) Representation similarity (CKA on h1/h2)
+        # ----------------------------
+        if n_ll == 1:
+            print("\n[CKA] Skipped (shared-LL; only one network).")
+        else:
+            # build CKA state batch from multiple topics (concat)
+            all_states = []
+            per = max(1, int(cka_states_per_topic))
+            for t in range(T):
+                if len(bank[t]) == 0:
+                    continue
+                take = min(per, len(bank[t]))
+                sel = np.random.choice(len(bank[t]), size=take, replace=False)
+                all_states.extend([bank[t][k] for k in sel])
+
+            if len(all_states) < 32:
+                print("\n[CKA] Skipped (not enough states).")
+            else:
+                X = torch.as_tensor(np.asarray(all_states, dtype=np.float32))
+                # ensure nets exist
+                for ag in tutor_agents:
+                    ag._ensure_networks(input_dim=X.shape[1])  # type: ignore
+
+                cka_vals = []
+                for i, j in itertools.combinations(range(T), 2):
+                    net_i = tutor_agents[i].policy_net  # type: ignore
+                    net_j = tutor_agents[j].policy_net  # type: ignore
+                    cka = avg_layer_cka(net_i, net_j, X, layers=("h1", "h2"))
+                    cka_vals.append(cka)
+
+                print("\n[CKA] pairwise avg CKA(h1,h2)")
+                print(f"- mean: {float(np.mean(cka_vals)):.4f}  min/max: {float(np.min(cka_vals)):.4f} / {float(np.max(cka_vals)):.4f}")
+                print("  Interpretation: CKA close to 1 => representations collapsed / highly similar.")
+
+        print("\n=== End Diagnostics ===\n")
+
+    finally:
+        # restore epsilons
+        for ag, e in zip(tutor_agents, old_eps):
+            ag.set_epsilon(e)
+        if tutee_agent is not None and old_t_eps is not None:
+            tutee_agent.set_epsilon(old_t_eps)
+
 
 # ----------------------------
 # Main
@@ -729,7 +1112,7 @@ def main():
     ap.add_argument(
         "--experience_sharing",
         action="store_true",
-        default=True,
+        default=False,
         help="Enable experience sharing between low-level tutor agents (only meaningful in ll_mode=multi).",
     )
     ap.add_argument(
@@ -752,6 +1135,8 @@ def main():
         default="",
         help="Optional extra tag appended to metrics filename (e.g., 'ablation1').",
     )
+    ap.add_argument("--diag_policy_collapse", action="store_true", default=False)
+
     args = ap.parse_args()
 
     # def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
@@ -1101,7 +1486,16 @@ def main():
                 ll_mode=args.ll_mode,
                 experience_sharing=args.experience_sharing,
                 share_mode=args.share_mode,
+                topic_cluster_ids=getattr(learner_cfg, "topic_cluster_ids", None),
             )
+            print("[LL CFG]", {
+                "ll_mode": args.ll_mode,
+                "train_every_steps": tutor_agents[0].cfg.train_every_steps,
+                "target_update_steps": tutor_agents[0].cfg.target_update_steps,
+                "min_replay_size": tutor_agents[0].cfg.min_replay_size,
+                "buffer_size": tutor_agents[0].cfg.buffer_size,
+            })
+
             flat_agent = None
         else:
             # flat single-agent RL baseline (no HL/LL decomposition)
@@ -1421,7 +1815,18 @@ def main():
         mean_mastery_tail = float(np.mean([r[3] for r in tail]))
         min_mastery_tail = float(np.mean([r[4] for r in tail]))
         completion_rate_tail = float(np.mean([r[5] for r in tail]))
-
+        # ---- optional: run collapse diagnostics after training ----
+        if args.arch == "hrl" and args.diag_policy_collapse:
+            run_policy_collapse_diagnostics(
+                env=env,
+                high_level_agent=high_level_agent,
+                tutor_agents=tutor_agents,
+                tutee_agent=tutee_agent,
+                state_bank_per_topic=2000,
+                eval_episodes=200,
+                cka_states_per_topic=512,
+                seed=seed,
+            )
         return {
             "mean_reward_last": mean_reward_tail,
             "mean_steps_last": mean_steps_tail,

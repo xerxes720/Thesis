@@ -34,7 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
-
+from education_framework.agents.low_level_agents import avg_layer_cka
 import math
 import random
 from dataclasses import field
@@ -1058,7 +1058,7 @@ class KDDLearnerModel:
         m_after = float(s.mastery[topic_id])
         den_local = max(abs(m_before), 0.05)
         r_local = (m_after - m_before) / den_local
-        r_local = float(np.clip(r_local, -0.05, 0.05))
+        r_local = float(np.clip(r_local, -0.10, 0.10))
 
         # 5) Observational updates (EMAs, opp, steps)
         self._apply_observation_updates(
