@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 
 $bundle   = "education_framework/data/kdd_bundle.joblib"
 $episodes = 1000
-$maxSteps = 450
+$maxSteps = 300
 $seeds    = @(0) #23 48
 
 $ts = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -36,15 +36,15 @@ try {
 #          --arch flat --ll_mode single --share_mode off `
 #          --seed $seed --run_tag "flat_single"
 #
-#        python -m education_framework.main `
-#          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-#          --arch hrl --ll_mode single --share_mode off `
-#          --seed $seed --run_tag "single_ll"
-
         python -m education_framework.main `
           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --share_mode off `
-          --seed $seed --run_tag "multi_no_es"
+          --arch hrl --ll_mode single --share_mode off `
+          --seed $seed --run_tag "single_ll"
+
+#        python -m education_framework.main `
+#          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#          --share_mode off `
+#          --seed $seed --run_tag "multi_no_es"
 
 #         python -m education_framework.main `
 #           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
@@ -61,10 +61,10 @@ try {
 #           --share_mode off --use_tutee `
 #           --seed $seed --run_tag "tutee_no_es"
 #
-         python -m education_framework.main `
-           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-           --experience_sharing --use_tutee `
-           --seed $seed --run_tag "tutee_weighted_cka"
+#         python -m education_framework.main `
+#           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#           --experience_sharing --use_tutee `
+#           --seed $seed --run_tag "tutee_weighted_cka"
     }
 
     Write-Host "ALL RUNS DONE."

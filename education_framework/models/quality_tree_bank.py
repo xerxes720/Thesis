@@ -117,14 +117,14 @@ class QualityTreeBank:
         m = self._get_model(topic_id)
         if m is None:
             return -1
-        leaf = int(m.tree.apply(x_state.reshape(1, -1))[0])
+        leaf = int(m.tree.apply(x_state.reshape(1, -1), check_input=False)[0])
         return leaf
 
     def predict_quality(self, topic_id: int, action_id: int, x_state: "Any") -> str:
         m = self._get_model(topic_id)
         if m is None:
             return "neutral"
-        leaf = int(m.tree.apply(x_state.reshape(1, -1))[0])
+        leaf = int(m.tree.apply(x_state.reshape(1, -1), check_input=False)[0])
         amap = m.leaf_to_action_quality.get(leaf)
         if not amap:
             return m.default_quality
@@ -135,7 +135,7 @@ class QualityTreeBank:
         m = self._get_model(topic_id)
         if m is None:
             return None
-        leaf = int(m.tree.apply(x_state.reshape(1, -1))[0])
+        leaf = int(m.tree.apply(x_state.reshape(1, -1), check_input=False)[0])
         smap = m.leaf_to_action_score_mean.get(leaf)
         if not smap:
             return None

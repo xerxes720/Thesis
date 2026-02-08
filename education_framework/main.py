@@ -729,7 +729,7 @@ def main():
     ap.add_argument(
         "--experience_sharing",
         action="store_true",
-        default=False,
+        default=True,
         help="Enable experience sharing between low-level tutor agents (only meaningful in ll_mode=multi).",
     )
     ap.add_argument(
@@ -1254,11 +1254,25 @@ def main():
             n_agents_eff = n_ll_eff + (1 if use_tutee else 0)
 
             # --- average reward over all agents (paper Fig.7 signal) ---
-            if args.arch == "flat":
-                avg_agent_reward = float(total_reward)  # only one agent
+            # --- Fig.7 signals (make both explicit so we stop oscillating) ---
+            if args.arch != "hrl":
+                avg_reward_per_learning_agent = float(total_reward)
+                avg_reward_per_topic_slot = float(total_reward)  # flat has no topics separation
             else:
-                ll_sum_eff = float(sum(ll_rewards_full[:n_ll_eff]))
-                avg_agent_reward = (ll_sum_eff + tutee_r) / float(n_agents_eff)
+                agent_reward_sum = float(np.sum(ll_rewards))
+                if use_tutee and tutee_agent is not None:
+                    agent_reward_sum += float(tutee_reward_total)
+
+                n_tutor_agents = len(ll_rewards)  # 1 if shared-LL else num_topics
+                n_learning_agents = n_tutor_agents + (1 if (use_tutee and tutee_agent is not None) else 0)
+
+                # B) average per *learning* agent (1 vs 7 causes the ×7 effect)
+                avg_reward_per_learning_agent = agent_reward_sum / max(1, n_learning_agents)
+
+                # A) average per *topic slot* (paper-style "over N agents", N=num_topics)
+                denom = num_topics + (1 if (use_tutee and tutee_agent is not None) else 0)
+                avg_reward_per_topic_slot = agent_reward_sum / max(1, denom)
+
             rows.append([
                 episode, float(total_reward), float(steps), mean_mastery, min_mastery, completed,
                 float(flat_agent_reward),
@@ -1276,6 +1290,8 @@ def main():
 
                 *[float(x) for x in ll_rewards_full],
                 float(tutee_reward_total),
+                avg_reward_per_learning_agent,
+                avg_reward_per_topic_slot,
             ])
             window_rewards.append(float(total_reward))
             window_steps.append(int(steps))
@@ -1384,6 +1400,8 @@ def main():
         ]
         header += [f"ll_reward_{i}" for i in range(num_topics)]
         header += ["tutee_reward_total"]
+        header += ["avg_reward_per_learning_agent"]
+        header += ["avg_reward_per_topic_slot"]
         metrics_path = out_dir / _metrics_filename(seed=seed)
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
         with open(metrics_path, "w", newline="") as f:

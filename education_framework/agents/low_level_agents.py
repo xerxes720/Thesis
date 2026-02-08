@@ -71,26 +71,42 @@ class LowLevelAgentConfig:
     cka_power: float = 1.0 # keep simple; optional
     # shared_loss_weight: float = 1.0  # base weight multiplier for shared samples
 
+    # --- Experience sharing speed controls ---
+    max_peers_per_update: int = 2  # limit how many peers you sample per update
+    cka_every_updates: int = 50  # recompute similarity only every N updates
+    cka_probe_n: int = 32  # use only 32 states to compute CKA (not full B)
+
 
 # ---------------- Replay Buffer ----------------
 
 class ReplayBuffer:
     def __init__(self, capacity: int):
         self.buffer = deque(maxlen=capacity)
-        self.np_rng = np.random.default_rng(0)
+        self.np_rng = np.random.default_rng(None)
 
     def push(self, s, a, r, s2, done):
-        self.buffer.append((s, a, r, s2, done))
+        # store as float32 numpy arrays ONCE to avoid repeated conversion later
+        s = np.asarray(s, dtype=np.float32)
+        s2 = np.asarray(s2, dtype=np.float32)
+        self.buffer.append((s, int(a), float(r), s2, bool(done)))
 
     def __len__(self):
         return len(self.buffer)
 
     def sample(self, batch_size: int):
         n = len(self)
-        idx = self.np_rng.integers(0, n, size=batch_size)  # with replacement (DQN standard)
-        batch = [self.buffer[i] for i in idx]  # still Python list, but avoids random.sample overhead
+        idx = self.np_rng.integers(0, n, size=batch_size)  # with replacement
+        batch = [self.buffer[i] for i in idx]
         s, a, r, s2, d = zip(*batch)
-        return list(s), list(a), list(r), list(s2), list(d)
+
+        # stack -> contiguous arrays (fast path)
+        s_np  = np.ascontiguousarray(np.stack(s,  axis=0), dtype=np.float32)
+        s2_np = np.ascontiguousarray(np.stack(s2, axis=0), dtype=np.float32)
+        a_np  = np.ascontiguousarray(np.fromiter(a, dtype=np.int64, count=batch_size))
+        r_np  = np.ascontiguousarray(np.fromiter(r, dtype=np.float32, count=batch_size))
+        d_np  = np.ascontiguousarray(np.fromiter(d, dtype=np.float32, count=batch_size))
+        return s_np, a_np, r_np, s2_np, d_np
+
 
 
 class QNetwork(nn.Module):
@@ -193,8 +209,41 @@ class DQNLowLevelAgent:
         self._share_peer_weight_sum = 0.0  # sum(weight * num_peer_samples) across all peers/updates
         self._share_eligible_peers_sum = 0  # sum(#eligible_peers) across sharing attempts
         self._share_selected_peers_sum = 0  # sum(#selected_peers) across sharing attempts
+        self._cka_cache = {}            # peer_id -> (last_update, sim_w)
+        self._last_cka_update = -10**9
+
+
         # self.shared_replay: Optional[ReplayBuffer] = None
         # self.share_ref_net: Optional[QNetwork] = None
+
+    def _get_peer_weight(self, peer: "DQNLowLevelAgent", probe_states_np: np.ndarray) -> float:
+        # mutual: always 1.0
+        mode = str(getattr(self.cfg, "share_mode", "off"))
+        if mode == "mutual":
+            return 1.0
+
+        # weighted_cka: throttle recomputation
+        peer_id = id(peer)
+        every = int(getattr(self.cfg, "cka_every_updates", 50))
+        power = float(getattr(self.cfg, "cka_power", 1.0))
+        layers = tuple(getattr(self.cfg, "cka_layers", ("h1", "h2")))
+
+        cached = self._cka_cache.get(peer_id, None)
+        if cached is not None:
+            last_u, w = cached
+            if (self.num_updates - last_u) < every:
+                return float(w)
+
+        # compute CKA on a small probe
+        with torch.no_grad():
+            q_t = torch.from_numpy(probe_states_np).to(self.device)
+            sim = float(avg_layer_cka(self.policy_net, peer.policy_net, q_t, layers))
+        sim = max(0.0, min(1.0, sim))
+        w = float(sim ** power)
+
+        self._cka_cache[peer_id] = (int(self.num_updates), w)
+        return w
+
 
     # def set_share_ref_net(self, net: Optional[QNetwork]) -> None:
     #     self.share_ref_net = net
@@ -269,12 +318,7 @@ class DQNLowLevelAgent:
         # -------- Build training batch: own + shared --------
         batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w = self._build_shared_batch(self.cfg.batch_size)
 
-        s_np = _to_f32_batch(batch_s)
-        s2_np = _to_f32_batch(batch_s2)
-        a_np = _to_i64_batch(batch_a)
-        r_np = np.ascontiguousarray(np.asarray(batch_r, dtype=np.float32))
-        d_np = np.ascontiguousarray(np.asarray(batch_d, dtype=np.float32))
-        w_np = np.ascontiguousarray(np.asarray(batch_w, dtype=np.float32))
+        s_np, a_np, r_np, s2_np, d_np, w_np = batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w
 
         s_t = torch.from_numpy(s_np)
         s2_t = torch.from_numpy(s2_np)
@@ -323,70 +367,79 @@ class DQNLowLevelAgent:
     def _build_shared_batch(self, B: int):
         mode = str(getattr(self.cfg, "share_mode", "off"))
 
-        # off => only own samples
+        # off / no sharing
         if (mode == "off") or (not getattr(self.cfg, "experience_sharing", False)):
             s, a, r, s2, d = self.replay.sample(B)
-            w = [1.0] * B
+            w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
-        # warmup => only own samples
+        # warmup
         if int(self.num_updates) < int(getattr(self.cfg, "share_warmup_updates", 0)):
             s, a, r, s2, d = self.replay.sample(B)
-            w = [1.0] * B
+            w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
         peers = list(getattr(self, "_peers", []) or [])
-        # no peers => fall back to own (do NOT count as a sharing attempt)
-        if len(peers) == 0:
+        if len(peers) == 0 or self.policy_net is None or mode not in ("mutual", "weighted_cka"):
             s, a, r, s2, d = self.replay.sample(B)
-            w = [1.0] * B
+            w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
-        # Own batch
+        # own batch (numpy arrays)
         s, a, r, s2, d = self.replay.sample(B)
-        w = [1.0] * B
+        w = np.ones((B,), dtype=np.float32)
 
-        # If nets not ready, do not share (do NOT count attempt)
-        if (self.policy_net is None) or (mode not in ("mutual", "weighted_cka")):
-            return s, a, r, s2, d, w
-
-        # Now sharing is truly attempted
+        # attempt sharing counters
         self._share_attempts += 1
         self._share_eligible_peers_sum += len(peers)
 
-        # CKA settings (paper: average across layers)
-        cka_layers = tuple(getattr(self.cfg, "cka_layers", ("h1", "h2")))
-        power = float(getattr(self.cfg, "cka_power", 1.0))  # paper doesn't emphasize exponent; keep 1.0 for faithful
+        # choose only a few peers (important)
+        max_peers = int(getattr(self.cfg, "max_peers_per_update", 2))
+        if len(peers) > max_peers:
+            peers = random.sample(peers, k=max_peers)
+
+        # build output arrays incrementally in lists, stack once
+        Ss  = [s]
+        As  = [a]
+        Rs  = [r]
+        S2s = [s2]
+        Ds  = [d]
+        Ws  = [w]
+
+        probe_n = int(getattr(self.cfg, "cka_probe_n", 32))
 
         for p in peers:
             if (p.policy_net is None) or (len(p.replay) < B):
                 continue
 
-            # Paper: sample Bj from peer j, and compute similarity using Bj as probe
             ps, pa, pr, ps2, pd = p.replay.sample(B)
 
-            if mode == "mutual":
-                sim_w = 1.0
+            # probe subset for similarity (tiny!)
+            if mode == "weighted_cka":
+                n = min(probe_n, ps.shape[0])
+                # choose first n (fast) or random indices if you prefer
+                probe = ps[:n]
+                sim_w = self._get_peer_weight(p, probe)
             else:
-                # weighted_cka
-                q_np = _to_f32_batch(ps)  # peer states are the probe
-                q_t = torch.from_numpy(q_np).to(self.device)
-
-                sim = float(avg_layer_cka(self.policy_net, p.policy_net, q_t, cka_layers))
-                sim = max(0.0, min(1.0, sim))
-                sim_w = sim ** power
+                sim_w = 1.0
 
             self._share_selected_peers_sum += 1
             self._share_peer_samples += B
             self._share_peer_weight_sum += float(sim_w) * B
-            s.extend(ps);
-            a.extend(pa);
-            r.extend(pr);
-            s2.extend(ps2);
-            d.extend(pd)
-            w.extend([sim_w] * B)
 
-        return s, a, r, s2, d, w
+            Ss.append(ps);  As.append(pa);  Rs.append(pr);  S2s.append(ps2);  Ds.append(pd)
+            Ws.append(np.full((B,), float(sim_w), dtype=np.float32))
+
+        # concatenate once (fast)
+        out_s  = np.ascontiguousarray(np.concatenate(Ss,  axis=0), dtype=np.float32)
+        out_a  = np.ascontiguousarray(np.concatenate(As,  axis=0), dtype=np.int64)
+        out_r  = np.ascontiguousarray(np.concatenate(Rs,  axis=0), dtype=np.float32)
+        out_s2 = np.ascontiguousarray(np.concatenate(S2s, axis=0), dtype=np.float32)
+        out_d  = np.ascontiguousarray(np.concatenate(Ds,  axis=0), dtype=np.float32)
+        out_w  = np.ascontiguousarray(np.concatenate(Ws,  axis=0), dtype=np.float32)
+
+        return out_s, out_a, out_r, out_s2, out_d, out_w
+
 
     def _ensure_networks(self, input_dim: int) -> None:
         if self.policy_net is not None:

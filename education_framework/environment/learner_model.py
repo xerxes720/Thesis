@@ -105,9 +105,9 @@ class LowLevelAction(IntEnum):
     TUTOR_REVIEW = 4
 
     # ---- Tutee actions (your thesis contribution) ----
-    TUTEE_QUIZ = 5        # retrieval prompt
-    TUTEE_EXPLAIN = 6     # teach-back / self-explanation
-    TUTEE_FIX = 7         # diagnose & fix mistakes
+    TUTEE_QUIZ = 5  # retrieval prompt
+    TUTEE_EXPLAIN = 6  # teach-back / self-explanation
+    TUTEE_FIX = 7  # diagnose & fix mistakes
 
 
 @dataclass(frozen=True)
@@ -148,13 +148,13 @@ class KDDActionSchema:
 
     @classmethod
     def fit_from_rows(
-        cls,
-        rows: Iterable[Mapping[str, Any]],
-        duration_col: str = "Step Duration (sec)",
-        hints_col: str = "Hints",
-        incorrects_col: str = "Incorrects",
-        corrects_col: str = "Corrects",
-        max_rows: int = 2_000_000,
+            cls,
+            rows: Iterable[Mapping[str, Any]],
+            duration_col: str = "Step Duration (sec)",
+            hints_col: str = "Hints",
+            incorrects_col: str = "Incorrects",
+            corrects_col: str = "Corrects",
+            max_rows: int = 2_000_000,
     ) -> "KDDActionSchema":
         durs: List[float] = []
         hints: List[float] = []
@@ -183,13 +183,13 @@ class KDDActionSchema:
 
     # ---- Tutor action labeling (from KDD observables) ----
     def label_tutor_action_from_row(
-        self,
-        row: Mapping[str, Any],
-        *,
-        cfa_col: str = "Correct First Attempt",
-        duration_col: str = "Step Duration (sec)",
-        hints_col: str = "Hints",
-        incorrects_col: str = "Incorrects",
+            self,
+            row: Mapping[str, Any],
+            *,
+            cfa_col: str = "Correct First Attempt",
+            duration_col: str = "Step Duration (sec)",
+            hints_col: str = "Hints",
+            incorrects_col: str = "Incorrects",
     ) -> LowLevelAction:
         """Label a KDD step into one of the *tutor* actions (0..4).
 
@@ -221,13 +221,13 @@ class KDDActionSchema:
 
     # ---- Simple generative-mode proxy (optional feature) ----
     def generation_mode_from_row(
-        self,
-        row: Mapping[str, Any],
-        *,
-        cfa_col: str = "Correct First Attempt",
-        duration_col: str = "Step Duration (sec)",
-        hints_col: str = "Hints",
-        incorrects_col: str = "Incorrects",
+            self,
+            row: Mapping[str, Any],
+            *,
+            cfa_col: str = "Correct First Attempt",
+            duration_col: str = "Step Duration (sec)",
+            hints_col: str = "Hints",
+            incorrects_col: str = "Incorrects",
     ) -> int:
         cfa = _safe_int(row.get(cfa_col), 0)
         hints = _safe_int(row.get(hints_col), 0)
@@ -330,7 +330,7 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.90
+    mastery_threshold: float = 0.75
     opp_min: int = 1
 
     topic_mastery_thresholds: Optional[List[float]] = field(
@@ -345,9 +345,8 @@ class KDDLearnerConfig:
 
     from dataclasses import field
     topic_cluster_ids: List[int] = field(default_factory=lambda: [0, 0, 0, 1, 1, 2, 2])
-    # topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
-    topic_difficulty: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.00, 1.0, 1.0, 1.0, 1.0])
-
+    topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
+    # topic_difficulty: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.00, 1.0, 1.0, 1.0, 1.0])
 
     # --- tutee (protégé / learning-by-teaching) simulation ---
     # Conservative, bounded mastery bonus with explicit cost.
@@ -396,21 +395,19 @@ class KDDLearnerConfig:
     teach_boost_beta_scale: float = 1.5  # tutor update multiplier range: 1 .. 1+0.5
 
     force_end_on_all_complete: bool = True
-    step_penalty: float = 0.0 # start small; tune 0.001..0.01
-
-
+    step_penalty: float = 0.0  # start small; tune 0.001..0.01
 
     # Per-topic observation noise scale (affects neutral noise and/or cfa sampling jitter if you want)
     topic_noise: Optional[List[float]] = None
 
     # --- Forgetting / spacing ---
     # forget_rate: float = 0.0002      # per "step unit" since last practice
-    forget_rate: float = 0.0      # per "step unit" since last practice
-    forget_floor: float = 0.1      # don't forget below this baseline mastery
+    forget_rate: float = 0.0  # per "step unit" since last practice
+    forget_floor: float = 0.1  # don't forget below this baseline mastery
     # retention_from_tutee: float = 0.10  # tutee increases retention (0..1)
     retention_from_tutee: float = 0.0  # tutee increases retention (0..1)
     # retention_decay: float = 0.999  # per step
-    retention_decay: float = 1.0 # per step
+    retention_decay: float = 1.0  # per step
     retention_init: float = 0.10
 
 
@@ -418,10 +415,10 @@ class KDDLearnerModel:
     """KDD-based learner simulator used by your HRL framework."""
 
     def __init__(
-        self,
-        cfg: Optional[KDDLearnerConfig] = None,
-        bundle: Optional[KDDModelBundle] = None,
-        seed: int = 0,
+            self,
+            cfg: Optional[KDDLearnerConfig] = None,
+            bundle: Optional[KDDModelBundle] = None,
+            seed: int = 0,
     ) -> None:
         self.cfg = cfg or KDDLearnerConfig()
         self.bundle = bundle
@@ -430,7 +427,6 @@ class KDDLearnerModel:
         self.state = LearnerState(n_topics=self.cfg.n_topics)
         # Per-topic one-time completion flags (reset each episode).
         self._topic_completed = np.zeros(self.cfg.n_topics, dtype=np.bool_)
-
 
     # ---------- persistence ----------
     def save(self, path: str) -> None:
@@ -481,7 +477,6 @@ class KDDLearnerModel:
             (int(s.opp[topic_id]) >= int(self.cfg.opp_min))
         )
 
-
     def _apply_forgetting_all_except(self, practiced_topic: int, step_cost: float) -> None:
         s = self.state
         cfg = self.cfg
@@ -522,6 +517,7 @@ class KDDLearnerModel:
         if topic_id < 0 or topic_id >= len(t):
             return float(self.cfg.mastery_threshold)
         return float(t[topic_id])
+
     def _beta_mult(self, name: str, topic_id: int) -> float:
         b = self.bundle
         if b is None:
@@ -533,6 +529,7 @@ class KDDLearnerModel:
             return float(arr[int(topic_id)])
         except Exception:
             return 1.0
+
     # ---------- feature engineering ----------
     def _state_features(self, s: LearnerState, topic_id: int) -> np.ndarray:
         """Features used by the routing quality tree: state only (no action, no outcomes)."""
@@ -551,48 +548,61 @@ class KDDLearnerModel:
         )
 
     def _build_features(
-        self,
-        s: LearnerState,
-        topic_id: int,
-        action_meta: ActionMeta,
-        generation_mode: int,
-        include_outcome: bool,
-        cfa: int = 0,
-        hints: int = 0,
-        incorrects: int = 0,
-        duration: float = 0.0,
+            self,
+            s: LearnerState,
+            topic_id: int,
+            action_meta: ActionMeta,
+            generation_mode: int,
+            include_outcome: bool,
+            cfa: int = 0,
+            hints: int = 0,
+            incorrects: int = 0,
+            duration: float = 0.0,
     ) -> np.ndarray:
         cfg = self.cfg
-        base = self._state_features(s, topic_id).tolist()
-        is_tutee = 1.0 if action_meta.is_tutee else 0.0
-        gen = float(generation_mode)
-        feats: List[float] = base + [is_tutee, gen]
 
-        # one-hot action (fixed length 8)
+        x = np.empty(22, dtype=np.float32)
+
+        # ---- base state features (8) ----
+        mastery_k = float(s.mastery[topic_id])
+        opp_k = float(s.opp[topic_id]) / max(cfg.opp_norm, 1e-6)
+        x[0] = mastery_k
+        x[1] = opp_k
+        x[2] = float(s.cfa_ema[topic_id])
+        x[3] = float(s.hint_ema[topic_id])
+        x[4] = float(s.time_ema[topic_id])
+        x[5] = float(s.inc_ema[topic_id])
+        x[6] = float(s.mastery.mean())  # still ok; optional to optimize later
+        x[7] = float(s.total_steps) / (cfg.opp_norm * cfg.n_topics)
+
+        # ---- meta (2) ----
+        x[8] = 1.0 if action_meta.is_tutee else 0.0
+        x[9] = float(generation_mode)
+
+        # ---- one-hot (8) ----
+        x[10:18] = 0.0
         a = int(action_meta.action)
-        one_hot = [0.0] * 8
-        one_hot[a] = 1.0
-        feats.extend(one_hot)
+        if 0 <= a < 8:
+            x[10 + a] = 1.0
 
+        # ---- outcome block (4) ----
         if include_outcome:
-            feats.extend(
-                [
-                    float(cfa),
-                    float(hints) / max(cfg.hints_norm, 1e-6),
-                    float(incorrects) / max(cfg.inc_norm, 1e-6),
-                    float(duration) / max(cfg.time_norm, 1e-6),
-                ]
-            )
+            x[18] = float(cfa)
+            x[19] = float(hints) / max(cfg.hints_norm, 1e-6)
+            x[20] = float(incorrects) / max(cfg.inc_norm, 1e-6)
+            x[21] = float(duration) / max(cfg.time_norm, 1e-6)
         else:
-            feats.extend([0.0, 0.0, 0.0, 0.0])
+            x[18:22] = 0.0
 
-        return np.asarray(feats, dtype=np.float32)
+        return x
 
     def _predict_proba_1(self, model: Any, x: np.ndarray) -> float:
+        x2 = x.reshape(1, -1)
         if hasattr(model, "predict_proba"):
-            proba = model.predict_proba(x.reshape(1, -1))
+            # critical: skip sklearn validation
+            proba = model.predict_proba(x2, check_input=False)
             return float(proba[0, 1])
-        y = float(model.predict(x.reshape(1, -1))[0])
+        y = float(model.predict(x2, check_input=False)[0])
         return _clip01(y)
 
     def _predict_aux_int(self, topic_id: int, x: np.ndarray, models: Optional[Dict[int, Any]], default: int) -> int:
@@ -601,16 +611,17 @@ class KDDLearnerModel:
         m = models.get(topic_id)
         if m is None:
             return int(default)
-        y = float(m.predict(x.reshape(1, -1))[0])
+        y = float(m.predict(x.reshape(1, -1), check_input=False)[0])
         return max(0, int(round(y)))
 
-    def _predict_aux_float(self, topic_id: int, x: np.ndarray, models: Optional[Dict[int, Any]], default: float) -> float:
+    def _predict_aux_float(self, topic_id: int, x: np.ndarray, models: Optional[Dict[int, Any]],
+                           default: float) -> float:
         if not models:
             return float(default)
         m = models.get(topic_id)
         if m is None:
             return float(default)
-        y = float(m.predict(x.reshape(1, -1))[0])
+        y = float(m.predict(x.reshape(1, -1), check_input=False)[0])
         return max(0.0, float(y))
 
     def _apply_mastery_quality_update(self, topic_id: int, quality: str) -> None:
@@ -741,7 +752,6 @@ class KDDLearnerModel:
             # if random.random() > p_succ:
             #     return 0.0  # failed retrieval => no mastery gain
 
-
         # --- 4) fix only helps when there is "something to fix" (struggle signal)
         # if a == LowLevelAction.TUTEE_FIX:
         #     # Use EMAs you already track (values are normalized later; keep it simple)
@@ -763,14 +773,14 @@ class KDDLearnerModel:
         return float(b)
 
     def _apply_observation_updates(
-        self,
-        topic_id: int,
-        *,
-        cfa: int,
-        hints: int,
-        incorrects: int,
-        duration: float,
-        step_cost: int = 1,
+            self,
+            topic_id: int,
+            *,
+            cfa: int,
+            hints: int,
+            incorrects: int,
+            duration: float,
+            step_cost: int = 1,
     ) -> None:
         if self.bundle is None:
             alpha = 0.2
@@ -782,9 +792,12 @@ class KDDLearnerModel:
         s.total_steps += int(max(1, step_cost))
 
         s.cfa_ema[topic_id] = _clip01((1.0 - alpha) * float(s.cfa_ema[topic_id]) + alpha * float(cfa))
-        s.hint_ema[topic_id] = _clip01((1.0 - alpha) * float(s.hint_ema[topic_id]) + alpha * (float(hints) / max(self.cfg.hints_norm, 1e-6)))
-        s.time_ema[topic_id] = _clip01((1.0 - alpha) * float(s.time_ema[topic_id]) + alpha * (float(duration) / max(self.cfg.time_norm, 1e-6)))
-        s.inc_ema[topic_id] = _clip01((1.0 - alpha) * float(s.inc_ema[topic_id]) + alpha * (float(incorrects) / max(self.cfg.inc_norm, 1e-6)))
+        s.hint_ema[topic_id] = _clip01(
+            (1.0 - alpha) * float(s.hint_ema[topic_id]) + alpha * (float(hints) / max(self.cfg.hints_norm, 1e-6)))
+        s.time_ema[topic_id] = _clip01(
+            (1.0 - alpha) * float(s.time_ema[topic_id]) + alpha * (float(duration) / max(self.cfg.time_norm, 1e-6)))
+        s.inc_ema[topic_id] = _clip01(
+            (1.0 - alpha) * float(s.inc_ema[topic_id]) + alpha * (float(incorrects) / max(self.cfg.inc_norm, 1e-6)))
 
     # ---------- core step ----------
     def _paper_vars(self, s: LearnerState) -> np.ndarray:
@@ -805,8 +818,6 @@ class KDDLearnerModel:
         # inv_time = 1.0 - float(np.mean(s.time_ema))
         #
         # return np.asarray([m, cfa, inv_hint, inv_inc, inv_time], dtype=np.float32)
-
-
 
     # def global_perf_observation(self) -> np.ndarray:
     #     """
@@ -875,6 +886,7 @@ class KDDLearnerModel:
         for k in range(self.cfg.n_topics):
             if (not bool(self._topic_completed[k])) and self.is_topic_complete(k):
                 self._topic_completed[k] = True
+
     def step(self, topic_id: int, action_meta: ActionMeta) -> Tuple[LearnerState, Dict[str, Any]]:
         if self.bundle is None:
             raise RuntimeError("KDDLearnerModel.bundle is None; provide a trained KDDModelBundle")
@@ -987,7 +999,8 @@ class KDDLearnerModel:
                 duration = max(0.0, float(self.np_rng.normal(duration, 0.05 * duration)))
 
         # 3) generation_mode (optional feature; not required by quality update)
-        generation_mode = 1 if (action_meta.force_generation or action_meta.action == LowLevelAction.TUTEE_EXPLAIN) else 0
+        generation_mode = 1 if (
+                    action_meta.force_generation or action_meta.action == LowLevelAction.TUTEE_EXPLAIN) else 0
 
         # 4) Quality lookup and mastery update
         qbank = self.bundle.quality_bank
@@ -995,9 +1008,11 @@ class KDDLearnerModel:
             quality = "good" if cfa == 1 else "bad"
             leaf_id = -1
         else:
-            x_state = self._state_features(s, topic_id)
-            leaf_id = qbank.apply_leaf(topic_id, x_state)
-            # For tutee actions, do not use the quality bank (which was learned from tutor-labelled KDD).
+            # reuse x_state/leaf_id computed above
+            if x_state is None:
+                x_state = self._state_features(s, topic_id)
+            if leaf_id == -1:
+                leaf_id = qbank.apply_leaf(topic_id, x_state)
             quality = "neutral" if is_tutee else qbank.predict_quality(
                 topic_id=topic_id,
                 action_id=int(action_meta.action),
@@ -1073,7 +1088,6 @@ class KDDLearnerModel:
         # optional but recommended for stability
         r_step = float(np.clip(r_step, -0.05, 0.05))
 
-
         # reward = r_step + (self.cfg.completion_reward if done else 0.0)
         # One-time completion reward per topic/subtask:
         # give +r_c the first time this topic reaches (mastery >= threshold AND opp >= opp_min).
@@ -1140,12 +1154,12 @@ class KDDTrajectoryBuilder:
     """Extract supervised rows from KDD for training response/aux models and quality trees."""
 
     def __init__(
-        self,
-        n_topics: int,
-        kc_to_topic: Mapping[str, int],
-        schema: KDDActionSchema,
-        ema_alpha: float = 0.2,
-        seed: int = 0,
+            self,
+            n_topics: int,
+            kc_to_topic: Mapping[str, int],
+            schema: KDDActionSchema,
+            ema_alpha: float = 0.2,
+            seed: int = 0,
     ) -> None:
         self.n_topics = int(n_topics)
         self.kc_to_topic = dict(kc_to_topic)
@@ -1180,14 +1194,14 @@ class KDDTrajectoryBuilder:
         return s if s else None
 
     def iter_training_rows(
-        self,
-        rows_by_student: Iterable[Tuple[str, List[Mapping[str, Any]]]],
-        *,
-        kc_col: str = "KC(Default)",
-        cfa_col: str = "Correct First Attempt",
-        duration_col: str = "Step Duration (sec)",
-        hints_col: str = "Hints",
-        incorrects_col: str = "Incorrects",
+            self,
+            rows_by_student: Iterable[Tuple[str, List[Mapping[str, Any]]]],
+            *,
+            kc_col: str = "KC(Default)",
+            cfa_col: str = "Correct First Attempt",
+            duration_col: str = "Step Duration (sec)",
+            hints_col: str = "Hints",
+            incorrects_col: str = "Incorrects",
     ) -> Iterable[TrainingRow]:
 
         for _sid, seq in rows_by_student:
@@ -1256,14 +1270,14 @@ class KDDTrajectoryBuilder:
                 )
 
     def _deterministic_estimator_update(
-        self,
-        s: LearnerState,
-        *,
-        topic_id: int,
-        cfa: int,
-        hints: int,
-        incorrects: int,
-        duration: float,
+            self,
+            s: LearnerState,
+            *,
+            topic_id: int,
+            cfa: int,
+            hints: int,
+            incorrects: int,
+            duration: float,
     ) -> None:
         """Defines a simple, fixed state estimator for building training targets.
 
@@ -1294,9 +1308,9 @@ class KDDTrajectoryBuilder:
 # ----------------------------
 
 def group_rows_by_student(
-    rows: Iterable[Mapping[str, Any]],
-    student_col: str = "Anon Student Id",
-    order_key_cols: Optional[Sequence[str]] = None,
+        rows: Iterable[Mapping[str, Any]],
+        student_col: str = "Anon Student Id",
+        order_key_cols: Optional[Sequence[str]] = None,
 ) -> List[Tuple[str, List[Mapping[str, Any]]]]:
     by: Dict[str, List[Mapping[str, Any]]] = {}
     for r in rows:

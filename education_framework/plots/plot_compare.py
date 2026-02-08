@@ -96,14 +96,20 @@ def _load_curves_for_condition(root_dir: str, must_contain=None):
 
         keep = ["episode", "reward", "steps"] + ll_cols
 
-        # keep arch if present (needed to detect flat correctly)
         if "arch" in df.columns:
             keep = ["arch"] + keep
-        # NEW: keep these if present
+        if "use_tutee" in df.columns:
+            keep.append("use_tutee")
+        if "n_ll_agents" in df.columns:
+            keep.append("n_ll_agents")
         if "tutee_reward_total" in df.columns:
             keep.append("tutee_reward_total")
         if "avg_agent_reward" in df.columns:
             keep.append("avg_agent_reward")
+        if "avg_reward_per_learning_agent" in df.columns:
+            keep.append("avg_reward_per_learning_agent")
+        if "avg_reward_per_topic_slot" in df.columns:
+            keep.append("avg_reward_per_topic_slot")
 
         df = df[keep].copy()
         df = df.sort_values("episode").reset_index(drop=True)
@@ -285,40 +291,15 @@ def plot_average_reward_over_all_agents():
     dfs_weighted = _load_curves_for_condition(COND_DIRS["weighted transfer"], COND_FILTERS["weighted transfer"])
 
     def avg_agent_reward_curve(dfs):
-        """
-        Comparable signal across ALL conditions (Option A):
-          y = total_reward_per_episode / NUM_TOPICS
-
-        We infer NUM_TOPICS from ll_reward_* columns when available,
-        otherwise fall back to a configured constant.
-        """
         ys = []
-
-        # infer num_topics robustly
-        def infer_num_topics(df):
-            ll_cols = [c for c in df.columns if c.startswith("ll_reward_")]
-            if ll_cols:
-                return len(ll_cols)
-            # fallback: use your global constant if you have one
-            # e.g., NUM_TOPICS = 7
-            return NUM_TOPICS
-
         for df in dfs:
-            if "reward" not in df.columns:
-                # nothing sensible to plot
+            if "avg_reward_per_topic_slot" not in df.columns:
                 continue
-
-            num_topics = infer_num_topics(df)
-            if num_topics <= 0:
-                continue
-
-            y = df["reward"].to_numpy(dtype=float) / float(num_topics)
-            ys.append(y)
+            ys.append(df["avg_reward_per_topic_slot"].to_numpy(dtype=float))
 
         mat = _pad_stack(ys)
         if mat is None:
             return None, None
-
         mean = np.nanmean(mat, axis=0)
         x = np.arange(1, len(mean) + 1)
         return x, _rolling_mean(mean, SMOOTH_W)
