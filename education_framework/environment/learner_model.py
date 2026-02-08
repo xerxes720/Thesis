@@ -330,7 +330,7 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.75
+    mastery_threshold: float = 0.90
     opp_min: int = 1
 
     topic_mastery_thresholds: Optional[List[float]] = field(
@@ -345,7 +345,8 @@ class KDDLearnerConfig:
 
     from dataclasses import field
     topic_cluster_ids: List[int] = field(default_factory=lambda: [0, 0, 0, 1, 1, 2, 2])
-    topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
+    # topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
+    topic_difficulty: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.00, 1.0, 1.0, 1.0, 1.0])
 
 
     # --- tutee (protégé / learning-by-teaching) simulation ---
@@ -403,10 +404,13 @@ class KDDLearnerConfig:
     topic_noise: Optional[List[float]] = None
 
     # --- Forgetting / spacing ---
-    forget_rate: float = 0.0002      # per "step unit" since last practice
+    # forget_rate: float = 0.0002      # per "step unit" since last practice
+    forget_rate: float = 0.0      # per "step unit" since last practice
     forget_floor: float = 0.1      # don't forget below this baseline mastery
-    retention_from_tutee: float = 0.10  # tutee increases retention (0..1)
-    retention_decay: float = 0.999  # per step
+    # retention_from_tutee: float = 0.10  # tutee increases retention (0..1)
+    retention_from_tutee: float = 0.0  # tutee increases retention (0..1)
+    # retention_decay: float = 0.999  # per step
+    retention_decay: float = 1.0 # per step
     retention_init: float = 0.10
 
 
@@ -476,6 +480,8 @@ class KDDLearnerModel:
             (float(s.mastery[topic_id]) >= self._topic_threshold(topic_id)) and
             (int(s.opp[topic_id]) >= int(self.cfg.opp_min))
         )
+
+
     def _apply_forgetting_all_except(self, practiced_topic: int, step_cost: float) -> None:
         s = self.state
         cfg = self.cfg
@@ -799,6 +805,37 @@ class KDDLearnerModel:
         # inv_time = 1.0 - float(np.mean(s.time_ema))
         #
         # return np.asarray([m, cfa, inv_hint, inv_inc, inv_time], dtype=np.float32)
+
+
+
+    # def global_perf_observation(self) -> np.ndarray:
+    #     """
+    #     Topic-agnostic learner-performance observation (all in [0,1]) for LOW-LEVEL agents.
+    #
+    #     Matches the paper's treatment: LL agents observe learner performance variables
+    #     (score/time/help/engagement-style signals) rather than per-topic latent knowledge vectors.
+    #     No topic identity is included; topic context is implied by which LL agent is selected.
+    #     """
+    #     s = self.state
+    #
+    #     # Knowledge/score proxies (global)
+    #     m_mean = float(np.mean(s.mastery))
+    #     m_min = float(np.min(s.mastery))
+    #
+    #     # Coverage proxy (global exposure)
+    #     opp_min = max(1, int(self.cfg.opp_min))
+    #     cov = float(np.mean(np.minimum(s.opp, opp_min) / float(opp_min)))
+    #
+    #     # Global recent performance proxies (higher is better)
+    #     cfa = float(np.mean(s.cfa_ema))
+    #     inv_hint = 1.0 - float(np.mean(s.hint_ema))
+    #     inv_inc = 1.0 - float(np.mean(s.inc_ema))
+    #     inv_time = 1.0 - float(np.mean(s.time_ema))
+    #
+    #     v = np.asarray([m_mean, m_min, cov, cfa, inv_hint, inv_inc, inv_time], dtype=np.float32)
+    #
+    #     return np.clip(v, 0.0, 1.0)
+    #
 
     def _sample_tutee_outcomes_from_stats(
             self,

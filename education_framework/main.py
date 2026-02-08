@@ -1,31 +1,6 @@
 # education_framework/main.py
 
 from __future__ import annotations
-
-import argparse
-import csv
-import math
-import sys
-from collections import Counter
-from collections import defaultdict
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, List, Optional
-
-import joblib
-import numpy as np
-from tqdm import tqdm
-import random, numpy as np
-import torch
-
-# --- Ensure imports work whether you run:
-#   python -m education_framework.main
-# or:
-#   python education_framework/main.py
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 from education_framework.agents.high_level_agent import HighLevelAgent, HighLevelAgentConfig
 from education_framework.agents.low_level_agents import (
     DQNLowLevelAgent,
@@ -43,6 +18,30 @@ from education_framework.environment.learner_model import (
     ActionMeta,
     LowLevelAction,
 )
+
+import argparse
+import csv
+import math
+import random
+import sys
+from collections import Counter
+from collections import defaultdict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import joblib
+import numpy as np
+import torch
+from tqdm import tqdm
+
+# --- Ensure imports work whether you run:
+#   python -m education_framework.main
+# or:
+#   python education_framework/main.py
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 # RUN WITH python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300
@@ -130,12 +129,12 @@ class KDDHierEnv:
                                     force_generation=False),
         }
 
-    def reset(self) -> List[float]:
+    def reset(self):
         self.step_count = 0
         self.model.reset(initial_mastery=self.cfg.initial_mastery)
         return self.get_observation()
 
-    def get_observation(self) -> List[float]:
+    def get_observation(self):
         """
         Observation for the RL agents.
 
@@ -170,7 +169,40 @@ class KDDHierEnv:
             ],
             axis=0,
         )
-        return obs.astype(np.float32).tolist()
+        return obs.astype(np.float32)
+
+    def get_ll_observation(self, topic_id: int) -> List[float]:
+        """
+           Paper-style *semantics*: LL agents observe learner performance variables for the
+           CURRENT topic context only (like Gridlock's current area), not all topics.
+
+           We return one scalar per per-topic block at index=topic_id, plus the global tail.
+           This prevents LL from seeing other topics while still being Markov for the current
+           tutoring interaction.
+        """
+        x = np.asarray(self.get_observation(), dtype=np.float32)
+
+        n_blocks = 7  # mastery,cfa,hint,time,inc,opp_norm,topic_complete
+        tail = 2  # global_mastery,total_steps_norm
+        T = int(self.num_topics)
+        expected = n_blocks * T + tail
+
+        if x.shape[0] != expected:
+            # fallback if obs layout changes
+            return x.tolist()
+
+        t = int(topic_id)
+        t = max(0, min(T - 1, t))
+
+        feats = []
+
+        for b in range(n_blocks):
+            start = b * T
+            feats.append(float(x[start + t]))  # pick the topic-specific scalar
+
+        # append global tail unchanged
+        feats.extend([float(x[-2]), float(x[-1])])
+        return np.asarray(feats, dtype=np.float32).tolist()
 
     def _done(self) -> bool:
         # Episode ends if learner achieved the simulator's completion criterion OR we hit a hard cap.
@@ -302,13 +334,13 @@ def create_agents(
     # --- sharing config (applies to tutor agents only) ---
     ll_cfg.experience_sharing = bool(experience_sharing) and (ll_mode == "multi")
     ll_cfg.share_mode = share_mode if ll_cfg.experience_sharing else "off"
-    if ll_cfg.experience_sharing and ll_cfg.share_mode == "weighted_cka":
-        ll_cfg.share_frac = 0.30
-        ll_cfg.max_peers_per_update = 3
-        ll_cfg.peer_batch_size = 64
-        ll_cfg.min_peer_replay_size = 500
-        ll_cfg.share_similarity_threshold = 0.10
-        ll_cfg.share_weight_power = 2.0
+    # if ll_cfg.experience_sharing and ll_cfg.share_mode == "weighted_cka":
+    #     ll_cfg.share_frac = 0.30
+    #     ll_cfg.max_peers_per_update = 3
+    #     ll_cfg.peer_batch_size = 64
+    #     ll_cfg.min_peer_replay_size = 500
+    #     ll_cfg.share_similarity_threshold = 0.10
+    #     ll_cfg.share_weight_power = 2.0
     # --- build tutor agents: single vs multi ---
     if ll_mode == "single":
         tutor_agents = [TutorLowLevelAgent(ll_cfg)]  # one shared tutor DQN
@@ -338,22 +370,22 @@ def create_agents(
         for a in tutor_agents:
             a.set_peers([])
 
+    # use_share = ll_cfg.experience_sharing and (ll_cfg.share_mode != "off") and (ll_mode == "multi")
+    # shared = ReplayBuffer(ll_cfg.shared_buffer_size) if use_share else None
+    # for a in tutor_agents:
+    #     a.set_shared_replay(shared)
+
     return high_level_agent, tutor_agents, tutee_agent
 
 
 def add_topic(obs, topic_id: int) -> np.ndarray:
-    obs_np = np.asarray(obs, dtype=np.float32)
-    return np.concatenate([obs_np, np.array([topic_id], dtype=np.float32)])
+    return np.concatenate([obs, np.array([topic_id], dtype=np.float32)])
 
 
-def canonicalize_obs(obs, topic_id: int, num_topics: int) -> np.ndarray:
+def summarize_obs(obs, num_topics: int) -> np.ndarray:
     """
-    Reorders per-topic blocks so that the active topic_id is always at index 0.
-    This makes experiences from different topics share the same semantics, enabling safe sharing.
-
-    Expected env obs layout (from get_observation()):
-      [mastery, cfa_ema, hint_ema, time_ema, inc_ema, opp_norm, topic_complete] each length=num_topics
-      + [global_mastery, total_steps_norm] length=2
+    Topic-agnostic compressed view of the learner state.
+    Removes topic identity and prevents access to all per-topic raw values.
     """
     x = np.asarray(obs, dtype=np.float32)
 
@@ -361,19 +393,50 @@ def canonicalize_obs(obs, topic_id: int, num_topics: int) -> np.ndarray:
     tail = 2
     expected = n_blocks * num_topics + tail
     if x.shape[0] != expected:
-        # Fallback: do nothing if obs layout changed
-        return x
+        return x  # fallback
 
-    perm = np.array([topic_id] + [i for i in range(num_topics) if i != topic_id], dtype=np.int64)
-
-    blocks = []
+    feats = []
+    # For each per-topic block, keep only aggregate stats (mean/min/max)
     for b in range(n_blocks):
         start = b * num_topics
         end = start + num_topics
-        blocks.append(x[start:end][perm])
+        v = x[start:end]
+        feats.extend([float(v.mean()), float(v.min()), float(v.max())])
 
-    tail_vec = x[n_blocks * num_topics:]
-    return np.concatenate(blocks + [tail_vec], axis=0)
+    # keep global tail (global_mastery, total_steps_norm)
+    feats.extend([float(x[-2]), float(x[-1])])
+
+    return np.asarray(feats, dtype=np.float32)
+
+
+# def canonicalize_obs(obs, topic_id: int, num_topics: int) -> np.ndarray:
+#     """
+#     Reorders per-topic blocks so that the active topic_id is always at index 0.
+#     This makes experiences from different topics share the same semantics, enabling safe sharing.
+#
+#     Expected env obs layout (from get_observation()):
+#       [mastery, cfa_ema, hint_ema, time_ema, inc_ema, opp_norm, topic_complete] each length=num_topics
+#       + [global_mastery, total_steps_norm] length=2
+#     """
+#     x = np.asarray(obs, dtype=np.float32)
+#
+#     n_blocks = 7
+#     tail = 2
+#     expected = n_blocks * num_topics + tail
+#     if x.shape[0] != expected:
+#         # Fallback: do nothing if obs layout changed
+#         return x
+#
+#     perm = np.array([topic_id] + [i for i in range(num_topics) if i != topic_id], dtype=np.int64)
+#
+#     blocks = []
+#     for b in range(n_blocks):
+#         start = b * num_topics
+#         end = start + num_topics
+#         blocks.append(x[start:end][perm])
+#
+#     tail_vec = x[n_blocks * num_topics:]
+#     return np.concatenate(blocks + [tail_vec], axis=0)
 
 
 class FlatAgent:
@@ -469,9 +532,15 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             # Always provide the active-topic-first view.
             # - For multi-LL: keeps “in-topic” semantics stable
             # - For single-LL: avoids giving a raw topic_id while keeping it Markov
-            tutor_obs = canonicalize_obs(obs, topic_id, num_topics)
+
+            tutor_obs = env.get_ll_observation(topic_id)
 
             ll_action_idx = tutor_agent.select_action(tutor_obs)
+            # if len(tutor_agents) > 1:
+            #     ref = tutor_agents[0].policy_net
+            #     if ref is not None:
+            #         for ag in tutor_agents:
+            #             ag.set_share_ref_net(ref)
             ll_action_str = tutor_agent.get_action_meanings()[ll_action_idx]
             tutor_action_counts[ll_action_str] += 1
 
@@ -484,7 +553,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             # else:
             #     # per-topic LL tutor must NOT include topic_id (keeps sharing “in-topic”)
             #     next_tutor_obs = canonicalize_obs(next_obs, topic_id, num_topics)
-            next_tutor_obs = canonicalize_obs(next_obs, topic_id, num_topics)
+            next_tutor_obs = env.get_ll_observation(topic_id)
 
             # per-agent reward attribution:
             # - multi-agent: reward belongs to that topic’s LL agent
@@ -499,14 +568,23 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         elif mode == "tutee" and tutee_agent is not None:
             tutee_hl_count += 1
 
-            tutee_obs = add_topic(obs, topic_id)
+            # tutee_obs = add_topic(obs, topic_id)
+            # tutee_obs = np.concatenate([np.asarray(env.get_ll_observation(topic_id), dtype=np.float32),
+            #                             np.array([topic_id], dtype=np.float32)]).tolist()
+
+            tutee_obs = env.get_ll_observation(topic_id)
+
             ll_action_idx = tutee_agent.select_action(tutee_obs)
             ll_action_str = tutee_agent.get_action_meanings()[ll_action_idx]
             tutee_action_counts[ll_action_str] += 1
 
             next_obs, reward_hl, done, info = env.step_tutee(topic_id, ll_action_str)
             reward_ll = float(info.get("reward_ll", reward_hl))
-            next_tutee_obs = add_topic(next_obs, topic_id)
+            # next_tutee_obs = add_topic(next_obs, topic_id)
+            # next_tutee_obs = np.concatenate([np.asarray(env.get_ll_observation(topic_id), dtype=np.float32),
+            #                             np.array([topic_id], dtype=np.float32)]).tolist()
+
+            next_tutee_obs = env.get_ll_observation(topic_id)
 
             tutee_reward_total += reward_ll
 
@@ -607,7 +685,7 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bundle", type=str, default="education_framework/data/kdd_bundle.joblib")
-    ap.add_argument("--episodes", type=int, default=2000)
+    ap.add_argument("--episodes", type=int, default=100)
     ap.add_argument("--log_window", type=int, default=100)
     ap.add_argument("--use_tutee", action="store_true", default=False)
     ap.add_argument("--seed", type=int, default=0)
