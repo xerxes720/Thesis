@@ -31,7 +31,7 @@ COND_FILTERS = {
 NUM_TOPICS = 7  # <- set this to bundle.n_topics in your experiment
 # NUM_TOPICS = 8  # or pull from config if you have it
 
-SMOOTH_W = 100  # paper-like smoothing; tweak to 50/200 if you want
+SMOOTH_W = 50  # paper-like smoothing; tweak to 50/200 if you want
 
 
 def _rolling_mean(y: np.ndarray, w: int) -> np.ndarray:
@@ -323,6 +323,31 @@ def plot_average_reward_over_all_agents():
     plt.show()
 
 
+# def plot_fig7_avg_reward_over_all_agents():
+#     # HRL single vs HRL multi (+ optional transfer/tutee if you want)
+#     single_ll_dfs = _load_curves_for_condition(COND_DIRS["single-ll"], COND_FILTERS["single-ll"])
+#     multi_dfs     = _load_curves_for_condition(COND_DIRS["multi-agent"], COND_FILTERS["multi-agent"])
+#
+#     plt.figure(figsize=(7.2, 4.2))
+#
+#     col = "avg_reward_per_topic_slot"  # <-- IMPORTANT
+#
+#     for x, y in _all_seed_curves(single_ll_dfs, col):
+#         plt.plot(x, y, alpha=0.15, linewidth=1.0)
+#     for x, y in _all_seed_curves(multi_dfs, col):
+#         plt.plot(x, y, alpha=0.15, linewidth=1.0)
+#
+#     xs, ys = _mean_curve(single_ll_dfs, col)
+#     xm, ym = _mean_curve(multi_dfs, col)
+#
+#     if xs is not None: plt.plot(xs, _rolling_mean(ys, SMOOTH_W), linewidth=2.5, label="HRL single (Avg per topic-slot)")
+#     if xm is not None: plt.plot(xm, _rolling_mean(ym, SMOOTH_W), linewidth=2.5, label="HRL multi (Avg per topic-slot)")
+#
+#     plt.xlabel("Training Episode")
+#     plt.ylabel("Average Reward over all agents (topic slots)")
+#     plt.tight_layout()
+#     plt.legend()
+#     plt.show()
 
 if __name__ == "__main__":
     plot_fig5_reward_per_episode()

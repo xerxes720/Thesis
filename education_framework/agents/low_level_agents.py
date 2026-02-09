@@ -68,7 +68,12 @@ class LowLevelAgentConfig:
 
     cka_layers: Tuple[str, ...] = ("h1", "h2")
     # cka_probe_n: int = 64
-    cka_power: float = 1.0 # keep simple; optional
+    cka_power: float = 1.0  # keep simple; optional
+
+    # --- Experience sharing stability knobs ---
+    share_max_weight: float = 0.60   # cap peer sample weight to prevent over-trust
+    share_weight_ema: float = 0.90   # EMA smoothing for peer weights (0 disables)
+
     # shared_loss_weight: float = 1.0  # base weight multiplier for shared samples
 
     # --- Experience sharing speed controls ---
@@ -222,32 +227,68 @@ class DQNLowLevelAgent:
         # self.share_ref_net: Optional[QNetwork] = None
 
     def _get_peer_weight(self, peer: "DQNLowLevelAgent", probe_states_np: np.ndarray) -> float:
-        # mutual: always 1.0
+        """
+        Returns a stable peer weight in [0, share_max_weight].
+
+        - mutual: always 1.0 (binary sharing baseline)
+        - weighted_cka: CKA-based similarity with:
+            * recompute throttling (cka_every_updates)
+            * thresholding (share_similarity_threshold)
+            * power mapping (cka_power)
+            * EMA smoothing (share_weight_ema)
+            * hard cap (share_max_weight)
+        """
         mode = str(getattr(self.cfg, "share_mode", "off"))
         if mode == "mutual":
             return 1.0
 
-        # weighted_cka: throttle recomputation
         peer_id = id(peer)
+
         every = int(getattr(self.cfg, "cka_every_updates", 50))
-        power = float(getattr(self.cfg, "cka_power", 1.0))
+
+        tau = float(getattr(self.cfg, "share_similarity_threshold", 0.75))
+        tau = max(0.0, min(0.999, tau))
+
+        power = float(getattr(self.cfg, "cka_power", 4.0))
+
+        w_cap = float(getattr(self.cfg, "share_max_weight", 0.60))
+        w_cap = max(0.0, min(1.0, w_cap))
+
+        ema = float(getattr(self.cfg, "share_weight_ema", 0.90))
+        ema = max(0.0, min(0.999, ema))
+
         layers = tuple(getattr(self.cfg, "cka_layers", ("h1", "h2")))
 
         cached = self._cka_cache.get(peer_id, None)
         if cached is not None:
-            last_u, w = cached
+            last_u, w_cached = cached
             if (self.num_updates - last_u) < every:
-                return float(w)
+                return float(w_cached)
+        else:
+            w_cached = 0.0
 
-        # compute CKA on a small probe
         with torch.no_grad():
             q_t = torch.from_numpy(probe_states_np).to(self.device)
             sim = float(avg_layer_cka(self.policy_net, peer.policy_net, q_t, layers))
         sim = max(0.0, min(1.0, sim))
-        w = float(sim ** power)
 
-        self._cka_cache[peer_id] = (int(self.num_updates), w)
-        return w
+        # threshold + normalize [tau, 1] -> [0, 1]
+        if sim < tau:
+            w_new = 0.0
+        else:
+            sim01 = (sim - tau) / max(1e-6, (1.0 - tau))
+            w_new = float(sim01 ** power)
+
+        # cap to prevent "over-trusting" any single peer
+        w_new = min(float(w_new), float(w_cap))
+
+        # smooth to remove spikes
+        if ema > 0.0:
+            w_new = float(ema * float(w_cached) + (1.0 - ema) * float(w_new))
+
+        self._cka_cache[peer_id] = (int(self.num_updates), float(w_new))
+        return float(w_new)
+
 
 
     # def set_share_ref_net(self, net: Optional[QNetwork]) -> None:
@@ -397,6 +438,12 @@ class DQNLowLevelAgent:
             w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
+        # stop sharing after a given update (avoids harming late-stage specialists)
+        if int(self.num_updates) >= int(getattr(self.cfg, "share_stop_updates", 10 ** 9)):
+            s, a, r, s2, d = self.replay.sample(B)
+            w = np.ones((B,), dtype=np.float32)
+            return s, a, r, s2, d, w
+
         peers = list(getattr(self, "_peers", []) or [])
         if len(peers) == 0:
             s, a, r, s2, d = self.replay.sample(B)
@@ -453,31 +500,23 @@ class DQNLowLevelAgent:
             chosen = eligible[:kmax]
             scored = [(1.0, p) for p in chosen]
         else:
-            cka_layers = tuple(getattr(self.cfg, "cka_layers", ("h1", "h2")))
-            raw_tau = float(getattr(self.cfg, "share_similarity_threshold", 0.75))
-            raw_tau = max(0.0, min(0.999, raw_tau))
-            power = float(getattr(self.cfg, "cka_power", 4.0))
+            # Build ONE probe batch per update and reuse across peers (reduces noise/spikes)
+            probe_n = int(getattr(self.cfg, "cka_probe_n", 64))
+            probe_n = max(8, min(probe_n, max(8, s.shape[0])))
+
+            # probe on SELF distribution (random subset avoids bias to early rows)
+            if isinstance(s, np.ndarray) and s.shape[0] >= probe_n:
+                idxs = np.random.randint(0, s.shape[0], size=probe_n)
+                probe_states = s[idxs]
+            else:
+                probe_states, *_ = self.replay.sample(probe_n)
+
+            probe_states_np = np.ascontiguousarray(probe_states, dtype=np.float32)
 
             for p in eligible:
-                probe_n = int(getattr(self.cfg, "cka_probe_n", 64))
-                probe_n = max(8, min(probe_n, B))
-
-                # probe on SELF distribution
-                if isinstance(s, np.ndarray) and s.shape[0] >= probe_n:
-                    probe_states = s[:probe_n]
-                else:
-                    probe_states, *_ = self.replay.sample(probe_n)
-
-                q_np = np.ascontiguousarray(probe_states, dtype=np.float32)
-                q_t = torch.from_numpy(q_np).to(self.device)
-
-                sim = float(avg_layer_cka(self.policy_net, p.policy_net, q_t, cka_layers))
-                sim = max(0.0, min(1.0, sim))
-                if sim < raw_tau:
+                sim_w = float(self._get_peer_weight(p, probe_states_np))
+                if sim_w <= 0.0:
                     continue
-
-                sim01 = (sim - raw_tau) / max(1e-6, (1.0 - raw_tau))  # [tau,1] -> [0,1]
-                sim_w = float(sim01 ** power)
                 scored.append((sim_w, p))
 
             scored.sort(key=lambda x: x[0], reverse=True)
@@ -497,7 +536,7 @@ class DQNLowLevelAgent:
 
         # ----- allocate share_B across selected peers -----
         self._share_attempts += 1
-        self._share_eligible_peers_sum += len(peers)
+        self._share_eligible_peers_sum += len(eligible)
 
         per_peer = max(1, share_B // len(scored))
         remaining = share_B

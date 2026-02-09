@@ -459,6 +459,29 @@ def train_bundle_from_kdd_csv(
             int(LowLevelAction.TUTEE_FIX),
         ):
             topic_action_mean[k][a_tutee] = 0.0
+
+    # --- NEW: per-topic per-action gain multipliers (data-driven) ---
+    # Stable normalization: use relative advantages, not raw std (avoids exploding when variance is tiny).
+    topic_tutor_action_gain = np.ones((cfg.n_topics, 5), dtype=np.float32)
+
+    G = 0.15  # strength (0.10..0.20 recommended)
+    LO, HI = 0.85, 1.15
+
+    for k in range(cfg.n_topics):
+        means = []
+        for a in range(5):
+            vals = [dm for dm, aa in zip(delta_m[k], act_id[k]) if aa == a]
+            means.append(float(np.mean(vals)) if vals else float(topic_action_mean.get(k, {}).get(a, 0.0)))
+
+        mu = float(np.mean(means))
+        adv = np.asarray([m - mu for m in means], dtype=np.float32)
+        denom = float(np.max(np.abs(adv))) + 1e-8  # scale by max deviation
+        rel = adv / denom  # in [-1,1]
+        gains = 1.0 + G * rel
+        gains = np.clip(gains, LO, HI)
+        topic_tutor_action_gain[k, :] = gains
+
+    print(topic_tutor_action_gain.shape)
     for k in range(cfg.n_topics):
         # NOTE: we no longer compute any tutee outcome tables from the dataset.
         Xs = np.asarray(X_state[k], dtype=np.float32)
@@ -672,6 +695,8 @@ def train_bundle_from_kdd_csv(
         topic_beta_very_good_mult=topic_beta_very_good_mult,
         topic_beta_bad_mult=topic_beta_bad_mult,
         topic_beta_very_bad_mult=topic_beta_very_bad_mult,
+        topic_tutor_action_gain=topic_tutor_action_gain,  # <-- add this
+
     )
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)

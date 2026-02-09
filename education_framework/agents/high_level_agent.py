@@ -43,7 +43,7 @@ class HighLevelAgentConfig:
     batch_size: int = 256
     min_replay_size: int = 1_000
 
-    train_every_steps: int = 50
+    train_every_steps: int = 100
     target_update_steps: int = 5 * train_every_steps
 
     # for numerical stability

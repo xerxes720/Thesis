@@ -321,6 +321,9 @@ class KDDModelBundle:
     topic_beta_bad_mult: Optional[np.ndarray] = None  # shape (n_topics,)
     topic_beta_very_bad_mult: Optional[np.ndarray] = None  # shape (n_topics,)
 
+    topic_tutor_action_gain: Optional[np.ndarray] = None
+
+
 
 # ----------------------------
 # Learner simulator
@@ -345,8 +348,19 @@ class KDDLearnerConfig:
 
     from dataclasses import field
     topic_cluster_ids: List[int] = field(default_factory=lambda: [0, 0, 0, 1, 1, 2, 2])
-    topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
-    # topic_difficulty: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.00, 1.0, 1.0, 1.0, 1.0])
+    # topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
+    topic_difficulty: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.00, 1.0, 1.0, 1.0, 1.0])
+    # --- Action-effect heterogeneity (makes per-topic specialists actually useful) ---
+    # Multipliers applied to the mastery-update scale by (topic_cluster, tutor_action_id).
+    # tutor_action_id order matches LowLevelAction.TUTOR_*:
+    #   [quiz, hint, worked_example, remediation, review]
+    # Keep values near 1.0 (e.g., 0.85..1.15) to stay stable.
+    enable_action_heterogeneity: bool = False
+    cluster_action_gains: List[List[float]] = field(default_factory=lambda: [
+        [1.15, 1.05, 0.95, 0.90, 0.95],  # cluster 0: retrieval/hint-heavy
+        [0.95, 1.00, 1.15, 1.05, 0.95],  # cluster 1: example/remediation-heavy
+        [0.95, 0.95, 0.90, 1.15, 1.10],  # cluster 2: remediation/review-heavy
+    ])
 
     # --- tutee (protégé / learning-by-teaching) simulation ---
     # Conservative, bounded mastery bonus with explicit cost.
@@ -463,12 +477,21 @@ class KDDLearnerModel:
 
         return self.state.copy()
 
+    # def is_done(self) -> bool:
+    #     s = self.state
+    #     for k in range(self.cfg.n_topics):
+    #         if not (float(s.mastery[k]) >= self._topic_threshold(k) and int(s.opp[k]) >= int(self.cfg.opp_min)):
+    #             return False
+    #     return True
     def is_done(self) -> bool:
         s = self.state
-        for k in range(self.cfg.n_topics):
-            if not (float(s.mastery[k]) >= self._topic_threshold(k) and int(s.opp[k]) >= int(self.cfg.opp_min)):
-                return False
-        return True
+        complete = (s.mastery >= self.cfg.mastery_threshold) & (s.opp >= self.cfg.opp_min)
+        return bool(np.all(complete))
+
+        # for k in range(self.cfg.n_topics):
+        #     if not (float(s.mastery[k]) >= self._topic_threshold(k) and int(s.opp[k]) >= int(self.cfg.opp_min)):
+        #         return False
+        # return True
 
     def is_topic_complete(self, topic_id: int) -> bool:
         s = self.state
@@ -503,6 +526,36 @@ class KDDLearnerModel:
             m2 = m - eff_forget * float(dt) * max(0.0, m - float(cfg.forget_floor))
             s.mastery[k] = _clip01(m2)
 
+    def _tutor_action_gain(self, topic_id: int, action_id: int) -> float:
+        """
+        Returns an action-effect multiplier for tutor actions (0..4), based on topic cluster.
+        For tutee actions (>=5) returns 1.0.
+        """
+        cfg = self.cfg
+        if not getattr(cfg, "enable_action_heterogeneity", False):
+            return 1.0
+
+        # only tutor actions 0..4
+        if action_id >= 5:
+            return 1.0
+
+        clusters = getattr(cfg, "topic_cluster_ids", None)
+        gains = getattr(cfg, "cluster_action_gains", None)
+        if not clusters or not gains:
+            return 1.0
+
+        if topic_id < 0 or topic_id >= len(clusters):
+            return 1.0
+
+        cid = int(clusters[topic_id])
+        cid = max(0, min(cid, len(gains) - 1))
+
+        vec = gains[cid]
+        if not vec or action_id < 0 or action_id >= len(vec):
+            return 1.0
+
+        return float(vec[action_id])
+
     def _topic_scalar(self, arr: Optional[List[float]], topic_id: int, default: float) -> float:
         if not arr:
             return float(default)
@@ -529,6 +582,18 @@ class KDDLearnerModel:
             return float(arr[int(topic_id)])
         except Exception:
             return 1.0
+
+    def _tutor_action_gain(self, topic_id: int, action_id: int) -> float:
+        if self.bundle is None:
+            return 1.0
+        g = getattr(self.bundle, "topic_tutor_action_gain", None)
+        if g is None:
+            return 1.0
+        if action_id < 0 or action_id >= 5:
+            return 1.0
+        if topic_id < 0 or topic_id >= g.shape[0]:
+            return 1.0
+        return float(g[topic_id, action_id])
 
     # ---------- feature engineering ----------
     def _state_features(self, s: LearnerState, topic_id: int) -> np.ndarray:
@@ -655,7 +720,11 @@ class KDDLearnerModel:
 
         s.mastery[topic_id] = _clip01(m2)
 
-    def _apply_mastery_quality_update_with_boost(self, topic_id: int, quality: str, boost: float) -> None:
+    from typing import Optional
+
+    def _apply_mastery_quality_update_with_boost(self, topic_id: int, quality: str, boost: float,
+                                                 action_id: Optional[int] = None) -> None:
+
         s = self.state
         m = float(s.mastery[topic_id])
 
@@ -672,7 +741,12 @@ class KDDLearnerModel:
         # Harder topic => smaller effective update
         diff_scale = 1.0 / max(0.6, diff)
 
+        # action_scale = 1.0
+        # if action_id is not None:
+        #     action_scale = self._tutor_action_gain(topic_id, int(action_id))
         scale = (1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)) * diff_scale
+        if action_id is not None:
+            scale *= self._tutor_action_gain(topic_id, int(action_id))
 
         if quality == "very_good":
             beta = float(params.beta_very_good) * self._beta_mult("topic_beta_very_good_mult", topic_id)
@@ -1044,9 +1118,10 @@ class KDDLearnerModel:
 
 
 
+
         else:
             boost = float(s.teach_boost[topic_id])
-            self._apply_mastery_quality_update_with_boost(topic_id, quality, boost)
+            self._apply_mastery_quality_update_with_boost(topic_id, quality, boost, action_id=int(action_meta.action))
 
         # If topic was already completed earlier this episode, don’t allow mastery to drop
         if bool(self._topic_completed[topic_id]):

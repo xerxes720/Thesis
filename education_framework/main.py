@@ -227,6 +227,7 @@ class KDDHierEnv:
         base_reward_local = float(info.get("reward_local", base_reward_global))
         step_cost = float(info.get("step_cost", 1))
 
+        self.lambda_step = 0
         reward_hl = base_reward_global - self.lambda_step * step_cost
         reward_ll = base_reward_local - self.lambda_step * step_cost
 
@@ -306,12 +307,12 @@ def create_agents(
     # --- Fairness: equalize LL update budget across modes ---
     # Base config assumed tuned for "multi" specialists. For a single shared LL, scale down update frequency
     # so it doesn't get an implicit sample-efficiency advantage.
-    ll_cfg.train_every_steps = 20
+    ll_cfg.train_every_steps = 80
     ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # paper-ish
-    # if ll_mode == "single":
-    #     n = max(1, num_topics)
-    #     ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
-    #     ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
+    if ll_mode == "single":
+        n = max(1, num_topics)
+        ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
+        ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
         # ll_cfg.buffer_size = max(5_000, int(ll_cfg.buffer_size) // max(1, num_topics))
         # ll_cfg.min_replay_size = int(ll_cfg.min_replay_size) * max(1, num_topics)
 
@@ -348,16 +349,19 @@ def create_agents(
             ll_cfg.share_stop_updates = 700  # STOP mutual later to avoid harming specialists
             ll_cfg.min_peer_replay_size = 300
 
+
         elif ll_cfg.share_mode == "weighted_cka":
-            # More selective + longer lasting than mutual
             ll_cfg.share_frac = 0.10
-            ll_cfg.max_peers_per_update = 1
+            ll_cfg.max_peers_per_update = 2
             ll_cfg.cka_probe_n = 64
             ll_cfg.share_similarity_threshold = 0.75
             ll_cfg.cka_power = 4.0
+            ll_cfg.cka_every_updates = 100  # reduce noise + compute cost
+            ll_cfg.share_max_weight = 0.60  # cap peer influence (prevents over-trust spikes)
+            ll_cfg.share_weight_ema = 0.90  # smooth weights over time (stability)
             ll_cfg.share_warmup_updates = 300
-            ll_cfg.share_stop_updates = 10 ** 9  # effectively "no stop"
-            ll_cfg.min_peer_replay_size = 300
+            ll_cfg.share_stop_updates = 1500  # stop late to avoid harming specialists
+            ll_cfg.min_peer_replay_size = 1000  # only share from mature peers
 
     # --- build tutor agents: single vs multi ---
     if ll_mode == "single":
@@ -1556,6 +1560,19 @@ def main():
         rows = []
 
         for episode in tqdm(range(1, args.episodes + 1), desc=f"Training(seed={seed})"):
+            # epsilon schedule
+            progress = min(1.0, episode / eps_decay_episodes)
+            eps = eps_start + (eps_end - eps_start) * progress
+            eps = max(0.01, eps)
+            # eps = max(0.02, eps_start + (eps_end - eps_start) * progress)
+            if args.arch == "hrl":
+                high_level_agent.set_epsilon(eps)
+                for ag in tutor_agents:
+                    ag.set_epsilon(eps)
+                if tutee_agent is not None:
+                    tutee_agent.set_epsilon(max(0.015, eps * 0.75))
+            else:
+                flat_agent.set_epsilon(eps)
             # ---- reset per-episode sharing counters (MUST be before the episode runs) ----
             if args.arch == "hrl":
                 for ag in tutor_agents:
@@ -1763,19 +1780,7 @@ def main():
                     if use_tutee and tutee_agent is not None:
                         window_tutee_action_counts = {a: 0 for a in tutee_action_names}
 
-                # epsilon schedule
-                progress = min(1.0, episode / eps_decay_episodes)
-                eps = eps_start + (eps_end - eps_start) * progress
-                eps = max(0.01, eps)
-                # eps = max(0.02, eps_start + (eps_end - eps_start) * progress)
-                if args.arch == "hrl":
-                    high_level_agent.set_epsilon(eps)
-                    for ag in tutor_agents:
-                        ag.set_epsilon(eps)
-                    if tutee_agent is not None:
-                        tutee_agent.set_epsilon(max(0.015, eps * 0.75))
-                else:
-                    flat_agent.set_epsilon(eps)
+
 
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
