@@ -510,28 +510,28 @@ def summarize_obs(obs, num_topics: int) -> np.ndarray:
 #     return np.concatenate(blocks + [tail_vec], axis=0)
 
 
+# --- in main.py ---
+
 class FlatAgent:
     """
-    Single-agent RL baseline: one DQN chooses (mode, topic_id, ll_action_str) directly.
-    No hierarchical split.
+    True flat baseline:
+      One DQN chooses (mode, topic_id, ll_action_str) each step.
     """
 
-    def __init__(self, cfg: LowLevelAgentConfig, num_topics: int, use_tutee: bool):
+    def __init__(self, cfg: LowLevelAgentConfig, num_topics: int):
         self.num_topics = int(num_topics)
-        self.use_tutee = bool(use_tutee)
 
         tutor_actions = build_tutor_actions()
-        self.actions = [("tutor", a) for a in tutor_actions]
-
-        if self.use_tutee:
-            tutee_actions = build_tutee_actions()
-            self.actions += [("tutee", a) for a in tutee_actions]
+        self.actions = []
+        for t in range(self.num_topics):
+            for a in tutor_actions:
+                self.actions.append(("tutor", t, a))
 
         self.agent = DQNLowLevelAgent(cfg, actions=[self._encode(x) for x in self.actions])
 
     def _encode(self, tpl):
-        mode, a = tpl
-        return f"{mode}|{a}"
+        mode, topic_id, a = tpl
+        return f"{mode}|topic={topic_id}|{a}"
 
     def decode_action(self, idx: int):
         return self.actions[int(idx)]
@@ -542,11 +542,33 @@ class FlatAgent:
     def select_action(self, obs):
         return self.agent.select_action(obs)
 
-    def update(self, obs, a, r, obs2, done):
-        self.agent.update(obs, a, r, obs2, done)
+    def update(self, obs, a_idx, r, next_obs, done):
+        self.agent.update(obs, a_idx, r, next_obs, done)
 
-    def get_action_meanings(self):
-        return self.agent.get_action_meanings()
+
+def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
+    obs = env.reset()
+    done = False
+    total_reward = 0.0
+    steps = 0
+
+    while not done:
+        a_idx = flat_agent.select_action(obs)
+        mode, topic_id, ll_action_str = flat_agent.decode_action(a_idx)
+
+        if mode == "tutee":
+            next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
+        else:
+            next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
+
+        if train:
+            flat_agent.update(obs, a_idx, reward, next_obs, done)
+
+        total_reward += float(reward)
+        steps += float(info.get("step_cost", 1.0))
+        obs = next_obs
+
+    return total_reward, steps, info
 
 
 # ----------------------------
@@ -755,43 +777,43 @@ def _sample_topic_for_case2(env) -> int:
     return int(np.random.choice(candidates))
 
 
-def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
-    obs = env.reset()
-    done = False
-    total_reward = 0.0
-    steps = 0
-
-    topic_id = _sample_topic_for_case2(env)
-
-    while not done:
-        obs_t = add_topic(obs, topic_id)  # topic is part of state (OK)
-        a_idx = flat_agent.select_action(obs_t)
-        mode, ll_action_str = flat_agent.decode_action(a_idx)
-
-        if mode == "tutee":
-            next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
-        else:
-            next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
-
-        # keep next state on the same topic for a valid transition
-        next_topic_id = topic_id
-
-        # optionally switch topics only sometimes (reduces handicap, still realistic)
-        # switch if topic complete OR with small probability
-        if env.model.is_topic_complete(topic_id) or random.random() < 0.10:
-            next_topic_id = _sample_topic_for_case2(env)
-
-        next_obs_t = add_topic(next_obs, next_topic_id)
-
-        if train:
-            flat_agent.update(obs_t, a_idx, reward, next_obs_t, done)
-
-        total_reward += float(reward)
-        steps += float(info.get("step_cost", 1))
-        obs = next_obs
-        topic_id = next_topic_id
-
-    return total_reward, steps
+# def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
+#     obs = env.reset()
+#     done = False
+#     total_reward = 0.0
+#     steps = 0
+#
+#     topic_id = _sample_topic_for_case2(env)
+#
+#     while not done:
+#         obs_t = add_topic(obs, topic_id)  # topic is part of state (OK)
+#         a_idx = flat_agent.select_action(obs_t)
+#         mode, ll_action_str = flat_agent.decode_action(a_idx)
+#
+#         if mode == "tutee":
+#             next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
+#         else:
+#             next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
+#
+#         # keep next state on the same topic for a valid transition
+#         next_topic_id = topic_id
+#
+#         # optionally switch topics only sometimes (reduces handicap, still realistic)
+#         # switch if topic complete OR with small probability
+#         if env.model.is_topic_complete(topic_id) or random.random() < 0.10:
+#             next_topic_id = _sample_topic_for_case2(env)
+#
+#         next_obs_t = add_topic(next_obs, next_topic_id)
+#
+#         if train:
+#             flat_agent.update(obs_t, a_idx, reward, next_obs_t, done)
+#
+#         total_reward += float(reward)
+#         steps += float(info.get("step_cost", 1))
+#         obs = next_obs
+#         topic_id = next_topic_id
+#
+#     return total_reward, steps
 
 
 # ----------------------------
@@ -1343,6 +1365,7 @@ def main():
         learner_cfg = KDDLearnerConfig(n_topics=bundle.n_topics)
         if tutee_bonus_base is not None:
             learner_cfg.tutee_bonus_base = float(tutee_bonus_base)
+            learner_cfg.tutee_reward_lambda = 0.0
 
         set_global_seed(seed)
 
@@ -1379,7 +1402,9 @@ def main():
             ll_cfg.device = "cpu"
             ll_cfg.experience_sharing = False
             ll_cfg.share_mode = "off"
-            flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics, use_tutee=use_tutee)
+            ll_cfg.min_replay_size = 1000
+
+            flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics)
 
             high_level_agent, tutor_agents, tutee_agent = None, [], None
 
@@ -1451,7 +1476,7 @@ def main():
                 for ag in tutor_agents:
                     ag.set_epsilon(eps)
                 if tutee_agent is not None:
-                    tutee_agent.set_epsilon(max(0.015, eps * 0.75))
+                    tutee_agent.set_epsilon(eps)
             else:
                 flat_agent.set_epsilon(eps)
             # ---- reset per-episode sharing counters (MUST be before the episode runs) ----
@@ -1480,7 +1505,7 @@ def main():
                 ) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
                 flat_agent_reward = 0.0
             else:
-                total_reward, steps = run_episode_flat(env, flat_agent, train=True)
+                total_reward, steps, info = run_episode_flat(env, flat_agent, train=True)
                 # fill HRL-only stats with zeros/empties for logging consistency
                 topic_counts = [0 for _ in range(num_topics)]
                 tutor_action_counts = {}

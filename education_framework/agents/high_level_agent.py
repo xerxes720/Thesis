@@ -50,6 +50,9 @@ class HighLevelAgentConfig:
     max_grad_norm: float = 10.0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"  # change to "cuda" if you want
 
+    tutee_ready_min: float = 0.40
+    tutee_cap_high: float = 0.95
+
 
 class ReplayBuffer:
     def __init__(self, capacity: int):
@@ -137,10 +140,23 @@ class HighLevelAgent:
 
         with torch.no_grad():
             obs_np = np.asarray(obs, dtype=np.float32)
-            x = torch.from_numpy(obs_np).unsqueeze(0)  # CPU
-            q = self.policy_net(x)
+            x = torch.from_numpy(obs_np).unsqueeze(0)
+            q = self.policy_net(x).squeeze(0)
 
-            return int(q.argmax(dim=1).item())
+            if self.cfg.use_tutee:
+                T = self.cfg.num_topics
+                mastery = obs_np[0:T]
+
+                # topic_complete block index: 6*T .. 7*T (per your env.get_observation)
+                topic_complete = obs_np[6 * T:7 * T]
+
+                q = q.clone()
+                for t in range(T):
+                    if (topic_complete[t] > 0.5) or (mastery[t] < self.cfg.tutee_ready_min) or (
+                            mastery[t] > self.cfg.tutee_cap_high):
+                        q[T + t] = -1e9  # mask tutee_topic_t
+
+            return int(torch.argmax(q).item())
 
 
     def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool) -> None:

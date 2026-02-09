@@ -55,12 +55,10 @@ class LowLevelAgentConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     # --- tutee readiness thresholds (copied from KDDLearnerConfig when building tutee agent) ---
-    tutee_ready_quiz: float = 0.50
-    tutee_ready_explain: float = 0.60
-    tutee_ready_fix: float = 0.65
-
-    # optional: penalty magnitude for "not ready"
-    tutee_not_ready_penalty: float = 0.5
+    tutee_ready_quiz: float = 0.40
+    tutee_ready_explain: float = 0.50
+    tutee_ready_fix: float = 0.55
+    tutee_not_ready_penalty: float = 0.0  # no longer used
 
     # share_frac: float = 0.2          # 0.3–0.7 works; start 0.5
     share_warmup_updates: int = 300   # same idea as you already use :contentReference[oaicite:2]{index=2}
@@ -620,12 +618,11 @@ class TuteeLowLevelAgent(DQNLowLevelAgent):
         super().__init__(cfg, actions=build_tutee_actions())
 
     def select_action(self, obs: List[float]) -> int:
-        self._ensure_networks(input_dim=len(obs))  # should be 9
+        self._ensure_networks(input_dim=len(obs))
 
         if random.random() < self.cfg.epsilon:
             return random.randrange(self.num_actions)
 
-        # obs = [mastery_k, cfa_k, hint_k, time_k, inc_k, opp_k, complete_k, global_mastery, steps_norm]
         m = float(obs[0])
 
         with torch.no_grad():
@@ -633,14 +630,14 @@ class TuteeLowLevelAgent(DQNLowLevelAgent):
             q = self.policy_net(x).squeeze(0).detach().cpu().numpy()
 
         idx_quiz, idx_explain, idx_fix = 0, 1, 2
-        pen = float(getattr(self.cfg, "tutee_not_ready_penalty", 0.5))
 
+        # hard mask not-ready actions
         if m < self.cfg.tutee_ready_quiz:
-            q[idx_quiz] -= pen
+            q[idx_quiz] = -1e9
         if m < self.cfg.tutee_ready_explain:
-            q[idx_explain] -= pen
+            q[idx_explain] = -1e9
         if m < self.cfg.tutee_ready_fix:
-            q[idx_fix] -= pen
+            q[idx_fix] = -1e9
 
         return int(q.argmax())
 

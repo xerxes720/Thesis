@@ -390,7 +390,7 @@ class KDDLearnerConfig:
     tutee_ready_fix: float = 0.55
     tutee_cap_high: float = 0.98
 
-    tutee_reward_lambda: float = 0.1  # start at 0, test 0.1 later
+    tutee_reward_lambda: float = 0.0  # start at 0, test 0.1 later
 
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02
