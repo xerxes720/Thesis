@@ -31,26 +31,26 @@ try {
         Write-Host "Running SEED=$seed"
         Write-Host "=============================="
 
+        python -m education_framework.main `
+          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+          --arch flat --ll_mode single --share_mode off `
+          --seed $seed --run_tag "flat_single"
+#
 #        python -m education_framework.main `
 #          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-#          --arch flat --ll_mode single --share_mode off `
-#          --seed $seed --run_tag "flat_single"
-#
-        python -m education_framework.main `
-          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --arch hrl --ll_mode single --share_mode off `
-          --seed $seed --run_tag "single_ll"
-#
-        python -m education_framework.main `
-          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --share_mode off `
-          --seed $seed --run_tag "multi_no_es"
+#          --arch hrl --ll_mode single --share_mode off `
+#          --seed $seed --run_tag "single_ll"
 ##
-         python -m education_framework.main `
-           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-           --experience_sharing `
-           --seed $seed --run_tag "multi_weighted_cka"
+#        python -m education_framework.main `
+#          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#          --share_mode off `
+#          --seed $seed --run_tag "multi_no_es"
 ##
+#         python -m education_framework.main `
+#           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#           --experience_sharing `
+#           --seed $seed --run_tag "multi_weighted_cka"
+###
 #        python -m education_framework.main `
 #          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
 #          --experience_sharing --share_mode mutual `

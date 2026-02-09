@@ -35,6 +35,7 @@ import joblib
 import numpy as np
 import torch
 from tqdm import tqdm
+from collections import defaultdict
 
 # --- Ensure imports work whether you run:
 #   python -m education_framework.main
@@ -44,8 +45,52 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-
 # RUN WITH python -m education_framework.main --bundle education_framework/data/kdd_bundle.joblib --episodes 2000 --max_steps 300
+
+import numpy as np
+import torch
+
+
+def _ll_pairwise_action_agreement(
+        tutor_agents: List["DQNLowLevelAgent"],
+        batch: int = 256,
+) -> float:
+    """
+    Measures how similar tutor LL agents are by comparing greedy actions on states
+    sampled from their replay buffers. Returns mean agreement over all i<j pairs.
+    - If only 1 agent exists or not enough replay, returns NaN.
+    """
+    if len(tutor_agents) <= 1:
+        return float("nan")
+
+    # Ensure networks exist
+    for ag in tutor_agents:
+        if getattr(ag, "policy_net", None) is None:
+            return float("nan")
+
+    # Collect pairwise agreements
+    agreements: List[float] = []
+    with torch.no_grad():
+        for i in range(len(tutor_agents)):
+            ag_i = tutor_agents[i]
+            if len(getattr(ag_i.replay, "buffer", [])) < max(50, batch):
+                continue
+            # sample states from agent i replay; ignore the rest of tuple
+            s_i, _, _, _, _ = ag_i.replay.sample(batch)
+            s_i_t = torch.tensor(s_i, dtype=torch.float32, device=ag_i.device)
+
+            q_i = ag_i.policy_net(s_i_t)
+            a_i = torch.argmax(q_i, dim=1)
+
+            for j in range(i + 1, len(tutor_agents)):
+                ag_j = tutor_agents[j]
+                q_j = ag_j.policy_net(s_i_t.to(ag_j.device))
+                a_j = torch.argmax(q_j, dim=1).to(a_i.device)
+                agreements.append(float((a_i == a_j).float().mean().item()))
+
+    if len(agreements) == 0:
+        return float("nan")
+    return float(np.mean(agreements))
 
 
 def _safe_mean(x):
@@ -227,7 +272,7 @@ class KDDHierEnv:
         base_reward_local = float(info.get("reward_local", base_reward_global))
         step_cost = float(info.get("step_cost", 1))
 
-        self.lambda_step = 0
+        self.lambda_step = 0.03
         reward_hl = base_reward_global - self.lambda_step * step_cost
         reward_ll = base_reward_local - self.lambda_step * step_cost
 
@@ -295,7 +340,7 @@ def create_agents(
         ll_mode: str = "multi",
         experience_sharing: bool = False,
         share_mode: str = "weighted_cka",
-        topic_cluster_ids=None,   # NEW
+        topic_cluster_ids=None,  # NEW
 ):
     hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
     hl_cfg.device = "cpu"
@@ -307,7 +352,7 @@ def create_agents(
     # --- Fairness: equalize LL update budget across modes ---
     # Base config assumed tuned for "multi" specialists. For a single shared LL, scale down update frequency
     # so it doesn't get an implicit sample-efficiency advantage.
-    ll_cfg.train_every_steps = 80
+    ll_cfg.train_every_steps = 20
     ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # paper-ish
     if ll_mode == "single":
         n = max(1, num_topics)
@@ -514,6 +559,8 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
     total_reward = 0.0
     steps = 0
 
+    # Track HL topic streaks (diagnose "stuck on one topic")
+    hl_topic_seq: List[int] = []
     step_topic_count = {}
     tutor_hl_count = 0
     tutee_hl_count = 0
@@ -535,6 +582,10 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
     for a in tutor_action_names:
         tutor_action_counts[a] = 0
 
+    # NEW: per-topic tutor action counts (even in single-LL; topic_id still exists at HL)
+    topic_tutor_action_counts: List[Dict[str, int]] = [
+        {a: 0 for a in tutor_action_names} for _ in range(num_topics)]
+
     if tutee_agent is not None:
         tutee_action_names = tutee_agent.get_action_meanings()
         for a in tutee_action_names:
@@ -555,6 +606,8 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             else:
                 tutor_agent = tutor_agents[topic_id]  # per-topic agent
 
+            # Record topic choice for streak stats
+            hl_topic_seq.append(int(topic_id))
             # Always provide the active-topic-first view.
             # - For multi-LL: keeps “in-topic” semantics stable
             # - For single-LL: avoids giving a raw topic_id while keeping it Markov
@@ -569,6 +622,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             #             ag.set_share_ref_net(ref)
             ll_action_str = tutor_agent.get_action_meanings()[ll_action_idx]
             tutor_action_counts[ll_action_str] += 1
+            topic_tutor_action_counts[int(topic_id)][ll_action_str] += 1
 
             # next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
             next_obs, reward_hl, done, info = env.step_tutor(topic_id, ll_action_str)
@@ -641,17 +695,53 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 
     # env.model.state.teach_boost *= float(env.model.cfg.teach_boost_decay)
 
+    # --- episode-end diagnostics: mastery vector, bottleneck topic, longest HL streak ---
+    # Try common locations; adapt if your env stores mastery elsewhere.
+    mastery_vec = None
+
+    if hasattr(env, "model") and hasattr(env.model, "state") and hasattr(env.model.state, "mastery"):
+        mastery_vec = np.asarray(env.model.state.mastery, dtype=np.float32).copy()
+    else:
+        mastery_vec = np.zeros(int(getattr(env, "num_topics", 0)), dtype=np.float32)
+
+    if mastery_vec.size > 0:
+        bottleneck_topic = int(np.argmin(mastery_vec))
+        bottleneck_mastery = float(mastery_vec[bottleneck_topic])
+    else:
+        bottleneck_topic = -1
+        bottleneck_mastery = float("nan")
+
+    # longest consecutive same-topic streak in hl_topic_seq
+    longest_streak = 0
+
+    if len(hl_topic_seq) > 0:
+        cur = 1
+        longest_streak = 1
+
+        for k in range(1, len(hl_topic_seq)):
+            if hl_topic_seq[k] == hl_topic_seq[k - 1]:
+                cur += 1
+            else:
+                longest_streak = max(longest_streak, cur)
+                cur = 1
+        longest_streak = max(longest_streak, cur)
+
     return (
         total_reward,
         steps,
         topic_counts,
         tutor_action_counts,
+        topic_tutor_action_counts,
         tutee_action_counts,
         tutor_hl_count,
         tutee_hl_count,
         hl_trace,
         ll_rewards,  # NEW
         tutee_reward_total,  # NEW
+        mastery_vec,  # NEW
+        bottleneck_topic,  # NEW
+        bottleneck_mastery,  # NEW
+        longest_streak,
     )
 
 
@@ -703,6 +793,7 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
 
     return total_reward, steps
 
+
 # ----------------------------
 # Policy-collapse diagnostics
 # ----------------------------
@@ -713,6 +804,7 @@ def _entropy_from_counts(counts: Dict[int, int]) -> float:
         return 0.0
     ps = [c / total for c in counts.values() if c > 0]
     return float(-sum(p * math.log(p + 1e-12) for p in ps))
+
 
 def _js_divergence(p: np.ndarray, q: np.ndarray, eps: float = 1e-12) -> float:
     # p, q are probability vectors summing to 1
@@ -725,14 +817,15 @@ def _js_divergence(p: np.ndarray, q: np.ndarray, eps: float = 1e-12) -> float:
     kl_qm = float(np.sum(q * (np.log(q) - np.log(m))))
     return 0.5 * (kl_pm + kl_qm)
 
+
 def _collect_state_bank(
-    env: "KDDHierEnv",
-    high_level_agent: "HighLevelAgent",
-    tutor_agents: List["TutorLowLevelAgent"],
-    tutee_agent: Optional["TuteeLowLevelAgent"],
-    *,
-    per_topic_target: int = 2000,
-    max_episodes: int = 200,
+        env: "KDDHierEnv",
+        high_level_agent: "HighLevelAgent",
+        tutor_agents: List["TutorLowLevelAgent"],
+        tutee_agent: Optional["TuteeLowLevelAgent"],
+        *,
+        per_topic_target: int = 2000,
+        max_episodes: int = 200,
 ) -> Dict[int, List[List[float]]]:
     """
     Collect LL observations actually encountered during eval rollouts.
@@ -795,12 +888,13 @@ def _collect_state_bank(
         if tutee_agent is not None and old_t_eps is not None:
             tutee_agent.set_epsilon(old_t_eps)
 
+
 def _eval_swap_episode(
-    env: "KDDHierEnv",
-    high_level_agent: "HighLevelAgent",
-    tutor_agents: List["TutorLowLevelAgent"],
-    tutee_agent: Optional["TuteeLowLevelAgent"],
-    topic_to_agent: Optional[List[int]],
+        env: "KDDHierEnv",
+        high_level_agent: "HighLevelAgent",
+        tutor_agents: List["TutorLowLevelAgent"],
+        tutee_agent: Optional["TuteeLowLevelAgent"],
+        topic_to_agent: Optional[List[int]],
 ) -> (float, float, int):
     """
     Evaluate 1 episode with optional topic->agent permutation (swap test).
@@ -846,16 +940,17 @@ def _eval_swap_episode(
     completed = 1 if env.model.is_done() else 0
     return float(total_reward), float(steps), int(completed)
 
+
 def run_policy_collapse_diagnostics(
-    env: "KDDHierEnv",
-    high_level_agent: "HighLevelAgent",
-    tutor_agents: List["TutorLowLevelAgent"],
-    tutee_agent: Optional["TuteeLowLevelAgent"],
-    *,
-    state_bank_per_topic: int = 2000,
-    eval_episodes: int = 200,
-    cka_states_per_topic: int = 512,
-    seed: int = 0,
+        env: "KDDHierEnv",
+        high_level_agent: "HighLevelAgent",
+        tutor_agents: List["TutorLowLevelAgent"],
+        tutee_agent: Optional["TuteeLowLevelAgent"],
+        *,
+        state_bank_per_topic: int = 2000,
+        eval_episodes: int = 200,
+        cka_states_per_topic: int = 512,
+        seed: int = 0,
 ) -> None:
     """
     Prints:
@@ -899,7 +994,9 @@ def run_policy_collapse_diagnostics(
             base_rewards, base_steps, base_done = [], [], []
             for _ in range(eval_episodes):
                 r, s, d = _eval_swap_episode(env, high_level_agent, tutor_agents, tutee_agent, topic_to_agent=None)
-                base_rewards.append(r); base_steps.append(s); base_done.append(d)
+                base_rewards.append(r);
+                base_steps.append(s);
+                base_done.append(d)
 
             # random permutation mapping
             perm = list(range(T))
@@ -907,12 +1004,16 @@ def run_policy_collapse_diagnostics(
             swap_rewards, swap_steps, swap_done = [], [], []
             for _ in range(eval_episodes):
                 r, s, d = _eval_swap_episode(env, high_level_agent, tutor_agents, tutee_agent, topic_to_agent=perm)
-                swap_rewards.append(r); swap_steps.append(s); swap_done.append(d)
+                swap_rewards.append(r);
+                swap_steps.append(s);
+                swap_done.append(d)
 
             print("\n[Swap test]")
             print(f"- perm mapping (topic->agent): {perm}")
-            print(f"- baseline: mean_reward={_safe_mean(base_rewards):.4f}  mean_steps={_safe_mean(base_steps):.2f}  completion={_safe_mean(base_done):.3f}")
-            print(f"- swapped : mean_reward={_safe_mean(swap_rewards):.4f}  mean_steps={_safe_mean(swap_steps):.2f}  completion={_safe_mean(swap_done):.3f}")
+            print(
+                f"- baseline: mean_reward={_safe_mean(base_rewards):.4f}  mean_steps={_safe_mean(base_steps):.2f}  completion={_safe_mean(base_done):.3f}")
+            print(
+                f"- swapped : mean_reward={_safe_mean(swap_rewards):.4f}  mean_steps={_safe_mean(swap_steps):.2f}  completion={_safe_mean(swap_done):.3f}")
             print("  Interpretation: if swapped ≈ baseline, agents are interchangeable (little specialization).")
 
         # ----------------------------
@@ -962,7 +1063,8 @@ def run_policy_collapse_diagnostics(
 
             print("\n[Actions] per-topic LL")
             print(f"- mean greedy entropy across topics: {float(np.mean(entropies)):.4f}")
-            print(f"- min/max greedy entropy across topics: {float(np.min(entropies)):.4f} / {float(np.max(entropies)):.4f}")
+            print(
+                f"- min/max greedy entropy across topics: {float(np.min(entropies)):.4f} / {float(np.max(entropies)):.4f}")
             print(f"- mean pairwise JS divergence between agents’ action distributions: {float(np.mean(js_vals)):.6f}")
             print("  Interpretation: very low entropy + JS≈0 => policies collapsed to near-identical behavior.")
 
@@ -997,7 +1099,8 @@ def run_policy_collapse_diagnostics(
                 acts = greedy_actions(tutor_agents[0])
                 # agreement with itself is trivial; report determinism via unique actions
                 print("\n[Agreement] shared-LL")
-                print(f"- unique greedy actions on ref states: {len(set(map(int, acts)))} / {tutor_agents[0].num_actions}")
+                print(
+                    f"- unique greedy actions on ref states: {len(set(map(int, acts)))} / {tutor_agents[0].num_actions}")
             else:
                 acts_list = [greedy_actions(tutor_agents[i]) for i in range(T)]
                 agree_vals = []
@@ -1052,7 +1155,8 @@ def run_policy_collapse_diagnostics(
                     cka_vals.append(cka)
 
                 print("\n[CKA] pairwise avg CKA(h1,h2)")
-                print(f"- mean: {float(np.mean(cka_vals)):.4f}  min/max: {float(np.min(cka_vals)):.4f} / {float(np.max(cka_vals)):.4f}")
+                print(
+                    f"- mean: {float(np.mean(cka_vals)):.4f}  min/max: {float(np.min(cka_vals)):.4f} / {float(np.max(cka_vals)):.4f}")
                 print("  Interpretation: CKA close to 1 => representations collapsed / highly similar.")
 
         print("\n=== End Diagnostics ===\n")
@@ -1141,6 +1245,25 @@ def main():
     )
     ap.add_argument("--diag_policy_collapse", action="store_true", default=False)
 
+    # --- diagnostics (separation debugging) ---
+    ap.add_argument(
+        "--log_ll_per_topic",
+        action="store_true",
+        default=False,
+        help="Print per-topic tutor action distributions (for HRL runs).",
+    )
+    ap.add_argument(
+        "--log_ll_agreement",
+        action="store_true",
+        default=False,
+        help="Print pairwise greedy-action agreement between tutor LL agents (multi-LL only).",
+    )
+    ap.add_argument(
+        "--agreement_batch",
+        type=int,
+        default=256,
+        help="Batch size for LL agreement diagnostic (states sampled from replay).",
+    )
     args = ap.parse_args()
 
     # def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
@@ -1193,257 +1316,6 @@ def main():
         if not s:
             return []
         return [cast_fn(x.strip()) for x in s.split(",") if x.strip()]
-
-    # def _run_training(*, seed: int, use_tutee: bool, tutee_bonus_base: float, out_dir: Path):
-    #     """Run one training job and write per-episode metrics + a compact JSON summary."""
-    #     out_dir.mkdir(parents=True, exist_ok=True)
-    #
-    #     env = KDDHierEnv(
-    #         bundle=bundle,
-    #         cfg=KDDEnvConfig(num_topics=bundle.n_topics, max_steps=args.max_steps, initial_mastery=0.2),
-    #         learner_cfg=KDDLearnerConfig(n_topics=bundle.n_topics, tutee_bonus_base=float(tutee_bonus_base)),
-    #         seed=int(seed),
-    #     )
-    #
-    #     num_topics = env.num_topics
-    #
-    #     if args.arch == "hrl":
-    #         high_level_agent, tutor_agents, tutee_agent = create_agents(
-    #             num_topics=bundle.n_topics,
-    #             use_tutee=use_tutee,
-    #             ll_mode=args.ll_mode,
-    #             experience_sharing=args.experience_sharing,
-    #             share_mode=args.share_mode,
-    #         )
-    #         flat_agent = None
-    #     else:
-    #         # --- flat single-agent RL baseline (no HL/LL decomposition) ---
-    #         ll_cfg = LowLevelAgentConfig(num_topics=bundle.n_topics)
-    #         ll_cfg.device = "cpu"
-    #         ll_cfg.experience_sharing = False
-    #         ll_cfg.share_mode = "off"
-    #         flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics, use_tutee=use_tutee)
-    #
-    #         high_level_agent, tutor_agents, tutee_agent = None, [], None
-    #
-    #     window_rewards: List[float] = []
-    #     window_steps: List[int] = []
-    #
-    #     ep_rewards: List[float] = []
-    #     ep_steps: List[int] = []
-    #     ep_mastery_mean: List[float] = []
-    #     ep_mastery_min: List[float] = []
-    #     ep_completed: List[int] = []
-    #
-    #     eps_start = 0.2
-    #     eps_end = 0.005
-    #     # eps_decay_episodes = max(1, args.episodes)
-    #     eps_decay_episodes = 1200
-    #
-    #     rows = []
-    #     for episode in tqdm(range(1, args.episodes + 1),
-    #                         desc=f"Training(seed={seed}, tutee={use_tutee}, base={tutee_bonus_base})"):
-    #         if args.arch == "hrl":
-    #             (total_reward, steps, topic_counts, tutor_action_counts, tutee_action_counts,
-    #              tutor_hl_count, tutee_hl_count, hl_trace, ll_rewards, tutee_reward_total) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
-    #             flat_agent_reward = 0.0
-    #             for ag in tutor_agents:
-    #                 ag.reset_share_stats()
-    #
-    #         else:
-    #             total_reward, steps = run_episode_flat(env, flat_agent, train=True)
-    #             flat_agent_reward = float(total_reward)
-    #             ll_rewards = [0.0 for _ in range(num_topics)]
-    #             tutee_reward_total = 0.0
-    #             flat_agent.agent.reset_share_stats()
-    #         m_vec = env.model.state.mastery
-    #         m_mean = float(np.mean(m_vec))
-    #         m_min = float(np.min(m_vec))
-    #         completed = 1 if env.model.is_done() else 0
-    #
-    #         # ---- collect sharing diagnostics for this episode ----
-    #         if args.arch == "hrl":
-    #             n_ll_agents = len(tutor_agents)
-    #             share_enabled_eff = int(tutor_agents and tutor_agents[0].cfg.experience_sharing and tutor_agents[0].cfg.share_mode != "off")
-    #             share_mode_eff = tutor_agents[0].cfg.share_mode if tutor_agents else "off"
-    #             stats_list = [ag.pop_share_stats() for ag in tutor_agents]
-    #         else:
-    #             n_ll_agents = 1
-    #             share_enabled_eff = 0
-    #             share_mode_eff = "off"
-    #             stats_list = [flat_agent.agent.pop_share_stats()]
-    #
-    #         share_attempts = sum(s["share_attempts"] for s in stats_list)
-    #         share_peer_samples = sum(s["peer_samples"] for s in stats_list)
-    #         peer_weight_sum = sum(s["peer_weight_sum"] for s in stats_list)
-    #         eligible_peers_sum = sum(s["eligible_peers_sum"] for s in stats_list)
-    #         selected_peers_sum = sum(s["selected_peers_sum"] for s in stats_list)
-    #
-    #         share_mean_peer_weight = (peer_weight_sum / share_peer_samples) if share_peer_samples > 0 else 0.0
-    #         share_eligible_peers_mean = (eligible_peers_sum / share_attempts) if share_attempts > 0 else 0.0
-    #         share_selected_peers_mean = (selected_peers_sum / share_attempts) if share_attempts > 0 else 0.0
-    #
-    #
-    #         ep_rewards.append(float(total_reward))
-    #         ep_steps.append(int(steps))
-    #         ep_mastery_mean.append(m_mean)
-    #         ep_mastery_min.append(m_min)
-    #         ep_completed.append(int(completed))
-    #         rows.append([
-    #             episode, float(total_reward), int(steps), m_mean, m_min, completed,
-    #             float(flat_agent_reward),
-    #
-    #             # ---- sharing diagnostics ----
-    #             int(n_ll_agents),
-    #             int(share_enabled_eff),
-    #             str(share_mode_eff),
-    #             int(share_attempts),
-    #             int(share_peer_samples),
-    #             float(share_mean_peer_weight),
-    #             float(share_eligible_peers_mean),
-    #             float(share_selected_peers_mean),
-    #
-    #             *[float(x) for x in ll_rewards],
-    #             float(tutee_reward_total),
-    #         ])
-    #
-    #         window_rewards.append(float(total_reward))
-    #         window_steps.append(int(steps))
-    #
-    #         # if episode % args.log_window == 0:
-    #         progress = min(1.0, episode / eps_decay_episodes)
-    #         eps = eps_start + (eps_end - eps_start) * progress
-    #
-    #         if args.arch == "hrl":
-    #             high_level_agent.set_epsilon(eps)
-    #             for ag in tutor_agents:
-    #                 ag.set_epsilon(eps)
-    #             if tutee_agent is not None:
-    #                 tutee_agent.set_epsilon(eps)
-    #         else:
-    #             flat_agent.set_epsilon(eps)
-    #
-    #     header = [
-    #         "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
-    #         "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward",
-    #
-    #         # ---- sharing diagnostics ----
-    #         "n_ll_agents",
-    #         "share_enabled_eff",
-    #         "share_mode_eff",
-    #         "share_attempts",
-    #         "share_peer_samples",
-    #         "share_mean_peer_weight",
-    #         "share_eligible_peers_mean",
-    #         "share_selected_peers_mean",
-    #     ]
-    #     header += [f"ll_reward_{i}" for i in range(num_topics)]
-    #     header += ["tutee_reward_total"]
-    #     # write per-episode metrics
-    #     with open(out_dir / "metrics.csv", "w", newline="") as f:
-    #         w = csv.writer(f)
-    #         w.writerow(header)
-    #         for row in rows:
-    #             # row is: [episode, reward, steps, mastery_mean, mastery_min, completed, ll_reward_0.., tutee_reward_total]
-    #             w.writerow([
-    #                 args.arch, args.ll_mode, int(args.experience_sharing), args.share_mode, int(use_tutee),
-    #                 *row
-    #             ])
-    #
-    #     # compute end-window summary
-    #     w = max(1, int(args.eval_window))
-    #     r_last = ep_rewards[-w:]
-    #     s_last = ep_steps[-w:]
-    #     mm_last = ep_mastery_mean[-w:]
-    #     mn_last = ep_mastery_min[-w:]
-    #     c_last = ep_completed[-w:]
-    #
-    #     summary = {
-    #         "seed": int(seed),
-    #         "arch": str(args.arch),
-    #         "use_tutee": bool(use_tutee),
-    #         "tutee_bonus_base": float(tutee_bonus_base),
-    #         "episodes": int(args.episodes),
-    #         "max_steps": int(args.max_steps),
-    #         "eval_window": int(w),
-    #         "reward_lastW_mean": float(np.mean(r_last)) if r_last else 0.0,
-    #         "steps_lastW_mean": float(np.mean(s_last)) if s_last else 0.0,
-    #         "mastery_mean_lastW_mean": float(np.mean(mm_last)) if mm_last else 0.0,
-    #         "mastery_min_lastW_mean": float(np.mean(mn_last)) if mn_last else 0.0,
-    #         "completion_rate_lastW": float(np.mean(c_last)) if c_last else 0.0,
-    #         "ll_mode": str(args.ll_mode) if args.arch == "hrl" else "n/a",
-    #         "experience_sharing": bool(args.experience_sharing) if args.arch == "hrl" else False,
-    #         "share_mode": str(args.share_mode) if args.arch == "hrl" else "off",
-    #     }
-    #     with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
-    #         import json
-    #         json.dump(summary, f, indent=2)
-    #     return summary
-    #
-    # # ---- Sweep mode ----
-    # sweep_bases = _parse_csv_list(args.sweep_bases, float)
-    # if sweep_bases:
-    #     out_root = Path(args.sweep_out_dir)
-    #     out_root.mkdir(parents=True, exist_ok=True)
-    #
-    #     seeds = _parse_csv_list(args.sweep_seeds, int)
-    #     if not seeds:
-    #         seeds = [int(args.seed), int(args.seed) + 1, int(args.seed) + 2]
-    #
-    #     all_summaries = []
-    #
-    #     # baseline: no tutee
-    #     for sd in seeds:
-    #         sdir = out_root / f"baseline_no_tutee" / f"seed_{sd}"
-    #         all_summaries.append(_run_training(seed=sd, use_tutee=False, tutee_bonus_base=0.0, out_dir=sdir))
-    #
-    #     # tutee runs per base
-    #     for base in sweep_bases:
-    #         for sd in seeds:
-    #             sdir = out_root / f"tutee_base_{base:.3f}" / f"seed_{sd}"
-    #             all_summaries.append(_run_training(seed=sd, use_tutee=True, tutee_bonus_base=float(base), out_dir=sdir))
-    #
-    #     # write a single sweep summary CSV
-    #     with open(out_root / "summary.csv", "w", newline="") as f:
-    #         w = csv.writer(f)
-    #         w.writerow([
-    #             "seed",
-    #             'arch',
-    #             "ll_mode",
-    #             "experience_sharing",
-    #             "share_mode",
-    #             "use_tutee",
-    #             "tutee_bonus_base",
-    #             "episodes",
-    #             "max_steps",
-    #             "eval_window",
-    #             "reward_lastW_mean",
-    #             "steps_lastW_mean",
-    #             "mastery_mean_lastW_mean",
-    #             "mastery_min_lastW_mean",
-    #             "completion_rate_lastW",
-    #         ])
-    #         for s in all_summaries:
-    #             w.writerow([
-    #                 s["seed"],
-    #                 s['arch'],
-    #                 s["ll_mode"],
-    #                 int(s["experience_sharing"]),
-    #                 s["share_mode"],
-    #                 int(s["use_tutee"]),
-    #                 s["tutee_bonus_base"],
-    #                 s["episodes"],
-    #                 s["max_steps"],
-    #                 s["eval_window"],
-    #                 f"{s['reward_lastW_mean']:.6f}",
-    #                 f"{s['steps_lastW_mean']:.3f}",
-    #                 f"{s['mastery_mean_lastW_mean']:.6f}",
-    #                 f"{s['mastery_min_lastW_mean']:.6f}",
-    #                 f"{s['completion_rate_lastW']:.6f}",
-    #             ])
-    #
-    #     print(f"Sweep finished. Wrote: {out_root / 'summary.csv'}")
-    #     return
 
     # ---- Single run mode (original behavior) ----
 
@@ -1551,11 +1423,20 @@ def main():
         window_topic_counts = [0 for _ in range(num_topics)]
         window_tutor_hl = 0
         window_tutee_hl = 0
+        window_topic_tutor_action_counts: List[Dict[str, int]] = [
+            {a: 0 for a in tutor_action_names} for _ in range(num_topics)
+        ]
 
+        # NEW: mastery/bottleneck/streak window stats
+        window_mastery_sum = np.zeros(num_topics, dtype=np.float64)
+        window_bottleneck_counts = np.zeros(num_topics, dtype=np.int64)
+        window_bottleneck_mastery_sum = np.zeros(num_topics, dtype=np.float64)
+        window_longest_streak_sum = 0.0
+        window_eps_count = 0
         eps_start = 0.2
         eps_end = 0.005
         # eps_decay_episodes = max(1, args.episodes)
-        eps_decay_episodes = 1200
+        eps_decay_episodes = 1000
 
         rows = []
 
@@ -1563,7 +1444,7 @@ def main():
             # epsilon schedule
             progress = min(1.0, episode / eps_decay_episodes)
             eps = eps_start + (eps_end - eps_start) * progress
-            eps = max(0.01, eps)
+            eps = max(0.00, eps)
             # eps = max(0.02, eps_start + (eps_end - eps_start) * progress)
             if args.arch == "hrl":
                 high_level_agent.set_epsilon(eps)
@@ -1585,12 +1466,17 @@ def main():
                     steps,
                     topic_counts,
                     tutor_action_counts,
+                    topic_tutor_action_counts,
                     tutee_action_counts,
                     tutor_hl_count,
                     tutee_hl_count,
                     hl_trace,
                     ll_rewards,  # NEW
                     tutee_reward_total,  # NEW
+                    ep_mastery_vec,  # NEW
+                    ep_bottleneck_topic,  # NEW
+                    ep_bottleneck_mastery,  # NEW
+                    ep_longest_streak,
                 ) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
                 flat_agent_reward = 0.0
             else:
@@ -1599,6 +1485,7 @@ def main():
                 topic_counts = [0 for _ in range(num_topics)]
                 tutor_action_counts = {}
                 tutee_action_counts = {}
+                topic_tutor_action_counts = []
                 tutor_hl_count = 0
                 tutee_hl_count = 0
                 hl_trace = []
@@ -1716,8 +1603,32 @@ def main():
                     window_tutor_action_counts[a] += int(tutor_action_counts.get(a, 0))
                 for a in window_tutee_action_counts:
                     window_tutee_action_counts[a] += int(tutee_action_counts.get(a, 0))
+
+                if topic_tutor_action_counts:
+                    for t in range(num_topics):
+                        for a in tutor_action_names:
+                            window_topic_tutor_action_counts[t][a] += int(
+                                topic_tutor_action_counts[t].get(a, 0)
+                            )
                 window_tutor_hl += int(tutor_hl_count)
                 window_tutee_hl += int(tutee_hl_count)
+
+                # NEW: aggregate mastery/bottleneck/streak
+                window_eps_count += 1
+
+                if ep_mastery_vec is not None and len(ep_mastery_vec) == num_topics:
+                    window_mastery_sum += np.asarray(ep_mastery_vec, dtype=np.float64)
+
+                if 0 <= int(ep_bottleneck_topic) < num_topics and np.isfinite(ep_bottleneck_mastery):
+                    t = int(ep_bottleneck_topic)
+                    window_bottleneck_counts[t] += 1
+                    window_bottleneck_mastery_sum[t] += float(ep_bottleneck_mastery)
+                elif 0 <= int(ep_bottleneck_topic) < num_topics:
+                    t = int(ep_bottleneck_topic)
+                    window_bottleneck_counts[t] += 1
+
+                if ep_longest_streak is not None:
+                    window_longest_streak_sum += float(ep_longest_streak)
 
             if episode % args.log_window == 0:
                 w = args.log_window
@@ -1755,6 +1666,39 @@ def main():
                             f = c / total_tutee_actions
                             print(f"    - {a:20s}: {f * 100:5.1f}% of tutee actions")
 
+                        if args.log_ll_per_topic:
+                            print("  Tutor action frequencies per topic (window):")
+                            for t in range(num_topics):
+                                tot = sum(window_topic_tutor_action_counts[t].values()) or 1
+                                parts = []
+                                for a in tutor_action_names:
+                                    f = window_topic_tutor_action_counts[t][a] / tot
+                                    parts.append(f"{a}={f * 100:4.1f}%")
+                                print(f"    - Topic {t}: " + " | ".join(parts))
+
+                    # NEW: pairwise LL agreement (multi only)
+                    if args.log_ll_agreement:
+                        agree = _ll_pairwise_action_agreement(
+                            tutor_agents, batch=int(args.agreement_batch)
+                        )
+                        print(f"  LL greedy-action agreement (pairwise mean): {agree: .3f}")
+                    # NEW: show bottleneck + mastery per topic (window)
+                    if window_eps_count > 0 and num_topics > 0:
+                        mean_mastery_by_topic = window_mastery_sum / max(1, window_eps_count)
+                        print("  Mean mastery by topic (window):")
+                        for t in range(num_topics):
+                            print(f"    - Topic {t}: {mean_mastery_by_topic[t]:.3f}")
+
+                        bn = int(np.argmax(window_bottleneck_counts)) if window_bottleneck_counts.sum() > 0 else -1
+                        if bn >= 0:
+                            bn_ct = int(window_bottleneck_counts[bn])
+                            bn_m = window_bottleneck_mastery_sum[bn] / max(1, bn_ct) if bn_ct > 0 else float("nan")
+                            print(
+                                f"  Bottleneck topic (most frequent): {bn} (count={bn_ct}/{window_eps_count}, mean_bottleneck_mastery={bn_m:.3f})")
+
+                        print(
+                            f"  HL longest same-topic streak (mean over window): {window_longest_streak_sum / max(1, window_eps_count):.1f}")
+
                     total_hl = window_tutor_hl + window_tutee_hl or 1
                     print(f"  High-level mode frequencies (last {w} episodes):")
                     print(f"    - tutor: {window_tutor_hl / total_hl * 100:5.1f}% of high-level decisions")
@@ -1775,12 +1719,18 @@ def main():
                 if args.arch == "hrl":
                     window_topic_counts[:] = [0 for _ in range(num_topics)]
                     window_tutor_action_counts = {a: 0 for a in tutor_action_names}
+                    window_topic_tutor_action_counts = [
+                        {a: 0 for a in tutor_action_names} for _ in range(num_topics)
+                    ]
                     window_tutor_hl = 0
                     window_tutee_hl = 0
+                    window_mastery_sum[:] = 0.0
+                    window_bottleneck_counts[:] = 0
+                    window_bottleneck_mastery_sum[:] = 0.0
+                    window_longest_streak_sum = 0.0
+                    window_eps_count = 0
                     if use_tutee and tutee_agent is not None:
                         window_tutee_action_counts = {a: 0 for a in tutee_action_names}
-
-
 
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",

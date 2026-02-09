@@ -31,6 +31,7 @@ What is deterministic at runtime
 
 from __future__ import annotations
 
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
@@ -1133,7 +1134,7 @@ class KDDLearnerModel:
         m_after = float(s.mastery[topic_id])
         den_local = max(abs(m_before), 0.05)
         r_local = (m_after - m_before) / den_local
-        r_local = float(np.clip(r_local, -0.10, 0.10))
+        r_local = float(np.clip(r_local, -10, 10))
 
         # 5) Observational updates (EMAs, opp, steps)
         self._apply_observation_updates(
@@ -1161,7 +1162,7 @@ class KDDLearnerModel:
         r_step = float(np.mean(pct))
 
         # optional but recommended for stability
-        r_step = float(np.clip(r_step, -0.05, 0.05))
+        r_step = float(np.clip(r_step, -10, 10))
 
         # reward = r_step + (self.cfg.completion_reward if done else 0.0)
         # One-time completion reward per topic/subtask:
