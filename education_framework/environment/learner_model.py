@@ -334,12 +334,12 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.75
-    opp_min: int = 1
+    mastery_threshold: float = 0.90
+    opp_min: int = 0
 
-    topic_mastery_thresholds: Optional[List[float]] = field(
-        default_factory=lambda: [0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82]
-    )
+    # topic_mastery_thresholds: Optional[List[float]] = field(
+    #     default_factory=lambda: [0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82]
+    # )
 
     # --- Topic heterogeneity / clustering (enables weighted transfer to beat mutual) ---
     # Example for 7 topics: 3 clusters {0,1,2}, {3,4}, {5,6}
@@ -348,7 +348,7 @@ class KDDLearnerConfig:
     # <1.0 = easier, >1.0 = harder. If None, all 1.0
 
     from dataclasses import field
-    topic_cluster_ids: List[int] = field(default_factory=lambda: [0, 0, 0, 1, 1, 2, 2])
+    # topic_cluster_ids: List[int] = field(default_factory=lambda: [0, 0, 0, 1, 1, 2, 2])
     # topic_difficulty: List[float] = field(default_factory=lambda: [0.85, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40])
     topic_difficulty: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.00, 1.0, 1.0, 1.0, 1.0])
     # --- Action-effect heterogeneity (makes per-topic specialists actually useful) ---
@@ -357,11 +357,11 @@ class KDDLearnerConfig:
     #   [quiz, hint, worked_example, remediation, review]
     # Keep values near 1.0 (e.g., 0.85..1.15) to stay stable.
     enable_action_heterogeneity: bool = False
-    cluster_action_gains: List[List[float]] = field(default_factory=lambda: [
-        [1.15, 1.05, 0.95, 0.90, 0.95],  # cluster 0: retrieval/hint-heavy
-        [0.95, 1.00, 1.15, 1.05, 0.95],  # cluster 1: example/remediation-heavy
-        [0.95, 0.95, 0.90, 1.15, 1.10],  # cluster 2: remediation/review-heavy
-    ])
+    # cluster_action_gains: List[List[float]] = field(default_factory=lambda: [
+    #     [1.15, 1.05, 0.95, 0.90, 0.95],  # cluster 0: retrieval/hint-heavy
+    #     [0.95, 1.00, 1.15, 1.05, 0.95],  # cluster 1: example/remediation-heavy
+    #     [0.95, 0.95, 0.90, 1.15, 1.10],  # cluster 2: remediation/review-heavy
+    # ])
 
     # --- tutee (protégé / learning-by-teaching) simulation ---
     # Conservative, bounded mastery bonus with explicit cost.
@@ -395,6 +395,7 @@ class KDDLearnerConfig:
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02
     completion_reward: float = 0.4
+    all_done_bonus: float = 1.0
 
     opp_norm: float = 20.0
     time_norm: float = 120.0
@@ -411,6 +412,7 @@ class KDDLearnerConfig:
 
     force_end_on_all_complete: bool = True
     step_penalty: float = 0.0  # start small; tune 0.001..0.01
+    # paper_var_weights: List[float] = field(default_factory=lambda: [0.2, 0.7, 0.1])
 
     # Per-topic observation noise scale (affects neutral noise and/or cfa sampling jitter if you want)
     topic_noise: Optional[List[float]] = None
@@ -532,30 +534,52 @@ class KDDLearnerModel:
         Returns an action-effect multiplier for tutor actions (0..4), based on topic cluster.
         For tutee actions (>=5) returns 1.0.
         """
+        # TODO
+        return 1.0
+        g = getattr(self.bundle, "topic_tutor_action_gain", None)
+        if g is not None:
+            t = int(np.clip(topic_id, 0, g.shape[0] - 1))
+            a = int(np.clip(action_id, 0, g.shape[1] - 1))
+            return float(g[t, a])
+        # 2) Fallback to cluster-based gains if enabled in cfg
         cfg = self.cfg
         if not getattr(cfg, "enable_action_heterogeneity", False):
             return 1.0
-
-        # only tutor actions 0..4
-        if action_id >= 5:
+        if not getattr(cfg, "topic_cluster_ids", None):
             return 1.0
-
-        clusters = getattr(cfg, "topic_cluster_ids", None)
+        cluster_id = int(cfg.topic_cluster_ids[int(topic_id)])
         gains = getattr(cfg, "cluster_action_gains", None)
-        if not clusters or not gains:
+        if not gains or cluster_id < 0 or cluster_id >= len(gains):
             return 1.0
-
-        if topic_id < 0 or topic_id >= len(clusters):
+        row = gains[cluster_id]
+        if action_id < 0 or action_id >= len(row):
             return 1.0
+        return float(row[action_id])
 
-        cid = int(clusters[topic_id])
-        cid = max(0, min(cid, len(gains) - 1))
-
-        vec = gains[cid]
-        if not vec or action_id < 0 or action_id >= len(vec):
-            return 1.0
-
-        return float(vec[action_id])
+        # cfg = self.cfg
+        # if not getattr(cfg, "enable_action_heterogeneity", False):
+        #     return 1.0
+        #
+        # # only tutor actions 0..4
+        # if action_id >= 5:
+        #     return 1.0
+        #
+        # clusters = getattr(cfg, "topic_cluster_ids", None)
+        # gains = getattr(cfg, "cluster_action_gains", None)
+        # if not clusters or not gains:
+        #     return 1.0
+        #
+        # if topic_id < 0 or topic_id >= len(clusters):
+        #     return 1.0
+        #
+        # cid = int(clusters[topic_id])
+        # cid = max(0, min(cid, len(gains) - 1))
+        #
+        # vec = gains[cid]
+        # if not vec or action_id < 0 or action_id >= len(vec):
+        #     return 1.0
+        #
+        # return float(vec[action_id])
 
     def _topic_scalar(self, arr: Optional[List[float]], topic_id: int, default: float) -> float:
         if not arr:
@@ -584,17 +608,17 @@ class KDDLearnerModel:
         except Exception:
             return 1.0
 
-    def _tutor_action_gain(self, topic_id: int, action_id: int) -> float:
-        if self.bundle is None:
-            return 1.0
-        g = getattr(self.bundle, "topic_tutor_action_gain", None)
-        if g is None:
-            return 1.0
-        if action_id < 0 or action_id >= 5:
-            return 1.0
-        if topic_id < 0 or topic_id >= g.shape[0]:
-            return 1.0
-        return float(g[topic_id, action_id])
+    # def _tutor_action_gain(self, topic_id: int, action_id: int) -> float:
+    #     if self.bundle is None:
+    #         return 1.0
+    #     g = getattr(self.bundle, "topic_tutor_action_gain", None)
+    #     if g is None:
+    #         return 1.0
+    #     if action_id < 0 or action_id >= 5:
+    #         return 1.0
+    #     if topic_id < 0 or topic_id >= g.shape[0]:
+    #         return 1.0
+    #     return float(g[topic_id, action_id])
 
     # ---------- feature engineering ----------
     def _state_features(self, s: LearnerState, topic_id: int) -> np.ndarray:
@@ -882,17 +906,19 @@ class KDDLearnerModel:
         """
         m_mean = float(np.mean(s.mastery))
         m_min = float(np.min(s.mastery))  # forces weakest-topic improvement
-        cov = float(np.mean(np.minimum(s.opp, self.cfg.opp_min) / max(self.cfg.opp_min, 1)))
-        return np.asarray([m_mean, m_min, cov], dtype=np.float32)
+        # cov = float(np.mean(np.minimum(s.opp, self.cfg.opp_min) / max(self.cfg.opp_min, 1)))
+        # return np.asarray([m_mean, m_min, cov], dtype=np.float32)
         # m = float(np.mean(s.mastery))
-        # cfa = float(np.mean(s.cfa_ema))
+        opp_min = max(1, int(self.cfg.opp_min))
+        cov = float(np.mean(np.minimum(s.opp, opp_min) / float(opp_min)))
+        cfa = float(np.mean(s.cfa_ema))
         #
         # # "less help/struggle/time" is better → invert to keep 'higher is better'
-        # inv_hint = 1.0 - float(np.mean(s.hint_ema))
-        # inv_inc = 1.0 - float(np.mean(s.inc_ema))
-        # inv_time = 1.0 - float(np.mean(s.time_ema))
+        inv_hint = 1.0 - float(np.mean(s.hint_ema))
+        inv_inc = 1.0 - float(np.mean(s.inc_ema))
+        inv_time = 1.0 - float(np.mean(s.time_ema))
         #
-        # return np.asarray([m, cfa, inv_hint, inv_inc, inv_time], dtype=np.float32)
+        return np.asarray([m_mean, m_min, cov, cfa, inv_hint, inv_inc, inv_time], dtype=np.float32)
 
     # def global_perf_observation(self) -> np.ndarray:
     #     """
@@ -1160,7 +1186,17 @@ class KDDLearnerModel:
         den = np.maximum(np.abs(v_prev), 0.05)  # critical: avoid dividing by ~0
         pct = (v_next - v_prev) / den
         r_step = float(np.mean(pct))
-
+        # w = np.asarray(getattr(self.cfg, "paper_var_weights", [1.0] * int(pct.shape[0])), dtype=np.float32)
+        # if w.size != pct.size:
+        #     r_step = float(np.mean(pct))
+        #
+        # else:
+        #     ws = float(np.sum(w))
+        #     if ws <= 1e-8:
+        #         r_step = float(np.mean(pct))
+        #     else:
+        #         w = w / ws
+        #         r_step = float(np.dot(w, pct))
         # optional but recommended for stability
         r_step = float(np.clip(r_step, -10, 10))
 

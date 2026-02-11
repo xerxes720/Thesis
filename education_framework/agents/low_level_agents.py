@@ -40,7 +40,7 @@ class LowLevelAgentConfig:
     epsilon: float = 0.2
 
     buffer_size: int = 50_000
-    batch_size: int = 256
+    batch_size: int = 64
     min_replay_size: int = 150
 
     train_every_steps: int = 20
@@ -88,9 +88,11 @@ class LowLevelAgentConfig:
 # ---------------- Replay Buffer ----------------
 
 class ReplayBuffer:
-    def __init__(self, capacity: int):
+    def __init__(self, capacity: int, seed: int | None = None):
         self.buffer = deque(maxlen=capacity)
-        self.np_rng = np.random.default_rng(None)
+        if seed is None:
+            seed = int(np.random.randint(0, 2**31-1))
+        self.np_rng = np.random.default_rng(seed)
 
     def push(self, s, a, r, s2, done):
         # store as float32 numpy arrays ONCE to avoid repeated conversion later

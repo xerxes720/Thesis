@@ -129,35 +129,57 @@ class HighLevelAgent:
 
     def select_action(self, obs: List[float]) -> int:
         self._ensure_networks(input_dim=len(obs))
+        obs_np = np.asarray(obs, dtype=np.float32)
 
+        T = self.cfg.num_topics
+        mastery = obs_np[0:T]
+        topic_complete = obs_np[6 * T:7 * T]  # per your env.get_observation
+
+        # Build a boolean mask of valid HL actions
+        valid = np.ones(self.num_actions, dtype=np.bool_)
+
+        # 1) mask tutor_topic_t if completed
+        for t in range(T):
+            if topic_complete[t] > 0.5:
+                valid[t] = False
+
+        # 2) if tutee exists, mask tutee_topic_t if not in mastery band OR completed
+        if self.cfg.use_tutee:
+            for t in range(T):
+                if (topic_complete[t] > 0.5) or (mastery[t] < self.cfg.tutee_ready_min) or (
+                        mastery[t] > self.cfg.tutee_cap_high):
+                    valid[T + t] = False
+
+        # If everything got masked (can happen), fall back to "no completion mask"
+        if not np.any(valid):
+            valid[:] = True
+            # Prefer any non-complete tutor topics; if none exist, allow all tutor topics.
+            if self.cfg.use_tutee:
+                tutor_valid = ~(topic_complete > 0.5)
+                if np.any(tutor_valid):
+                    valid[:] = False
+                    valid[:T] = tutor_valid
+                else:
+                    valid[:] = False
+                    valid[:T] = True
+            else:
+                valid[:] = True
+
+        # Epsilon exploration must sample ONLY from valid actions
         if random.random() < self.cfg.epsilon:
-            return random.randrange(self.num_actions)
-
-        # if self.cfg.use_tutee and np.mean(obs[-self.cfg.num_topics:]) > 0.85:  # avg mastery high
-        #     tutee_mask = [False if "tutee" in a else True for a in self.actions]
-        #     q_masked = q.clone();q_masked[:, ~torch.tensor(tutee_mask)] = -float('inf')
-        #     action = int(torch.argmax(q_masked).item())
+            idxs = np.flatnonzero(valid)
+            return int(random.choice(idxs.tolist()))
 
         with torch.no_grad():
-            obs_np = np.asarray(obs, dtype=np.float32)
             x = torch.from_numpy(obs_np).unsqueeze(0)
-            q = self.policy_net(x).squeeze(0)
+            q = self.policy_net(x).squeeze(0).clone()
 
-            if self.cfg.use_tutee:
-                T = self.cfg.num_topics
-                mastery = obs_np[0:T]
-
-                # topic_complete block index: 6*T .. 7*T (per your env.get_observation)
-                topic_complete = obs_np[6 * T:7 * T]
-
-                q = q.clone()
-                for t in range(T):
-                    if (topic_complete[t] > 0.5) or (mastery[t] < self.cfg.tutee_ready_min) or (
-                            mastery[t] > self.cfg.tutee_cap_high):
-                        q[T + t] = -1e9  # mask tutee_topic_t
+            # Apply mask to Q-values
+            invalid_idxs = np.flatnonzero(~valid)
+            if invalid_idxs.size > 0:
+                q[torch.tensor(invalid_idxs, dtype=torch.long)] = -1e9
 
             return int(torch.argmax(q).item())
-
 
     def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool) -> None:
         self._ensure_networks(input_dim=len(obs))

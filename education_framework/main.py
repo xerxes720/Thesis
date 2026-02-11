@@ -118,7 +118,7 @@ class KDDEnvConfig:
     num_topics: int = 7
     max_steps: int = 200
     initial_mastery: float = 0.2
-    lambda_step: float = 0.03  # NEW: reward penalty per step-cost unit
+    lambda_step: float = 0.003  # NEW: reward penalty per step-cost unit
 
 
 class KDDHierEnv:
@@ -272,14 +272,14 @@ class KDDHierEnv:
         base_reward_local = float(info.get("reward_local", base_reward_global))
         step_cost = float(info.get("step_cost", 1))
 
-        self.lambda_step = 0.03
-        reward_hl = base_reward_global - self.lambda_step * step_cost
-        reward_ll = base_reward_local - self.lambda_step * step_cost
+        step_penalty = self.lambda_step * step_cost
+        reward_hl = base_reward_global - step_penalty
+        reward_ll = base_reward_local - step_penalty
 
         info = dict(info)
         info["base_reward_global"] = base_reward_global
         info["base_reward_local"] = base_reward_local
-        info["step_penalty"] = float(self.lambda_step * step_cost)
+        info["step_penalty"] = float(step_penalty)
         info["reward_hl"] = float(reward_hl)
         info["reward_ll"] = float(reward_ll)
 
@@ -358,6 +358,8 @@ def create_agents(
         n = max(1, num_topics)
         ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
         ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
+        ll_cfg.min_replay_size = int(max(ll_cfg.min_replay_size, ll_cfg.batch_size) * n)
+        # ll_cfg.target_update_steps = 200  # keep k=5 rule
         # ll_cfg.buffer_size = max(5_000, int(ll_cfg.buffer_size) // max(1, num_topics))
         # ll_cfg.min_replay_size = int(ll_cfg.min_replay_size) * max(1, num_topics)
 
