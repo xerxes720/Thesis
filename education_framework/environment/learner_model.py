@@ -535,7 +535,7 @@ class KDDLearnerModel:
         For tutee actions (>=5) returns 1.0.
         """
         # TODO
-        return 1.0
+        # return 1.0
         g = getattr(self.bundle, "topic_tutor_action_gain", None)
         if g is not None:
             t = int(np.clip(topic_id, 0, g.shape[0] - 1))

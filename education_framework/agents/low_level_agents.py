@@ -77,10 +77,10 @@ class LowLevelAgentConfig:
     # --- Experience sharing speed controls ---
     cka_every_updates: int = 50  # recompute similarity only every N updates
     # --- experience sharing knobs ---
-    share_frac: float = 0.10
-    max_peers_per_update: int = 1
-    min_peer_replay_size: int = 300
-    share_similarity_threshold: float = 0.75
+    share_frac: float = 0.20
+    max_peers_per_update: int = 2
+    min_peer_replay_size: int = 200
+    share_similarity_threshold: float = 0.25
     cka_probe_n: int = 64
     share_stop_updates: int = 10 ** 9
 
@@ -249,7 +249,7 @@ class DQNLowLevelAgent:
         tau = float(getattr(self.cfg, "share_similarity_threshold", 0.75))
         tau = max(0.0, min(0.999, tau))
 
-        power = float(getattr(self.cfg, "cka_power", 4.0))
+        power = float(getattr(self.cfg, "cka_power", 1.0))
 
         w_cap = float(getattr(self.cfg, "share_max_weight", 0.60))
         w_cap = max(0.0, min(1.0, w_cap))

@@ -523,13 +523,68 @@ class FlatAgent:
     def __init__(self, cfg: LowLevelAgentConfig, num_topics: int):
         self.num_topics = int(num_topics)
 
+        # NOTE: The flat baseline has a large discrete action space (topic x tutor_action).
+        # To reduce the "structural handicap" vs HRL (where completed topics are masked at HL),
+        # we (1) mask completed topics for action selection, and (2) expand the flat observation
+        # with a per-topic grouped representation (feature engineering) to make "choose topic +
+        # choose action" easier for a vanilla MLP.
+
         tutor_actions = build_tutor_actions()
+        self._n_tutor_actions = int(len(tutor_actions))
         self.actions = []
         for t in range(self.num_topics):
             for a in tutor_actions:
                 self.actions.append(("tutor", t, a))
 
         self.agent = DQNLowLevelAgent(cfg, actions=[self._encode(x) for x in self.actions])
+
+    # -------- observation shaping (flat-only) --------
+
+    def _expand_obs(self, obs) -> np.ndarray:
+        """Expand the raw env observation with a per-topic grouped view."""
+        x = np.asarray(obs, dtype=np.float32)
+
+        T = int(self.num_topics)
+        n_blocks = 7
+        tail = 2
+        expected = n_blocks * T + tail
+        if x.shape[0] != expected:
+            return x
+
+        mastery = x[0:T]
+        cfa = x[1*T:2*T]
+        hint = x[2*T:3*T]
+        t_ema = x[3*T:4*T]
+        inc = x[4*T:5*T]
+        opp = x[5*T:6*T]
+        done = x[6*T:7*T]
+
+        per_topic = np.stack([mastery, cfa, hint, t_ema, inc, opp, done], axis=1).reshape(-1)
+        return np.concatenate([x, per_topic.astype(np.float32, copy=False)], axis=0)
+
+    def _valid_action_indices(self, obs) -> List[int]:
+        """Return the indices of actions whose topic is NOT completed (masking)."""
+        x = np.asarray(obs, dtype=np.float32)
+        T = int(self.num_topics)
+        n_blocks = 7
+        tail = 2
+        expected = n_blocks * T + tail
+
+        # Fallback: if obs layout differs, do not mask.
+        if x.shape[0] != expected:
+            return list(range(len(self.actions)))
+
+        topic_complete = x[6*T:7*T]
+        valid_topics = [t for t in range(T) if float(topic_complete[t]) < 0.5]
+        if len(valid_topics) == 0:
+            valid_topics = list(range(T))
+
+        A = int(self._n_tutor_actions)
+        valid = []
+        for t in valid_topics:
+            base = int(t) * A
+            valid.extend(list(range(base, base + A)))
+        return valid
 
     def _encode(self, tpl):
         mode, topic_id, a = tpl
@@ -542,10 +597,36 @@ class FlatAgent:
         self.agent.set_epsilon(eps)
 
     def select_action(self, obs):
-        return self.agent.select_action(obs)
+        # Completed-topic masking (flat-only)
+        valid = self._valid_action_indices(obs)
+        if len(valid) == 0:
+            valid = list(range(len(self.actions)))
+
+        # Expanded observation (flat-only)
+        obs_x = self._expand_obs(obs)
+        self.agent._ensure_networks(input_dim=int(len(obs_x)))
+
+        # Epsilon-greedy but over VALID actions only.
+        if random.random() < float(self.agent.cfg.epsilon):
+            return int(random.choice(valid))
+
+        with torch.no_grad():
+            x = torch.as_tensor(obs_x, dtype=torch.float32, device=self.agent.device).unsqueeze(0)
+            q = self.agent.policy_net(x).squeeze(0)
+
+            q_np = q.detach().cpu().numpy()
+            # hard-mask invalid actions
+            mask = np.full_like(q_np, -1e9, dtype=np.float32)
+            mask[np.asarray(valid, dtype=np.int64)] = 0.0
+            q_np = q_np + mask
+            return int(q_np.argmax())
 
     def update(self, obs, a_idx, r, next_obs, done):
-        self.agent.update(obs, a_idx, r, next_obs, done)
+        # Keep training in the same expanded observation space.
+        obs_x = self._expand_obs(obs)
+        next_obs_x = self._expand_obs(next_obs)
+        self.agent.update(obs_x, a_idx, r, next_obs_x, done)
+
 
 
 def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
@@ -606,6 +687,10 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
     for a in tutor_action_names:
         tutor_action_counts[a] = 0
 
+    A = len(tutor_action_names)
+    tutor_dm_sum = np.zeros((num_topics, A), dtype=np.float64)
+    tutor_dm_count = np.zeros((num_topics, A), dtype=np.int64)
+
     # NEW: per-topic tutor action counts (even in single-LL; topic_id still exists at HL)
     topic_tutor_action_counts: List[Dict[str, int]] = [
         {a: 0 for a in tutor_action_names} for _ in range(num_topics)]
@@ -649,8 +734,18 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             topic_tutor_action_counts[int(topic_id)][ll_action_str] += 1
 
             # next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
+
+            m_prev_topic = float(env.model.state.mastery[int(topic_id)])
             next_obs, reward_hl, done, info = env.step_tutor(topic_id, ll_action_str)
+            m_new_topic = float(env.model.state.mastery[int(topic_id)])
+            dm = m_new_topic - m_prev_topic
+            if 0 <= int(topic_id) < num_topics and 0 <= int(ll_action_idx) < A:
+                tutor_dm_sum[int(topic_id), int(ll_action_idx)] += float(dm)
+                tutor_dm_count[int(topic_id), int(ll_action_idx)] += 1
             reward_ll = float(info.get("reward_ll", reward_hl))
+
+
+
             # if len(tutor_agents) == 1:
             #     # single shared LL tutor needs topic_id to disambiguate
             #     next_tutor_obs = add_topic(next_obs, topic_id)
@@ -766,6 +861,8 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         bottleneck_topic,  # NEW
         bottleneck_mastery,  # NEW
         longest_streak,
+        tutor_dm_sum,  # NEW
+        tutor_dm_count,  # NEW
     )
 
 
@@ -1288,6 +1385,12 @@ def main():
         default=256,
         help="Batch size for LL agreement diagnostic (states sampled from replay).",
     )
+    ap.add_argument(
+        "--log_ll_action_effects",
+        action="store_true",
+        default=False,
+        help="Print per-topic mean mastery gain (Δmastery) conditioned on tutor action (HRL runs).",
+    )
     args = ap.parse_args()
 
     # def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
@@ -1454,6 +1557,15 @@ def main():
             {a: 0 for a in tutor_action_names} for _ in range(num_topics)
         ]
 
+        # NEW: per-topic per-action mastery gain stats (tutor mode only)
+        if args.arch == "hrl":
+            A = len(tutor_action_names)
+            window_tutor_dm_sum = np.zeros((num_topics, A), dtype=np.float64)
+            window_tutor_dm_count = np.zeros((num_topics, A), dtype=np.int64)
+        else:
+            window_tutor_dm_sum = None
+            window_tutor_dm_count = None
+
         # NEW: mastery/bottleneck/streak window stats
         window_mastery_sum = np.zeros(num_topics, dtype=np.float64)
         window_bottleneck_counts = np.zeros(num_topics, dtype=np.int64)
@@ -1504,6 +1616,8 @@ def main():
                     ep_bottleneck_topic,  # NEW
                     ep_bottleneck_mastery,  # NEW
                     ep_longest_streak,
+                    ep_tutor_dm_sum,  # NEW
+                    ep_tutor_dm_count,  # NEW
                 ) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
                 flat_agent_reward = 0.0
             else:
@@ -1637,6 +1751,12 @@ def main():
                             window_topic_tutor_action_counts[t][a] += int(
                                 topic_tutor_action_counts[t].get(a, 0)
                             )
+                # NEW: accumulate tutor Δmastery stats per action/topic
+                if window_tutor_dm_sum is not None and ep_tutor_dm_sum is not None:
+                    window_tutor_dm_sum += np.asarray(ep_tutor_dm_sum, dtype=np.float64)
+                if window_tutor_dm_count is not None and ep_tutor_dm_count is not None:
+                    window_tutor_dm_count += np.asarray(ep_tutor_dm_count, dtype=np.int64)
+
                 window_tutor_hl += int(tutor_hl_count)
                 window_tutee_hl += int(tutee_hl_count)
 
@@ -1735,6 +1855,45 @@ def main():
                     if hl_trace:
                         print("  High-level decision sequence (last episode):")
                         print(f"    --> {' --> '.join(hl_trace)}")
+                if args.log_ll_action_effects and window_tutor_dm_sum is not None and window_tutor_dm_count is not None:
+                    print("  Tutor action effects per topic (mean Δmastery | action) (window):")
+                    denom = np.maximum(1, window_tutor_dm_count)
+                    mean_dm = window_tutor_dm_sum / denom  # [T, A]
+
+                    for t in range(num_topics):
+                        row = mean_dm[t]
+                        cnt = window_tutor_dm_count[t]
+
+                        best_ai = int(np.argmax(row)) if row.size > 0 else -1
+                        parts = []
+                        for ai, a in enumerate(tutor_action_names):
+                            m = float(row[ai])
+                            n = int(cnt[ai])
+                            star = "*" if ai == best_ai else ""
+                            parts.append(f"{a}={m:+.4f}{star} (n={n})")
+
+                        # optional: total samples for that topic in the window
+                        total_n = int(cnt.sum())
+                        print(f"    - Topic {t} (total n={total_n}): " + " | ".join(parts))
+
+                    # summarize similarity of these effect-vectors across topics
+                    min_n = 20  # threshold per action
+                    V = mean_dm.copy()
+
+                    # mask unreliable dims per topic
+                    mask = (window_tutor_dm_count >= min_n).astype(np.float64)
+                    V = V * mask
+
+                    norms = np.linalg.norm(V, axis=1, keepdims=True) + 1e-12
+                    Vn = V / norms
+                    S = Vn @ Vn.T
+                    mask = ~np.eye(num_topics, dtype=bool)
+                    vals = S[mask]
+                    if vals.size > 0:
+                        print("  Action-effect vector cosine similarity across topics (window):")
+                        print(
+                            f"    min={float(vals.min()):.3f} mean={float(vals.mean()):.3f} max={float(vals.max()):.3f} std={float(vals.std()):.3f}")
+
                 print()
 
                 # reset window
@@ -1742,6 +1901,10 @@ def main():
                 window_steps.clear()
                 window_mastery.clear()
                 window_done.clear()
+                if window_tutor_dm_sum is not None:
+                    window_tutor_dm_sum[:] = 0.0
+                if window_tutor_dm_count is not None:
+                    window_tutor_dm_count[:] = 0
 
                 if args.arch == "hrl":
                     window_topic_counts[:] = [0 for _ in range(num_topics)]
@@ -1758,6 +1921,7 @@ def main():
                     window_eps_count = 0
                     if use_tutee and tutee_agent is not None:
                         window_tutee_action_counts = {a: 0 for a in tutee_action_names}
+
 
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",

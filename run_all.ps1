@@ -17,24 +17,24 @@ $logPath = "logs\run_all_$ts.log"
 Start-Transcript -Path $logPath -Append | Out-Null
 
 try {
-#     python -m education_framework.scripts.build_decision_tree `
-#       --csv education_framework/data/algebra_2005_2006_train.txt `
-#       --out $bundle `
-#       --n_topics 7 `
-#       --max_depth 7 `
-#       --min_leaf 50 `
-#       --ema_alpha 0.2 `
-#       --seed 0
+     python -m education_framework.scripts.build_decision_tree `
+       --csv education_framework/data/algebra_2005_2006_train.txt `
+       --out $bundle `
+       --n_topics 7 `
+       --max_depth 7 `
+       --min_leaf 50 `
+       --ema_alpha 0.2 `
+       --seed 0
 
     foreach ($seed in $seeds) {
         Write-Host "=============================="
         Write-Host "Running SEED=$seed"
         Write-Host "=============================="
 
-        python -m education_framework.main `
-          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --arch flat --ll_mode single --share_mode off `
-          --seed $seed --run_tag "flat_single"
+#        python -m education_framework.main `
+#          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#          --arch flat --ll_mode single --share_mode off `
+#          --seed $seed --run_tag "flat_single"
 
         python -m education_framework.main `
           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
