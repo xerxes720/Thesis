@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 
 $bundle   = "education_framework/data/kdd_bundle.joblib"
 $episodes = 1000
-$maxSteps = 400
+$maxSteps = 450
 $seeds    = @(23) #23 48
 
 $ts = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -17,14 +17,16 @@ $logPath = "logs\run_all_$ts.log"
 Start-Transcript -Path $logPath -Append | Out-Null
 
 try {
-     python -m education_framework.scripts.build_decision_tree `
-       --csv education_framework/data/algebra_2005_2006_train.txt `
-       --out $bundle `
-       --n_topics 7 `
-       --max_depth 7 `
-       --min_leaf 50 `
-       --ema_alpha 0.2 `
-       --seed 0
+#     python -m education_framework.scripts.build_decision_tree `
+#       --csv education_framework/data/algebra_2005_2006_train.txt `
+#       --out $bundle `
+#       --n_topics 7 `
+#       --max_depth 7 `
+#       --min_leaf 50 `
+#       --ema_alpha 0.2 `
+#       --seed 0 `
+#       --cluster_mode behavior
+     #python -m education_framework.scripts.build_decision_tree --csv education_framework/data/algebra_2005_2006_train.txt --out education_framework/data/kdd_bundle.joblib --n_topics 7 --max_depth 7 --min_leaf 50 --ema_alpha 0.2 --seed 0 --cluster_mode cooccur --action_label_mode cluster --cluster_max_kcs 800 --cluster_min_kc_freq 20
 
     foreach ($seed in $seeds) {
         Write-Host "=============================="
@@ -39,12 +41,12 @@ try {
         python -m education_framework.main `
           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
           --arch hrl --ll_mode single --share_mode off `
-          --seed $seed --run_tag "single_ll"
+          --seed $seed --run_tag "single_ll" --log_ll_action_effects
 ##
         python -m education_framework.main `
           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
           --share_mode off `
-          --seed $seed --run_tag "multi_no_es"
+          --seed $seed --run_tag "multi_no_es" --log_ll_action_effects
 ##
 #         python -m education_framework.main `
 #           --bundle $bundle --episodes $episodes --max_steps $maxSteps `

@@ -69,9 +69,14 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
             return default
         if isinstance(x, str) and x.strip() == "":
             return default
-        return float(x)
+        v = float(x)
+        # IMPORTANT: reject NaN/inf
+        if not np.isfinite(v):
+            return default
+        return v
     except Exception:
         return default
+
 
 
 def _safe_int(x: Any, default: int = 0) -> int:
@@ -196,6 +201,40 @@ class KDDActionSchema:
 
         This is intentionally simple and threshold-based so it is explainable.
         """
+        mode = str(getattr(self, "action_mode", "classic"))
+        if mode == "discover":
+            da = getattr(self, "discovered_action", None)
+            if da is None:
+                return LowLevelAction.TUTOR_QUIZ
+
+            feat_names = da["feature_names"]
+            opp_col = da.get("opp_col", "")
+            mu = da["mu"]
+            sd = da["sd"]
+            centroids = da["centroids"]
+            mode_to_action = da["mode_to_action"]
+
+            # build row feature vector in same order
+            vals = []
+            if "hints" in feat_names:
+                vals.append(np.log1p(_safe_int(row.get(hints_col), 0)))
+            if "incorrects" in feat_names:
+                vals.append(np.log1p(_safe_int(row.get(incorrects_col), 0)))
+            if "duration" in feat_names:
+                vals.append(np.log1p(max(0.0, _safe_float(row.get(duration_col), 0.0))))
+            if "opp" in feat_names:
+                opp = _safe_int(row.get(opp_col), 0) if opp_col else 0
+                vals.append(np.log1p(opp))
+
+            x = np.asarray(vals, dtype=np.float32)
+            xs = (x - mu.reshape(-1)) / sd.reshape(-1)
+
+            d = ((centroids - xs.reshape(1, -1)) ** 2).sum(axis=1)
+            mode_id = int(np.argmin(d))
+            act_id = int(mode_to_action.get(mode_id, 0))
+
+            return LowLevelAction(act_id)  # assuming enum values match 0..4
+
         cfa = _safe_int(row.get(cfa_col), 0)
         hints = _safe_int(row.get(hints_col), 0)
         inc = _safe_int(row.get(incorrects_col), 0)
@@ -334,7 +373,7 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.90
+    mastery_threshold: float = 0.80
     opp_min: int = 0
 
     # topic_mastery_thresholds: Optional[List[float]] = field(
@@ -687,13 +726,53 @@ class KDDLearnerModel:
         return x
 
     def _predict_proba_1(self, model: Any, x: np.ndarray) -> float:
+        """
+        Robustly return P(y=1) for sklearn-like models.
+
+        Handles degenerate single-class models where predict_proba returns (n, 1)
+        and model.classes_ has length 1.
+        """
         x2 = x.reshape(1, -1)
+
+        # 1) Try probabilistic path
         if hasattr(model, "predict_proba"):
-            # critical: skip sklearn validation
-            proba = model.predict_proba(x2, check_input=False)
-            return float(proba[0, 1])
-        y = float(model.predict(x2, check_input=False)[0])
-        return _clip01(y)
+            try:
+                proba = model.predict_proba(x2, check_input=False)
+            except TypeError:
+                # some models don't support check_input
+                proba = model.predict_proba(x2)
+
+            proba = np.asarray(proba, dtype=np.float32)
+
+            classes = getattr(model, "classes_", None)
+            if classes is not None:
+                classes = np.asarray(classes)
+
+                # Normal multi-class/binary case: pick the column for class==1 if present
+                if proba.ndim == 2 and proba.shape[1] == classes.size:
+                    idx_ones = np.where(classes == 1)[0]
+                    if idx_ones.size > 0:
+                        return _clip01(float(proba[0, int(idx_ones[0])]))
+
+                    # Degenerate: model never saw class 1
+                    if classes.size == 1:
+                        return 1.0 if int(classes[0]) == 1 else 0.0
+
+                # If classes exist but don't align, fall through to hard prediction
+
+            # If no classes_ info:
+            # - if 2+ columns, assume column 1 corresponds to class 1 (common sklearn convention)
+            if proba.ndim == 2 and proba.shape[1] >= 2:
+                return _clip01(float(proba[0, 1]))
+
+            # If only one column and no reliable mapping -> fall back to hard prediction below
+
+        # 2) Hard prediction fallback
+        try:
+            yhat = model.predict(x2, check_input=False)[0]
+        except TypeError:
+            yhat = model.predict(x2)[0]
+        return _clip01(float(yhat))
 
     def _predict_aux_int(self, topic_id: int, x: np.ndarray, models: Optional[Dict[int, Any]], default: int) -> int:
         if not models:
@@ -1305,6 +1384,10 @@ class KDDTrajectoryBuilder:
             s = s.split("~~")[0].strip()
         return s if s else None
 
+    # learner_model.py
+    from typing import Callable, Optional, Any, Mapping, Iterable, Tuple, List
+
+    # inside KDDTrajectoryBuilder
     def iter_training_rows(
             self,
             rows_by_student: Iterable[Tuple[str, List[Mapping[str, Any]]]],
@@ -1314,10 +1397,11 @@ class KDDTrajectoryBuilder:
             duration_col: str = "Step Duration (sec)",
             hints_col: str = "Hints",
             incorrects_col: str = "Incorrects",
+            action_labeler: Optional[Callable[..., int]] = None,
     ) -> Iterable[TrainingRow]:
 
         for _sid, seq in rows_by_student:
-            self.sim.reset(initial_mastery=0.2)
+            self.sim.reset(initial_mastery=0.1)
 
             for r in seq:
                 kc = self._extract_kc(r, kc_col)
@@ -1327,18 +1411,40 @@ class KDDTrajectoryBuilder:
                 if topic_id is None:
                     continue
 
-                action = self.schema.label_tutor_action_from_row(
-                    r,
-                    cfa_col=cfa_col,
-                    duration_col=duration_col,
-                    hints_col=hints_col,
-                    incorrects_col=incorrects_col,
-                )
-                action_meta = ActionMeta(action=action, is_tutee=False, force_generation=False)
+                # ---- outcomes (available in KDD row) ----
+                cfa = _safe_int(r.get(cfa_col), 0)
+                hints = _safe_int(r.get(hints_col), 0)
+                incorrects = _safe_int(r.get(incorrects_col), 0)
+                duration = _safe_float(r.get(duration_col), 0.0)
 
                 s_pre = self.sim.state.copy()
                 mastery_pre = float(s_pre.mastery[topic_id])
+                x_state = self.sim._state_features(s_pre, topic_id)
 
+                # ---- action id (schema OR external labeler) ----
+                if action_labeler is None:
+                    action = self.schema.label_tutor_action_from_row(
+                        r,
+                        cfa_col=cfa_col,
+                        duration_col=duration_col,
+                        hints_col=hints_col,
+                        incorrects_col=incorrects_col,
+                    )
+                else:
+                    action = int(action_labeler(
+                        row=r,
+                        topic_id=int(topic_id),
+                        s_pre=s_pre,
+                        x_state=x_state,
+                        cfa=int(cfa),
+                        hints=int(hints),
+                        incorrects=int(incorrects),
+                        duration=float(duration),
+                    ))
+
+                action_meta = ActionMeta(action=action, is_tutee=False, force_generation=False)
+
+                # x_resp must be built with the *chosen* action id
                 x_resp = self.sim._build_features(
                     s=s_pre,
                     topic_id=topic_id,
@@ -1346,14 +1452,8 @@ class KDDTrajectoryBuilder:
                     generation_mode=0,
                     include_outcome=False,
                 )
-                x_state = self.sim._state_features(s_pre, topic_id)
 
-                cfa = _safe_int(r.get(cfa_col), 0)
-                hints = _safe_int(r.get(hints_col), 0)
-                incorrects = _safe_int(r.get(incorrects_col), 0)
-                duration = _safe_float(r.get(duration_col), 0.0)
-
-                # Deterministic estimator update defines delta_mastery used for quality calibration
+                # deterministic estimator update (unchanged)
                 s_post = s_pre.copy()
                 self._deterministic_estimator_update(
                     s_post,
@@ -1364,8 +1464,6 @@ class KDDTrajectoryBuilder:
                     duration=duration,
                 )
                 delta_mastery = float(s_post.mastery[topic_id] - s_pre.mastery[topic_id])
-
-                # commit
                 self.sim.state = s_post
 
                 yield TrainingRow(
