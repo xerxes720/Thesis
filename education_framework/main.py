@@ -118,7 +118,7 @@ class KDDEnvConfig:
     num_topics: int = 7
     max_steps: int = 200
     initial_mastery: float = 0.2
-    lambda_step: float = 0.003  # NEW: reward penalty per step-cost unit
+    lambda_step: float = 0.01  # NEW: reward penalty per step-cost unit
 
 
 class KDDHierEnv:
@@ -356,9 +356,10 @@ def create_agents(
     ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # paper-ish
     if ll_mode == "single":
         n = max(1, num_topics)
-        ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
-        ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
-        ll_cfg.min_replay_size = int(max(ll_cfg.min_replay_size, ll_cfg.batch_size) * n)
+        # ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
+        # ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
+        # ll_cfg.min_replay_size = int(max(ll_cfg.min_replay_size, ll_cfg.batch_size) * n)
+
         # ll_cfg.target_update_steps = 200  # keep k=5 rule
         # ll_cfg.buffer_size = max(5_000, int(ll_cfg.buffer_size) // max(1, num_topics))
         # ll_cfg.min_replay_size = int(ll_cfg.min_replay_size) * max(1, num_topics)
@@ -398,17 +399,17 @@ def create_agents(
 
 
         elif ll_cfg.share_mode == "weighted_cka":
-            ll_cfg.share_frac = 0.10
+            ll_cfg.share_frac = 0.20
             ll_cfg.max_peers_per_update = 2
             ll_cfg.cka_probe_n = 64
-            ll_cfg.share_similarity_threshold = 0.75
-            ll_cfg.cka_power = 4.0
+            ll_cfg.share_similarity_threshold = 0.40
+            ll_cfg.cka_power = 2.0
             ll_cfg.cka_every_updates = 100  # reduce noise + compute cost
             ll_cfg.share_max_weight = 0.60  # cap peer influence (prevents over-trust spikes)
             ll_cfg.share_weight_ema = 0.90  # smooth weights over time (stability)
-            ll_cfg.share_warmup_updates = 300
-            ll_cfg.share_stop_updates = 1500  # stop late to avoid harming specialists
-            ll_cfg.min_peer_replay_size = 1000  # only share from mature peers
+            ll_cfg.share_warmup_updates = 100
+            ll_cfg.share_stop_updates = 5000  # stop late to avoid harming specialists
+            ll_cfg.min_peer_replay_size = 400  # only share from mature peers
 
     # --- build tutor agents: single vs multi ---
     if ll_mode == "single":

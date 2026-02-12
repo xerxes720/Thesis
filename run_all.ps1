@@ -43,15 +43,15 @@ try {
           --arch hrl --ll_mode single --share_mode off `
           --seed $seed --run_tag "single_ll" --log_ll_action_effects
 ##
-        python -m education_framework.main `
-          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
-          --share_mode off `
-          --seed $seed --run_tag "multi_no_es" --log_ll_action_effects
-##
+#        python -m education_framework.main `
+#          --bundle $bundle --episodes $episodes --max_steps $maxSteps `
+#          --share_mode off `
+#          --seed $seed --run_tag "multi_no_es" --log_ll_action_effects
+###
 #         python -m education_framework.main `
 #           --bundle $bundle --episodes $episodes --max_steps $maxSteps `
 #           --experience_sharing `
-#           --seed $seed --run_tag "multi_weighted_cka"
+#           --seed $seed --run_tag "multi_weighted_cka" --log_ll_action_effects
 ###
 #        python -m education_framework.main `
 #          --bundle $bundle --episodes $episodes --max_steps $maxSteps `

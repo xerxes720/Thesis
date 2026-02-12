@@ -19,7 +19,9 @@ which is easier to explain and avoids EMA double-counting.
 
 """
 Run with: 
-python -m education_framework.scripts.build_decision_tree --csv education_framework/data/algebra_2005_2006_train.txt --out education_framework/data/kdd_bundle.joblib --n_topics 7 --max_depth 7 --min_leaf 50 --ema_alpha 0.2 --seed 0 
+python -m education_framework.scripts.build_decision_tree   --csv education_framework/data/algebra_2005_2006_train.tx
+t   --out education_framework/data/kdd_bundle.joblib   --n_topics 7 --max_depth 7 --min_leaf 50 --ema_alpha 0.2 --seed 0   --cluster_mode behavior -
+-action_mode discover --n_actions 5   --action_features hints,incorrects,duration,opp   --action_min_cluster_frac 0.06 --action_label_mode schema   --leaf_shrinkage_prior 10   --topic_gain_mode balanced_primary   --quality_eps_frac 0.05 --quality_eps_min 0.0001
 
 """
 
@@ -658,61 +660,71 @@ def _merge_tiny_clusters(labels: np.ndarray, centroids: np.ndarray, min_frac: fl
     return labels2
 
 
-def _assign_discovered_modes_to_action_ids(
-        centroids: np.ndarray,
-        feature_names: List[str],
-        n_actions: int,
-) -> Dict[int, int]:
+def _assign_discovered_modes_to_action_ids(centroids: np.ndarray, feature_names: List[str], n_actions: int) -> Dict[int, int]:
     """
-    Map discovered mode_id -> tutor action ids [0..4].
-    If we have >=5 modes, reserve one mode for REVIEW (4) using highest 'opp' (or duration fallback).
-    Then map remaining modes by "support" to {0,1,2,3}.
+    Robust bijection: assign each centroid to one of {quiz, hint, worked_example, remediation, review}
+    using independent semantic scores, then resolve collisions by priority.
     """
     K = int(centroids.shape[0])
-    mode_to_action: Dict[int, int] = {}
-    remaining = list(range(K))
+    if K != 5:
+        raise ValueError(f"Expected K=5 centroids, got K={K}")
 
-    # --- pick REVIEW(4) if we have capacity ---
-    if K >= 5:
-        if "opp" in feature_names:
-            opp_idx = feature_names.index("opp")
-            review_mode = int(np.argmax(centroids[:, opp_idx]))
-        elif "duration" in feature_names:
-            dur_idx = feature_names.index("duration")
-            review_mode = int(np.argmax(centroids[:, dur_idx]))
-        else:
-            review_mode = int(np.argmax(centroids.sum(axis=1)))
+    fn = [f.lower().strip() for f in feature_names]
+    def col(name: str):
+        return fn.index(name) if name in fn else None
 
-        mode_to_action[review_mode] = 4  # REVIEW
-        remaining = [m for m in remaining if m != review_mode]
+    idx_h = col("hints")
+    idx_i = col("incorrects")
+    idx_d = col("duration")
+    idx_o = col("opp")
 
-    # --- compute support index (help/struggle proxy) ---
-    w = np.ones((centroids.shape[1],), dtype=np.float32)
-    if "opp" in feature_names:
-        w[feature_names.index("opp")] = 0.5
-    support = (centroids * w.reshape(1, -1)).sum(axis=1)
+    H = centroids[:, idx_h] if idx_h is not None else np.zeros((K,), dtype=np.float32)
+    I = centroids[:, idx_i] if idx_i is not None else np.zeros((K,), dtype=np.float32)
+    D = centroids[:, idx_d] if idx_d is not None else np.zeros((K,), dtype=np.float32)
+    O = centroids[:, idx_o] if idx_o is not None else np.zeros((K,), dtype=np.float32)
 
-    # --- order remaining by support ---
-    ordered = sorted(remaining, key=lambda m: float(support[m]))
+    # candidate picks (may collide)
+    pick = {
+        "review": int(np.argmax(O)) if idx_o is not None else int(np.argmax(D)),
+        "quiz": int(np.argmin(H + I + D)),
+        "hint": int(np.argmax(H)),
+        "remediation": int(np.argmax(I)),
+        "worked_example": int(np.argmax(D)),
+    }
 
-    # map to 0..3
-    if len(ordered) >= 1:
-        mode_to_action[ordered[0]] = 0  # QUIZ (lowest support)
-    if len(ordered) >= 2:
-        mode_to_action[ordered[-1]] = 3  # REMEDIATION (highest support)
+    # resolve collisions by priority: review > remediation > worked_example > hint > quiz
+    priority = ["review", "remediation", "worked_example", "hint", "quiz"]
+    used_modes = set()
+    final = {}
 
-    mids = [m for m in ordered if m not in (ordered[0], ordered[-1])] if len(ordered) >= 3 else []
-    if len(mids) >= 1:
-        mode_to_action[mids[0]] = 1  # HINT
-    if len(mids) >= 2:
-        mode_to_action[mids[-1]] = 2  # WORKED_EXAMPLE
+    remaining = set(range(K))
 
-    # any leftover -> HINT
-    for m in range(K):
-        if m not in mode_to_action:
-            mode_to_action[m] = 1
+    for name in priority:
+        m = pick[name]
+        if m in remaining:
+            final[name] = m
+            remaining.remove(m)
 
+    # fill any missing roles with leftovers (stable)
+    for name in priority:
+        if name not in final:
+            m = min(remaining)  # deterministic
+            final[name] = m
+            remaining.remove(m)
+
+    mode_to_action = {
+        final["quiz"]: 0,
+        final["hint"]: 1,
+        final["worked_example"]: 2,
+        final["remediation"]: 3,
+        final["review"]: 4,
+    }
+
+    used = sorted(mode_to_action.values())
+    if used != [0, 1, 2, 3, 4]:
+        raise RuntimeError(f"Non-bijective mapping produced: {mode_to_action}")
     return mode_to_action
+
 
 
 
