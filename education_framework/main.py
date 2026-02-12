@@ -217,14 +217,11 @@ class KDDHierEnv:
         )
         return obs.astype(np.float32)
 
-    def get_ll_observation(self, topic_id: int) -> List[float]:
+    def get_ll_observation(self, topic_id: int, include_topic_id: bool = True) -> List[float]:
         """
-           Paper-style *semantics*: LL agents observe learner performance variables for the
-           CURRENT topic context only (like Gridlock's current area), not all topics.
-
-           We return one scalar per per-topic block at index=topic_id, plus the global tail.
-           This prevents LL from seeing other topics while still being Markov for the current
-           tutoring interaction.
+        LL observation for a given topic.
+        - Specialist LL agents (one per topic): include_topic_id=False (paper-friendly)
+        - Single shared LL / tutee LL: include_topic_id=True (needs topic identity)
         """
         x = np.asarray(self.get_observation(), dtype=np.float32)
 
@@ -234,20 +231,23 @@ class KDDHierEnv:
         expected = n_blocks * T + tail
 
         if x.shape[0] != expected:
-            # fallback if obs layout changes
             return x.tolist()
 
         t = int(topic_id)
         t = max(0, min(T - 1, t))
 
         feats = []
-
         for b in range(n_blocks):
             start = b * T
-            feats.append(float(x[start + t]))  # pick the topic-specific scalar
+            feats.append(float(x[start + t]))
 
-        # append global tail unchanged
         feats.extend([float(x[-2]), float(x[-1])])
+
+        if include_topic_id:
+            onehot = np.zeros((T,), dtype=np.float32)
+            onehot[t] = 1.0
+            feats.extend(onehot.tolist())
+
         return np.asarray(feats, dtype=np.float32).tolist()
 
     def _done(self) -> bool:
@@ -356,9 +356,9 @@ def create_agents(
     ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # paper-ish
     if ll_mode == "single":
         n = max(1, num_topics)
-        # ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
-        # ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
-        # ll_cfg.min_replay_size = int(max(ll_cfg.min_replay_size, ll_cfg.batch_size) * n)
+        ll_cfg.train_every_steps = int(ll_cfg.train_every_steps) * n
+        ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep k=5 rule
+        ll_cfg.min_replay_size = int(max(ll_cfg.min_replay_size, ll_cfg.batch_size) * n)
 
         # ll_cfg.target_update_steps = 200  # keep k=5 rule
         # ll_cfg.buffer_size = max(5_000, int(ll_cfg.buffer_size) // max(1, num_topics))
@@ -390,26 +390,54 @@ def create_agents(
 
     if ll_cfg.experience_sharing:
         if ll_cfg.share_mode == "mutual":
-            # Conservative, early-only, cluster-local bootstrap
-            ll_cfg.share_frac = 0.05
-            ll_cfg.max_peers_per_update = 1
-            ll_cfg.share_warmup_updates = 200
-            ll_cfg.share_stop_updates = 700  # STOP mutual later to avoid harming specialists
-            ll_cfg.min_peer_replay_size = 300
+            # # Conservative, early-only, cluster-local bootstrap
+            # ll_cfg.share_frac = 0.05
+            # ll_cfg.max_peers_per_update = 1
+            # ll_cfg.share_warmup_updates = 200
+            # ll_cfg.share_stop_updates = 700  # STOP mutual later to avoid harming specialists
+            # ll_cfg.min_peer_replay_size = 300
+            # Paper-faithful mutual: same mechanism as weighted, but weights=1
+            ll_cfg.share_paper_batch = True
+            ll_cfg.share_loss_norm = "mean"
+            ll_cfg.share_warmup_updates = 0
+            ll_cfg.share_stop_updates = 10 ** 9
+            ll_cfg.min_peer_replay_size = ll_cfg.batch_size
 
 
         elif ll_cfg.share_mode == "weighted_cka":
+            # ll_cfg.share_frac = 0.20
+            # ll_cfg.max_peers_per_update = 2
+            # ll_cfg.cka_probe_n = 64
+            # ll_cfg.share_similarity_threshold = 0.40
+            # ll_cfg.cka_power = 2.0
+            # ll_cfg.cka_every_updates = 100  # reduce noise + compute cost
+            # ll_cfg.share_max_weight = 0.60  # cap peer influence (prevents over-trust spikes)
+            # ll_cfg.share_weight_ema = 0.90  # smooth weights over time (stability)
+            # ll_cfg.share_warmup_updates = 100
+            # ll_cfg.share_stop_updates = 5000  # stop late to avoid harming specialists
+            # ll_cfg.min_peer_replay_size = 400  # only share from mature peers
+            # Paper-faithful weighted sharing (Algorithm 1)
+
+            ll_cfg.share_paper_batch = True
+            ll_cfg.share_loss_norm = "sumw"
+
+            # bounded sharing (critical)
             ll_cfg.share_frac = 0.20
             ll_cfg.max_peers_per_update = 2
-            ll_cfg.cka_probe_n = 64
+
+            # your stabilizers (critical)
             ll_cfg.share_similarity_threshold = 0.40
             ll_cfg.cka_power = 2.0
-            ll_cfg.cka_every_updates = 100  # reduce noise + compute cost
-            ll_cfg.share_max_weight = 0.60  # cap peer influence (prevents over-trust spikes)
-            ll_cfg.share_weight_ema = 0.90  # smooth weights over time (stability)
+            ll_cfg.cka_every_updates = 20
+            ll_cfg.share_max_weight = 0.60
+            ll_cfg.share_weight_ema = 0.90
+
+            # warmup + stop (critical)
             ll_cfg.share_warmup_updates = 100
-            ll_cfg.share_stop_updates = 5000  # stop late to avoid harming specialists
-            ll_cfg.min_peer_replay_size = 400  # only share from mature peers
+            ll_cfg.share_stop_updates = 5000
+
+            ll_cfg.min_peer_replay_size = 400
+            ll_cfg.cka_probe_n = 64
 
     # --- build tutor agents: single vs multi ---
     if ll_mode == "single":
@@ -432,14 +460,17 @@ def create_agents(
 
     # --- peers only when multi + sharing enabled ---
     if ll_mode == "multi" and ll_cfg.experience_sharing and ll_cfg.share_mode != "off":
-        clusters = topic_cluster_ids
         for i, agent in enumerate(tutor_agents):
-            if clusters is not None and len(clusters) == len(tutor_agents):
-                ci = clusters[i]
-                peers = [p for j, p in enumerate(tutor_agents) if j != i and clusters[j] == ci]
-            else:
-                peers = [p for j, p in enumerate(tutor_agents) if j != i]
+            peers = [p for j, p in enumerate(tutor_agents) if j != i]
             agent.set_peers(peers)
+        # clusters = topic_cluster_ids
+        # for i, agent in enumerate(tutor_agents):
+        #     if clusters is not None and len(clusters) == len(tutor_agents):
+        #         ci = clusters[i]
+        #         peers = [p for j, p in enumerate(tutor_agents) if j != i and clusters[j] == ci]
+        #     else:
+        #         peers = [p for j, p in enumerate(tutor_agents) if j != i]
+        #     agent.set_peers(peers)
     else:
         for a in tutor_agents:
             a.set_peers([])
@@ -542,7 +573,7 @@ class FlatAgent:
     # -------- observation shaping (flat-only) --------
 
     def _expand_obs(self, obs) -> np.ndarray:
-        """Expand the raw env observation with a per-topic grouped view."""
+        """Expand the raw env observation with a per-topic grouped view (+ topic id)."""
         x = np.asarray(obs, dtype=np.float32)
 
         T = int(self.num_topics)
@@ -553,14 +584,19 @@ class FlatAgent:
             return x
 
         mastery = x[0:T]
-        cfa = x[1*T:2*T]
-        hint = x[2*T:3*T]
-        t_ema = x[3*T:4*T]
-        inc = x[4*T:5*T]
-        opp = x[5*T:6*T]
-        done = x[6*T:7*T]
+        cfa = x[1 * T:2 * T]
+        hint = x[2 * T:3 * T]
+        t_ema = x[3 * T:4 * T]
+        inc = x[4 * T:5 * T]
+        opp = x[5 * T:6 * T]
+        done = x[6 * T:7 * T]
 
-        per_topic = np.stack([mastery, cfa, hint, t_ema, inc, opp, done], axis=1).reshape(-1)
+        # NEW: explicit topic id feature (normalized 0..1)
+        tid = (np.arange(T, dtype=np.float32) / max(1, T - 1))
+
+        # per-topic grouped features now include tid as the last column
+        per_topic = np.stack([mastery, cfa, hint, t_ema, inc, opp, done, tid], axis=1).reshape(-1)
+
         return np.concatenate([x, per_topic.astype(np.float32, copy=False)], axis=0)
 
     def _valid_action_indices(self, obs) -> List[int]:
@@ -575,7 +611,7 @@ class FlatAgent:
         if x.shape[0] != expected:
             return list(range(len(self.actions)))
 
-        topic_complete = x[6*T:7*T]
+        topic_complete = x[6 * T:7 * T]
         valid_topics = [t for t in range(T) if float(topic_complete[t]) < 0.5]
         if len(valid_topics) == 0:
             valid_topics = list(range(T))
@@ -627,7 +663,6 @@ class FlatAgent:
         obs_x = self._expand_obs(obs)
         next_obs_x = self._expand_obs(next_obs)
         self.agent.update(obs_x, a_idx, r, next_obs_x, done)
-
 
 
 def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
@@ -722,8 +757,8 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             # - For multi-LL: keeps “in-topic” semantics stable
             # - For single-LL: avoids giving a raw topic_id while keeping it Markov
 
-            tutor_obs = env.get_ll_observation(topic_id)
-
+            include_tid = (len(tutor_agents) == 1)  # single LL must know which topic; specialists do not
+            tutor_obs = env.get_ll_observation(topic_id, include_topic_id=include_tid)
             ll_action_idx = tutor_agent.select_action(tutor_obs)
             # if len(tutor_agents) > 1:
             #     ref = tutor_agents[0].policy_net
@@ -745,15 +780,13 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
                 tutor_dm_count[int(topic_id), int(ll_action_idx)] += 1
             reward_ll = float(info.get("reward_ll", reward_hl))
 
-
-
             # if len(tutor_agents) == 1:
             #     # single shared LL tutor needs topic_id to disambiguate
             #     next_tutor_obs = add_topic(next_obs, topic_id)
             # else:
             #     # per-topic LL tutor must NOT include topic_id (keeps sharing “in-topic”)
             #     next_tutor_obs = canonicalize_obs(next_obs, topic_id, num_topics)
-            next_tutor_obs = env.get_ll_observation(topic_id)
+            next_tutor_obs = env.get_ll_observation(topic_id, include_topic_id=include_tid)
 
             # per-agent reward attribution:
             # - multi-agent: reward belongs to that topic’s LL agent
@@ -772,7 +805,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             # tutee_obs = np.concatenate([np.asarray(env.get_ll_observation(topic_id), dtype=np.float32),
             #                             np.array([topic_id], dtype=np.float32)]).tolist()
 
-            tutee_obs = env.get_ll_observation(topic_id)
+            tutee_obs = env.get_ll_observation(topic_id, include_topic_id=True)
 
             ll_action_idx = tutee_agent.select_action(tutee_obs)
             ll_action_str = tutee_agent.get_action_meanings()[ll_action_idx]
@@ -784,7 +817,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             # next_tutee_obs = np.concatenate([np.asarray(env.get_ll_observation(topic_id), dtype=np.float32),
             #                             np.array([topic_id], dtype=np.float32)]).tolist()
 
-            next_tutee_obs = env.get_ll_observation(topic_id)
+            next_tutee_obs = env.get_ll_observation(topic_id, include_topic_id=True)
 
             tutee_reward_total += reward_ll
 
@@ -976,7 +1009,8 @@ def _collect_state_bank(
                 mode, topic_id = high_level_agent.decode_action(hl_a)
 
                 if mode == "tutor":
-                    tutor_obs = env.get_ll_observation(topic_id)
+                    tutor_obs = env.get_ll_observation(topic_id, include_topic_id=(len(tutor_agents) == 1))
+
                     bank[int(topic_id)].append(tutor_obs)
 
                     # take an action just to advance env (eval; no learning)
@@ -1032,7 +1066,7 @@ def _eval_swap_episode(
         mode, topic_id = high_level_agent.decode_action(hl_a)
 
         if mode == "tutor":
-            tutor_obs = env.get_ll_observation(topic_id)
+            tutor_obs = env.get_ll_observation(topic_id, include_topic_id=(len(tutor_agents) == 1))
 
             if len(tutor_agents) == 1:
                 ag = tutor_agents[0]
@@ -1299,7 +1333,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bundle", type=str, default="education_framework/data/kdd_bundle.joblib")
     ap.add_argument("--episodes", type=int, default=100)
-    ap.add_argument("--log_window", type=int, default=100)
+    # Option A (fastest): reduce --log_window to 25 (or 20) so the gate updates before sharing becomes active.
+    ap.add_argument("--log_window", type=int, default=20)
     ap.add_argument("--use_tutee", action="store_true", default=False)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max_steps", type=int, default=200)
@@ -1352,6 +1387,39 @@ def main():
         choices=["off", "mutual", "weighted_cka"],
         help="Sharing mode used by low-level tutor agents when experience_sharing is enabled.",
     )
+
+    # --- experience sharing peer-gating (action-effect similarity) ---
+    ap.add_argument(
+        "--peer_gate_action_effects",
+        action="store_true",
+        default=False,
+        help="If set (HRL + multi LL + sharing): restrict each topic's peer set to top-K topics with similar action-effect vectors (reduces negative transfer).",
+    )
+    ap.add_argument(
+        "--peer_gate_topk",
+        type=int,
+        default=1,
+        help="Top-K most similar topics to allow as peers when --peer_gate_action_effects is enabled.",
+    )
+    ap.add_argument(
+        "--peer_gate_sim_threshold",
+        type=float,
+        default=0.70,
+        help="Minimum cosine similarity required for a topic to be considered an eligible peer under action-effect gating.",
+    )
+    ap.add_argument(
+        "--peer_gate_min_n",
+        type=int,
+        default=20,
+        help="Minimum per-action sample count within the log window for that dimension to be trusted in the action-effect vector.",
+    )
+    ap.add_argument(
+        "--peer_gate_verbose",
+        action="store_true",
+        default=False,
+        help="Print peer-gating selections each log window (debug).",
+    )
+
     ap.add_argument(
         "--arch",
         type=str,
@@ -1392,6 +1460,10 @@ def main():
         default=False,
         help="Print per-topic mean mastery gain (Δmastery) conditioned on tutor action (HRL runs).",
     )
+    ap.add_argument("--peer_gate_min_dims", type=int, default=3)
+    ap.add_argument("--peer_gate_min_pair_dims", type=int, default=3)
+    ap.add_argument("--peer_gate_update_every", type=int, default=25)
+    ap.add_argument("--peer_gate_sim_power", type=float, default=2.0)
     args = ap.parse_args()
 
     # def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
@@ -1485,6 +1557,15 @@ def main():
         num_topics = env.num_topics
 
         if args.arch == "hrl":
+
+            # Specialists (multi) should NOT include topic-id; single LL MUST include it.
+            include_tid_tutor = (args.ll_mode == "single")  # single shared LL needs topic identity
+            include_tid_tutee = True  # tutee is a single agent across topics
+
+            # Infer dims from the env itself (robust).
+            tutor_obs_dim = len(env.get_ll_observation(0, include_topic_id=include_tid_tutor))
+            tutee_obs_dim = len(env.get_ll_observation(0, include_topic_id=include_tid_tutee))
+
             high_level_agent, tutor_agents, tutee_agent = create_agents(
                 num_topics=bundle.n_topics,
                 use_tutee=use_tutee,
@@ -1493,6 +1574,32 @@ def main():
                 share_mode=args.share_mode,
                 topic_cluster_ids=getattr(learner_cfg, "topic_cluster_ids", None),
             )
+
+            # ---- Ensure LL networks exist with the *correct* observation dims ----
+            # Tutor LL: depends on ll_mode (single needs topic id; specialists do not)
+            for ag in tutor_agents:
+                ag._ensure_networks(input_dim=int(tutor_obs_dim))
+
+            # Tutee LL: always includes topic id
+            if tutee_agent is not None:
+                tutee_agent._ensure_networks(input_dim=int(tutee_obs_dim))
+            # ---- Paper-faithful: initialize all LL agents with identical weights ----
+
+            if args.ll_mode == "multi" and len(tutor_agents) > 1:
+                # force-create networks with correct input dim
+                _ = env.reset()
+                # ll_dim = len(env.get_ll_observation(0))
+                #
+                # for ag in tutor_agents:
+                #     ag._ensure_networks(ll_dim)
+
+                base_pol = tutor_agents[0].policy_net.state_dict()
+                base_tgt = tutor_agents[0].target_net.state_dict()
+
+                for ag in tutor_agents[1:]:
+                    ag.policy_net.load_state_dict(base_pol)
+                    ag.target_net.load_state_dict(base_tgt)
+
             print("[LL CFG]", {
                 "ll_mode": args.ll_mode,
                 "train_every_steps": tutor_agents[0].cfg.train_every_steps,
@@ -1563,6 +1670,9 @@ def main():
             A = len(tutor_action_names)
             window_tutor_dm_sum = np.zeros((num_topics, A), dtype=np.float64)
             window_tutor_dm_count = np.zeros((num_topics, A), dtype=np.int64)
+            gate_tutor_dm_sum = np.zeros((num_topics, A), dtype=np.float64)
+            gate_tutor_dm_count = np.zeros((num_topics, A), dtype=np.int64)
+            gate_eps_count = 0
         else:
             window_tutor_dm_sum = None
             window_tutor_dm_count = None
@@ -1710,7 +1820,8 @@ def main():
                 avg_reward_per_learning_agent = agent_reward_sum / max(1, n_learning_agents)
 
                 # A) average per *topic slot* (paper-style "over N agents", N=num_topics)
-                denom = num_topics + (1 if (use_tutee and tutee_agent is not None) else 0)
+                # denom = num_topics + (1 if (use_tutee and tutee_agent is not None) else 0)
+                denom = num_topics
                 avg_reward_per_topic_slot = agent_reward_sum / max(1, denom)
 
             rows.append([
@@ -1755,14 +1866,28 @@ def main():
                 # NEW: accumulate tutor Δmastery stats per action/topic
                 if window_tutor_dm_sum is not None and ep_tutor_dm_sum is not None:
                     window_tutor_dm_sum += np.asarray(ep_tutor_dm_sum, dtype=np.float64)
+                    gate_tutor_dm_sum += ep_tutor_dm_sum
                 if window_tutor_dm_count is not None and ep_tutor_dm_count is not None:
                     window_tutor_dm_count += np.asarray(ep_tutor_dm_count, dtype=np.int64)
+                    gate_tutor_dm_count += ep_tutor_dm_count
 
                 window_tutor_hl += int(tutor_hl_count)
                 window_tutee_hl += int(tutee_hl_count)
 
                 # NEW: aggregate mastery/bottleneck/streak
                 window_eps_count += 1
+                gate_eps_count += 1
+
+                # update peer-gate selections every --peer_gate_update_every episodes
+
+                # if (... and episode % args.peer_gate_update_every == 0):
+                #     mean_dm_gate = gate_tutor_dm_sum / max(1, gate_tutor_dm_count)
+                #     reliable = (gate_tutor_dm_count >= args.peer_gate_min_n)
+                #     topic_signal = (reliable.sum(axis=1) >= args.peer_gate_min_dims)
+                    # compute pairwise cosine ONLY on shared reliable dims
+                    # choose peers with sim>=threshold; if none => disable sharing for that topic
+                    # ag.set_peers(peers, sims=chosen_sims, sim_threshold=thr,
+                    #                       sim_power=args.peer_gate_sim_power)
 
                 if ep_mastery_vec is not None and len(ep_mastery_vec) == num_topics:
                     window_mastery_sum += np.asarray(ep_mastery_vec, dtype=np.float64)
@@ -1895,6 +2020,71 @@ def main():
                         print(
                             f"    min={float(vals.min()):.3f} mean={float(vals.mean()):.3f} max={float(vals.max()):.3f} std={float(vals.std()):.3f}")
 
+                # --- dynamic peer gating using action-effect similarity (reduces negative transfer) ---
+                if (
+                        args.arch == "hrl"
+                        and args.ll_mode == "multi"
+                        and bool(args.experience_sharing)
+                        and str(args.share_mode) != "off"
+                        and bool(getattr(args, "peer_gate_action_effects", False))
+                ):
+                    # Build per-topic action-effect vectors from the current log window and
+                    # restrict each topic's peer set to the top-K most similar topics.
+                    # This prevents negative transfer when topics disagree about action utility.
+                    denom = np.maximum(1, window_tutor_dm_count)
+                    mean_dm_gate = window_tutor_dm_sum / denom  # [T, A]
+
+                    min_n_gate = int(getattr(args, "peer_gate_min_n", 20))
+                    V = mean_dm_gate.copy()
+
+                    # mask unreliable dimensions (low support in the window)
+                    reliable = (window_tutor_dm_count >= min_n_gate).astype(np.float64)
+                    V = V * reliable
+
+                    topic_signal = (reliable.sum(axis=1) > 0)  # topics with any trusted dims
+
+                    if int(topic_signal.sum()) >= 2:
+                        norms = np.linalg.norm(V, axis=1, keepdims=True)
+                        norms = np.maximum(norms, 1e-12)
+                        Vn = V / norms
+                        S_gate = Vn @ Vn.T  # cosine similarity (T x T)
+
+                        topk = max(1, int(getattr(args, "peer_gate_topk", 2)))
+                        thr = float(getattr(args, "peer_gate_sim_threshold", 0.10))
+                        thr = max(-1.0, min(1.0, thr))
+
+                        for i, ag in enumerate(tutor_agents):
+                            # if no stable signal for this topic yet: avoid isolating it
+                            if not bool(topic_signal[i]):
+                                ag.set_peers(tutor_agents)
+                                continue
+
+                            sims = np.asarray(S_gate[i], dtype=np.float64).copy()
+                            sims[i] = -1e9  # exclude self
+
+                            # rank candidates
+                            cand = [(float(sims[j]), j) for j in range(num_topics) if j != i]
+                            cand.sort(key=lambda x: x[0], reverse=True)
+
+                            # chosen_idx = [j for sim, j in cand if sim >= thr][:topk]
+                            # if not chosen_idx:
+                            #     # fall back to top-K even if below threshold (keeps sharing alive)
+                            #     chosen_idx = [j for _, j in cand[:topk]]
+                            chosen_idx = [j for sim, j in cand if sim >= thr][:topk]
+                            if not chosen_idx:
+                                ag.set_peers([tutor_agents[j] for j in chosen_idx])
+                                continue
+
+                            ag.set_peers([tutor_agents[j] for j in chosen_idx])
+
+                            if bool(getattr(args, "peer_gate_verbose", False)):
+                                sims_str = ", ".join([f"{j}:{float(S_gate[i, j]):.3f}" for j in chosen_idx])
+                                print(f"  [peer-gate] topic {i}: peers={chosen_idx} sims=({sims_str})")
+                    else:
+                        # not enough signal yet -> default all-to-all peers
+                        for i, ag in enumerate(tutor_agents):
+                            ag.set_peers(tutor_agents)
+
                 print()
 
                 # reset window
@@ -1922,7 +2112,6 @@ def main():
                     window_eps_count = 0
                     if use_tutee and tutee_agent is not None:
                         window_tutee_action_counts = {a: 0 for a in tutee_action_names}
-
 
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",

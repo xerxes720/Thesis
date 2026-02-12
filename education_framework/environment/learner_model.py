@@ -373,7 +373,7 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.80
+    mastery_threshold: float = 0.85
     opp_min: int = 0
 
     # topic_mastery_thresholds: Optional[List[float]] = field(
