@@ -46,6 +46,14 @@ class LowLevelAgentConfig:
     batch_size: int = 64
     min_replay_size: int = 150
 
+    # --- single-LL fairness option: keep separate replay buffers per topic ---
+    per_topic_replay: bool = False
+    # How to pick which topic-buffer to train from when per_topic_replay=True
+    # - "current": train on the buffer for the topic that generated this transition
+    # - "uniform": sample a topic uniformly among buffers with enough data
+    per_topic_sample_mode: str = "current"
+    # Capacity per topic when per_topic_replay=True. If None, uses buffer_size // num_topics.
+    per_topic_buffer_size: Optional[int] = None
     train_every_steps: int = 20
     # target_update_steps: int = 1_000
     # To be faithful to the original paper: k=5
@@ -218,6 +226,15 @@ class DQNLowLevelAgent:
         self.num_updates = 0
 
         self.replay = ReplayBuffer(self.cfg.buffer_size)
+        # Optional: in single-LL mode we can keep replay separated per topic to remove
+        # the implicit cross-topic mini-batch advantage of a shared LL network.
+        self._topic_replays: Optional[List[ReplayBuffer]] = None
+        if bool(getattr(self.cfg, "per_topic_replay", False)):
+            cap = getattr(self.cfg, "per_topic_buffer_size", None)
+            if cap is None:
+                cap = max(1000, int(self.cfg.buffer_size) // max(1, int(self.cfg.num_topics)))
+            self._topic_replays = [ReplayBuffer(int(cap)) for _ in range(int(self.cfg.num_topics))]
+
         self.policy_net: Optional[QNetwork] = None
         self.target_net: Optional[QNetwork] = None
         self.optimizer: Optional[optim.Optimizer] = None
@@ -361,6 +378,49 @@ class DQNLowLevelAgent:
         self.cfg.epsilon = max(0.0, float(epsilon))
 
     # def set_peers(self, peers: List["DQNLowLevelAgent"]) -> None:
+    # ---------- per-topic replay helpers (single-LL fairness) ----------
+
+    def _has_topic_replay(self) -> bool:
+        return (self._topic_replays is not None) and (len(self._topic_replays) == int(self.cfg.num_topics))
+
+    def _topic_replay(self, topic_id: int) -> ReplayBuffer:
+        assert self._topic_replays is not None
+        tid = int(topic_id)
+        if tid < 0 or tid >= len(self._topic_replays):
+            raise ValueError(f"topic_id out of range: {topic_id}")
+        return self._topic_replays[tid]
+
+    def _choose_train_topic(self, prefer_topic_id: Optional[int]) -> Optional[int]:
+        """Choose which topic-buffer to sample from when per_topic_replay=True."""
+        if not self._has_topic_replay():
+            return None
+
+        mode = str(getattr(self.cfg, "per_topic_sample_mode", "current"))
+
+        # default: current topic
+
+        if mode == "current" and prefer_topic_id is not None:
+            return int(prefer_topic_id)
+
+        # uniform among topic buffers with enough data
+        need = int(max(self.cfg.min_replay_size, self.cfg.batch_size))
+        ok = [t for t in range(int(self.cfg.num_topics)) if len(self._topic_replay(t)) >= need]
+        if not ok:
+            return int(prefer_topic_id) if prefer_topic_id is not None else None
+        return int(np.random.choice(ok))
+
+    def _sample_own(
+            self, B: int, topic_id: Optional[int]
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Sample a batch from own replay (global or per-topic)."""
+        if self._has_topic_replay():
+            tid = self._choose_train_topic(topic_id)
+            if tid is None:
+                return self.replay.sample(B)
+
+            return self._topic_replay(tid).sample(B)
+
+        return self.replay.sample(B)
 
     def set_peers(
             self,
@@ -406,13 +466,20 @@ class DQNLowLevelAgent:
             q = self.policy_net(x)
             return int(q.argmax(dim=1).item())
 
-    def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool) -> None:
+    def update(self, obs: List[float], action: int, reward: float, next_obs: List[float], done: bool,
+               topic_id: Optional[int] = None) -> None:
         self._ensure_networks(input_dim=len(obs))
 
         # store own transition
         # obs/next_obs are freshly created lists from env; do not copy (major speed win)
         # self.replay.push(obs, int(action), float(reward), next_obs, bool(done))
-        self.replay.push(obs, action, reward, next_obs, done)
+        # self.replay.push(obs, action, reward, next_obs, done)
+
+        if self._has_topic_replay():
+            tid = int(topic_id) if topic_id is not None else 0
+            self._topic_replay(tid).push(obs, action, reward, next_obs, done)
+        else:
+            self.replay.push(obs, action, reward, next_obs, done)
 
         # if self.shared_replay is not None:
         #     self.shared_replay.push(obs, action, reward, next_obs, done)
@@ -421,11 +488,21 @@ class DQNLowLevelAgent:
         if self.total_steps % self.cfg.train_every_steps != 0:
             return
 
-        if len(self.replay) < max(self.cfg.min_replay_size, self.cfg.batch_size):
-            return
+        if self._has_topic_replay():
+            tid = self._choose_train_topic(topic_id)
+            if len(self._topic_replay(tid)) < max(self.cfg.min_replay_size, self.cfg.batch_size):
+                return
+        else:
+
+            if len(self.replay) < max(self.cfg.min_replay_size, self.cfg.batch_size):
+                return
+
+        # if len(self.replay) < max(self.cfg.min_replay_size, self.cfg.batch_size):
+        #     return
 
         # -------- Build training batch: own + shared --------
-        batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w = self._build_shared_batch(self.cfg.batch_size)
+        batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w = self._build_shared_batch(self.cfg.batch_size,
+                                                                                                  topic_id=topic_id)
 
         s_np, a_np, r_np, s2_np, d_np, w_np = batch_s, batch_a, batch_r, batch_s2, batch_d, batch_w
 
@@ -488,7 +565,7 @@ class DQNLowLevelAgent:
 
     # -------- internals --------
 
-    def _build_shared_batch(self, B: int):
+    def _build_shared_batch(self, B: int, topic_id: Optional[int] = None):
         mode = str(getattr(self.cfg, "share_mode", "off"))
 
         # --- helpers ---
@@ -502,31 +579,31 @@ class DQNLowLevelAgent:
 
         # --- no sharing / warmup ---
         if (mode == "off") or (not getattr(self.cfg, "experience_sharing", False)):
-            s, a, r, s2, d = self.replay.sample(B)
+            s, a, r, s2, d = self._sample_own(B, topic_id)
             w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
         if int(self.num_updates) < int(getattr(self.cfg, "share_warmup_updates", 0)):
-            s, a, r, s2, d = self.replay.sample(B)
+            s, a, r, s2, d = self._sample_own(B, topic_id)
             w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
         # stop sharing after a given update (avoids harming late-stage specialists)
         if int(self.num_updates) >= int(getattr(self.cfg, "share_stop_updates", 10 ** 9)):
-            s, a, r, s2, d = self.replay.sample(B)
+            s, a, r, s2, d = self._sample_own(B, topic_id)
             w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
         peers = list(getattr(self, "_peers", []) or [])
         if len(peers) == 0:
-            s, a, r, s2, d = self.replay.sample(B)
+            s, a, r, s2, d = self._sample_own(B, topic_id)
             w = np.ones((B,), dtype=np.float32)
             return s, a, r, s2, d, w
 
         # ---- paper-faithful batch (Algorithm 1) ----
 
         if bool(getattr(self.cfg, "share_paper_batch", False)):
-            return self._build_shared_batch_paper(B, mode)
+            return self._build_shared_batch_paper(B, mode, topic_id=topic_id)
         # ----- fixed batch budget -----
         share_frac = float(getattr(self.cfg, "share_frac", 0.25))
         share_B = int(round(B * share_frac))
@@ -534,7 +611,7 @@ class DQNLowLevelAgent:
         own_B = B - share_B
 
         # sample own portion
-        s, a, r, s2, d = self.replay.sample(own_B)
+        s, a, r, s2, d = self._sample_own(own_B, topic_id)
         w = np.ones((own_B,), dtype=np.float32)
 
         # if can't share for some reason, pad with own
@@ -659,14 +736,15 @@ class DQNLowLevelAgent:
 
         return s, a, r, s2, d, w
 
-    def _build_shared_batch_paper(self, B: int, mode: str):
+    def _build_shared_batch_paper(self, B: int, mode: str, topic_id: Optional[int] = None):
+
         def _cat2(x: np.ndarray, y: np.ndarray) -> np.ndarray:
             if x.size == 0: return y
             if y.size == 0: return x
             return np.concatenate([x, y], axis=0)
 
         # Self batch
-        s, a, r, s2, d = self.replay.sample(B)
+        s, a, r, s2, d = self._sample_own(B, topic_id)
         w = np.ones((B,), dtype=np.float32)
 
         # Eligible peers
