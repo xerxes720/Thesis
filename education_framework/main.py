@@ -118,7 +118,8 @@ class KDDEnvConfig:
     num_topics: int = 7
     max_steps: int = 200
     initial_mastery: float = 0.2
-    lambda_step: float = 0.01  # NEW: reward penalty per step-cost unit
+    lambda_step: float = 0.008  # NEW: reward penalty per step-cost unit
+    rho_diminish: float = 0.0015  # paper-like diminishing returns; 0 disables
 
 
 class KDDHierEnv:
@@ -144,6 +145,7 @@ class KDDHierEnv:
         self.num_topics = int(self.cfg.num_topics)
         self.max_steps = int(self.cfg.max_steps)
         self.lambda_step = float(self.cfg.lambda_step)
+        self.rho_diminish = float(getattr(self.cfg, "rho_diminish", 0.0))
 
         self.model = KDDLearnerModel(
             cfg=learner_cfg or KDDLearnerConfig(n_topics=self.num_topics),
@@ -278,14 +280,21 @@ class KDDHierEnv:
         reward_hl = base_reward_global - step_penalty
         reward_ll = base_reward_local - step_penalty
 
+        # ---- Paper-faithful: one extrinsic team reward used by everyone ----
+        reward_team = float(reward_hl)
+        if self.rho_diminish > 0.0:
+            # use cumulative assist/interaction count proxy (step_count is cost-weighted)
+            reward_team = reward_team / (1.0 + self.rho_diminish * float(self.step_count))
+
         info = dict(info)
         info["base_reward_global"] = base_reward_global
         info["base_reward_local"] = base_reward_local
         info["step_penalty"] = float(step_penalty)
         info["reward_hl"] = float(reward_hl)
         info["reward_ll"] = float(reward_ll)
+        info["reward_team"] = float(reward_team)
 
-        return self.get_observation(), reward_hl, done, {"mode": "tutor", **info}
+        return self.get_observation(), reward_team, done, {"mode": "tutor", **info}
 
         # base_reward = float(info.get("reward", 0.0))
         # step_cost = float(info.get("step_cost", 1))
@@ -322,14 +331,21 @@ class KDDHierEnv:
         reward_hl = base_reward_global - self.lambda_step * step_cost
         reward_ll = base_reward_local - self.lambda_step * step_cost
 
+        # ---- Paper-faithful: one extrinsic team reward used by everyone ----
+        reward_team = float(reward_hl)
+        if self.rho_diminish > 0.0:
+            # use cumulative assist/interaction count proxy (step_count is cost-weighted)
+            reward_team = reward_team / (1.0 + self.rho_diminish * float(self.step_count))
+
         info = dict(info)
         info["base_reward_global"] = base_reward_global
         info["base_reward_local"] = base_reward_local
         info["step_penalty"] = float(self.lambda_step * step_cost)
         info["reward_hl"] = float(reward_hl)
         info["reward_ll"] = float(reward_ll)
+        info["reward_team"] = float(reward_team)
 
-        return self.get_observation(), reward_hl, done, {"mode": "tutee", **info}
+        return self.get_observation(), reward_team, done, {"mode": "tutee", **info}
 
 
 # ----------------------------
@@ -347,18 +363,43 @@ def create_agents(
         share_probe_peer_frac: float = 0.5,
 ):
     hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
+    hl_cfg = HighLevelAgentConfig(
+        lr=3e-4,
+        gamma=0.99,
+        buffer_size=100000,
+        batch_size=128,
+        min_replay_size=1000,
+        train_every_steps=10,
+        target_update_steps=50,
+    )
     hl_cfg.device = "cpu"
+    # --- Fairness: match HL learning cadence to LL/flat so early training is comparable ---
+    # HRL makes two decisions (HL then LL). If HL warms up much later than LL/flat, HRL will look
+    # artificially weak early, then jump mid-run when HL finally starts updating.
+    # hl_cfg.train_every_steps = 20
+    # hl_cfg.target_update_steps = 100  # 5 * 20
+    # hl_cfg.batch_size = 64
+    # hl_cfg.min_replay_size = 200
     high_level_agent = HighLevelAgent(hl_cfg)
 
     ll_cfg = LowLevelAgentConfig(num_topics=num_topics)
+    ll_cfg = LowLevelAgentConfig(
+        lr=5e-4,
+        gamma=0.985,
+        buffer_size=100000,
+        batch_size=128,
+        min_replay_size=1000,
+        train_every_steps=10,
+        target_update_steps=50,
+    )
     ll_cfg.device = "cpu"
 
     # --- Fairness: remove single-LL's implicit cross-topic minibatch advantage without starving updates ---
     # Keep the same optimizer cadence as multi specialists (train_every/target_update in agent-step units),
     # but keep replay separated per topic so each gradient step is topic-specific.
-    ll_cfg.train_every_steps = 20
-    ll_cfg.train_every_steps = 20
-    ll_cfg.target_update_steps = 100
+    # ll_cfg.train_every_steps = 20
+    # ll_cfg.train_every_steps = 20
+    # ll_cfg.target_update_steps = 100
 
     if ll_mode == "single":
         # DO NOT scale update cadence
@@ -385,14 +426,22 @@ def create_agents(
         ll_cfg.share_warmup_updates = max(200, int(ll_cfg.share_warmup_updates) // max(1, num_topics))
 
     # --- make min_replay_size smaller ONLY for multi-agent (data-starved per-topic buffers) ---
-    BASE_MIN_REPLAY = 1000
+    # --- scale min_replay_size for per-topic replay buffers (fixes delayed multi "takeoff") ---
+    BASE_MIN_REPLAY_SHARED = 1000  # what a single shared-policy would use
 
-    if ll_mode == "multi" or (ll_mode == "single" and bool(getattr(ll_cfg, "per_topic_replay", False))):
-        # each topic agent gets fewer transitions; start learning earlier
-        ll_cfg.min_replay_size = 200
+    per_topic = (ll_mode == "multi") or (ll_mode == "single" and bool(getattr(ll_cfg, "per_topic_replay", False)))
+
+    if per_topic:
+        # Each topic buffer gets ~1/num_topics of the stream, so warmup should shrink accordingly.
+        # Keep a floor to avoid learning from ultra-tiny buffers.
+        scaled = int(BASE_MIN_REPLAY_SHARED / max(1, int(num_topics)))
+        ll_cfg.min_replay_size = max(ll_cfg.batch_size, min(300, max(100, scaled)))
     else:
-        # single shared LL agent sees all topics; can afford larger warmup
-        ll_cfg.min_replay_size = BASE_MIN_REPLAY
+        ll_cfg.min_replay_size = max(ll_cfg.batch_size, int(BASE_MIN_REPLAY_SHARED))
+
+    # Sharing should not be blocked by an unscaled maturity threshold when buffers are per-topic.
+    if ll_cfg.experience_sharing:
+        ll_cfg.min_peer_replay_size = max(ll_cfg.batch_size, int(ll_cfg.min_replay_size))
 
     # --- sharing config (applies to tutor agents only) ---
     ll_cfg.experience_sharing = bool(experience_sharing) and (ll_mode == "multi")
@@ -691,8 +740,12 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
 
     # gamma = float(getattr(flat_agent.cfg, "gamma", 0.99))   # use agent gamma
     # beta  = float(getattr(flat_agent.cfg, "shaping_beta", 0.5))  # add to cfg, or hardcode 0.5
-    gamma =  0.99   # use agent gamma
-    beta  =  0.5  # add to cfg, or hardcode 0.5
+    # gamma =  0.99   # use agent gamma
+    # beta  =  0.5  # add to cfg, or hardcode 0.5
+
+    # Optional: policy-invariant shaping applied uniformly across architectures.
+    gamma = float(getattr(flat_agent.agent.cfg, "gamma", 0.99))
+    beta = float(getattr(flat_agent.agent.cfg, "shaping_beta", 0.0))  # default off
 
     def phi(o):
         # Use global progress only (fair / objective-aligned). Two good choices:
@@ -706,20 +759,26 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
         a_idx = flat_agent.select_action(obs)
         mode, topic_id, ll_action_str = flat_agent.decode_action(a_idx)
 
-        next_obs, reward_hl, done, info = env.step_tutor(topic_id, ll_action_str)
-
+        # next_obs, reward_hl, done, info = env.step_tutor(topic_id, ll_action_str)
+        #
         # Potential-based shaping (policy-invariant)
-        shaped = float(reward_hl) + beta * (gamma * phi(next_obs) - phi(obs))
+        # shaped = float(reward_hl) + beta * (gamma * phi(next_obs) - phi(obs))
+
+        next_obs, reward_team, done, info = env.step_tutor(topic_id, ll_action_str)
+        reward_train = float(reward_team)
+
+        if beta != 0.0:
+            reward_train = reward_train + beta * (gamma * phi(next_obs) - phi(obs))
 
         if train:
-            flat_agent.update(obs, a_idx, shaped, next_obs, done)
+            # flat_agent.update(obs, a_idx, shaped, next_obs, done)
+            flat_agent.update(obs, a_idx, reward_train, next_obs, done)
 
-        total_reward += float(reward_hl)  # compare on true objective
+        total_reward += float(reward_team)  # compare on true objective
         steps += float(info.get("step_cost", 1.0))
         obs = next_obs
 
     return total_reward, steps, info
-
 
 
 # ----------------------------
@@ -812,6 +871,7 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
                 tutor_dm_sum[int(topic_id), int(ll_action_idx)] += float(dm)
                 tutor_dm_count[int(topic_id), int(ll_action_idx)] += 1
             reward_ll = float(info.get("reward_ll", reward_hl))
+            reward_team = float(info.get("reward_team", reward_hl))
 
             # if len(tutor_agents) == 1:
             #     # single shared LL tutor needs topic_id to disambiguate
@@ -826,12 +886,18 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             # - multi-agent: reward belongs to that topic’s LL agent
             # - single-agent: reward belongs to the single shared LL agent (index 0)
             ll_idx = 0 if len(tutor_agents) == 1 else int(topic_id)
-            ll_rewards[ll_idx] += reward_ll
+            # ll_rewards[ll_idx] += reward_ll
+            ll_rewards[ll_idx] += reward_team
 
             if train:
-                high_level_agent.update(obs, hl_action_idx, reward_hl, next_obs, done)
-                tutor_agent.update(tutor_obs, ll_action_idx, reward_ll, next_tutor_obs, done, topic_id=int(topic_id) if len(tutor_agents) == 1 else None)
-
+                # high_level_agent.update(obs, hl_action_idx, reward_hl, next_obs, done)
+                # tutor_agent.update(tutor_obs, ll_action_idx, reward_ll, next_tutor_obs, done,
+                #                    topic_id=int(topic_id) if len(tutor_agents) == 1 else None)
+                high_level_agent.update(obs, hl_action_idx, reward_team, next_obs, done)
+                tutor_agent.update(
+                    tutor_obs, ll_action_idx, reward_team, next_tutor_obs, done,
+                    topic_id=int(topic_id) if len(tutor_agents) == 1 else None
+                )
 
         elif mode == "tutee" and tutee_agent is not None:
             tutee_hl_count += 1
@@ -847,18 +913,22 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             tutee_action_counts[ll_action_str] += 1
 
             next_obs, reward_hl, done, info = env.step_tutee(topic_id, ll_action_str)
-            reward_ll = float(info.get("reward_ll", reward_hl))
+            # reward_ll = float(info.get("reward_ll", reward_hl))
+            reward_team = float(info.get("reward_team", reward_hl))
             # next_tutee_obs = add_topic(next_obs, topic_id)
             # next_tutee_obs = np.concatenate([np.asarray(env.get_ll_observation(topic_id), dtype=np.float32),
             #                             np.array([topic_id], dtype=np.float32)]).tolist()
 
             next_tutee_obs = env.get_ll_observation(topic_id, include_topic_id=True)
 
-            tutee_reward_total += reward_ll
+            # tutee_reward_total += reward_ll
+            tutee_reward_total += reward_team
 
             if train:
-                high_level_agent.update(obs, hl_action_idx, reward_hl, next_obs, done)
-                tutee_agent.update(tutee_obs, ll_action_idx, reward_ll, next_tutee_obs, done)
+                # high_level_agent.update(obs, hl_action_idx, reward_hl, next_obs, done)
+                # tutee_agent.update(tutee_obs, ll_action_idx, reward_ll, next_tutee_obs, done)
+                high_level_agent.update(obs, hl_action_idx, reward_team, next_obs, done)
+                tutee_agent.update(tutee_obs, ll_action_idx, reward_team, next_tutee_obs, done)
 
             # next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
             # next_tutee_obs = add_topic(next_obs, topic_id)
@@ -871,10 +941,12 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
         else:
             # Safety fallback
             next_obs, reward_hl, done, info = env.step_tutor(topic_id, "no_help")
+            reward_team = float(info.get("reward_team", reward_hl))
             if train:
-                high_level_agent.update(obs, hl_action_idx, reward_hl, next_obs, done)
+                high_level_agent.update(obs, hl_action_idx, reward_team, next_obs, done)
 
-        total_reward += float(reward_hl)
+        # total_reward += float(reward_hl)
+        total_reward += float(reward_team)
         # Steps should reflect the simulator's effective step cost (tutee consumes more budget).
         steps += float(info.get("step_cost", 1))
         obs = next_obs
@@ -1667,7 +1739,7 @@ def main():
             ll_cfg.device = "cpu"
             ll_cfg.experience_sharing = False
             ll_cfg.share_mode = "off"
-            ll_cfg.min_replay_size = 1000
+            ll_cfg.min_replay_size = 200
 
             flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics)
 
@@ -1735,8 +1807,8 @@ def main():
         window_bottleneck_mastery_sum = np.zeros(num_topics, dtype=np.float64)
         window_longest_streak_sum = 0.0
         window_eps_count = 0
-        eps_start = 0.2
-        eps_end = 0.005
+        eps_start = 0.35
+        eps_end = 0.03
         # eps_decay_episodes = max(1, args.episodes)
         eps_decay_episodes = 1000
 
@@ -1745,17 +1817,19 @@ def main():
         for episode in tqdm(range(1, args.episodes + 1), desc=f"Training(seed={seed})"):
             # epsilon schedule
             progress = min(1.0, episode / eps_decay_episodes)
-            eps = eps_start + (eps_end - eps_start) * progress
-            eps = max(0.00, eps)
+            eps_flat = eps_start + (eps_end - eps_start) * progress
+            eps_flat = max(0.0, float(eps_flat))
             # eps = max(0.02, eps_start + (eps_end - eps_start) * progress)
             if args.arch == "hrl":
-                high_level_agent.set_epsilon(eps)
+                eps_joint = 1.0 - math.sqrt(max(0.0, 1.0 - eps_flat))
+                eps_joint = float(np.clip(eps_joint, 0.0, 1.0))
+                high_level_agent.set_epsilon(eps_joint)
                 for ag in tutor_agents:
-                    ag.set_epsilon(eps)
+                    ag.set_epsilon(eps_joint)
                 if tutee_agent is not None:
-                    tutee_agent.set_epsilon(eps)
+                    tutee_agent.set_epsilon(eps_joint)
             else:
-                flat_agent.set_epsilon(eps)
+                flat_agent.set_epsilon(eps_flat)
             # ---- reset per-episode sharing counters (MUST be before the episode runs) ----
             if args.arch == "hrl":
                 for ag in tutor_agents:
@@ -1994,10 +2068,10 @@ def main():
                 #     mean_dm_gate = gate_tutor_dm_sum / max(1, gate_tutor_dm_count)
                 #     reliable = (gate_tutor_dm_count >= args.peer_gate_min_n)
                 #     topic_signal = (reliable.sum(axis=1) >= args.peer_gate_min_dims)
-                    # compute pairwise cosine ONLY on shared reliable dims
-                    # choose peers with sim>=threshold; if none => disable sharing for that topic
-                    # ag.set_peers(peers, sims=chosen_sims, sim_threshold=thr,
-                    #                       sim_power=args.peer_gate_sim_power)
+                # compute pairwise cosine ONLY on shared reliable dims
+                # choose peers with sim>=threshold; if none => disable sharing for that topic
+                # ag.set_peers(peers, sims=chosen_sims, sim_threshold=thr,
+                #                       sim_power=args.peer_gate_sim_power)
 
                 if ep_mastery_vec is not None and len(ep_mastery_vec) == num_topics:
                     window_mastery_sum += np.asarray(ep_mastery_vec, dtype=np.float64)

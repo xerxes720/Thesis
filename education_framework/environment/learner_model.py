@@ -373,7 +373,7 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.85
+    mastery_threshold: float = 0.80
     opp_min: int = 0
 
     # topic_mastery_thresholds: Optional[List[float]] = field(
@@ -525,10 +525,16 @@ class KDDLearnerModel:
     #         if not (float(s.mastery[k]) >= self._topic_threshold(k) and int(s.opp[k]) >= int(self.cfg.opp_min)):
     #             return False
     #     return True
+    # def is_done(self) -> bool:
+    #     s = self.state
+    #     complete = (s.mastery >= self.cfg.mastery_threshold) & (s.opp >= self.cfg.opp_min)
+    #     return bool(np.all(complete))
     def is_done(self) -> bool:
         s = self.state
-        complete = (s.mastery >= self.cfg.mastery_threshold) & (s.opp >= self.cfg.opp_min)
-        return bool(np.all(complete))
+        for k in range(self.cfg.n_topics):
+            if not (float(s.mastery[k]) >= self._topic_threshold(k) and int(s.opp[k]) >= int(self.cfg.opp_min)):
+                return False
+        return True
 
         # for k in range(self.cfg.n_topics):
         #     if not (float(s.mastery[k]) >= self._topic_threshold(k) and int(s.opp[k]) >= int(self.cfg.opp_min)):
