@@ -118,8 +118,8 @@ class KDDEnvConfig:
     num_topics: int = 7
     max_steps: int = 200
     initial_mastery: float = 0.2
-    lambda_step: float = 0.008  # NEW: reward penalty per step-cost unit
-    rho_diminish: float = 0.0015  # paper-like diminishing returns; 0 disables
+    lambda_step: float = 0.004  # NEW: reward penalty per step-cost unit
+    rho_diminish: float = 0.0  # paper-like diminishing returns; 0 disables
 
 
 class KDDHierEnv:
@@ -362,8 +362,10 @@ def create_agents(
         share_similarity_metric: str = "q_cos",
         share_probe_peer_frac: float = 0.5,
 ):
-    hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
+    # hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
     hl_cfg = HighLevelAgentConfig(
+        num_topics=num_topics,
+        use_tutee=use_tutee,
         lr=3e-4,
         gamma=0.99,
         buffer_size=100000,
@@ -382,7 +384,6 @@ def create_agents(
     # hl_cfg.min_replay_size = 200
     high_level_agent = HighLevelAgent(hl_cfg)
 
-    ll_cfg = LowLevelAgentConfig(num_topics=num_topics)
     ll_cfg = LowLevelAgentConfig(
         lr=5e-4,
         gamma=0.985,
@@ -417,11 +418,6 @@ def create_agents(
     # --- compensate multi-agent data starvation ---
     # In multi-agent, each topic policy sees fewer transitions; increase update frequency.
     if ll_mode == "multi":
-        # base_te = int(ll_cfg.train_every_steps)
-        # ll_cfg.train_every_steps = max(1, base_te // ma
-        # x(1, num_topics))
-        # ll_cfg.target_update_steps = 5 * ll_cfg.train_every_steps  # keep your k=5 rule
-
         # Sharing warmup expressed in gradient updates; if we update more often, warmup should shrink.
         ll_cfg.share_warmup_updates = max(200, int(ll_cfg.share_warmup_updates) // max(1, num_topics))
 
@@ -451,13 +447,6 @@ def create_agents(
 
     if ll_cfg.experience_sharing:
         if ll_cfg.share_mode == "mutual":
-            # # Conservative, early-only, cluster-local bootstrap
-            # ll_cfg.share_frac = 0.05
-            # ll_cfg.max_peers_per_update = 1
-            # ll_cfg.share_warmup_updates = 200
-            # ll_cfg.share_stop_updates = 700  # STOP mutual later to avoid harming specialists
-            # ll_cfg.min_peer_replay_size = 300
-            # Paper-faithful mutual: same mechanism as weighted, but weights=1
             ll_cfg.share_paper_batch = True
             ll_cfg.share_loss_norm = "mean"
             ll_cfg.share_warmup_updates = 0
@@ -466,24 +455,11 @@ def create_agents(
 
 
         elif ll_cfg.share_mode == "weighted_cka":
-            # ll_cfg.share_frac = 0.20
-            # ll_cfg.max_peers_per_update = 2
-            # ll_cfg.cka_probe_n = 64
-            # ll_cfg.share_similarity_threshold = 0.40
-            # ll_cfg.cka_power = 2.0
-            # ll_cfg.cka_every_updates = 100  # reduce noise + compute cost
-            # ll_cfg.share_max_weight = 0.60  # cap peer influence (prevents over-trust spikes)
-            # ll_cfg.share_weight_ema = 0.90  # smooth weights over time (stability)
-            # ll_cfg.share_warmup_updates = 100
-            # ll_cfg.share_stop_updates = 5000  # stop late to avoid harming specialists
-            # ll_cfg.min_peer_replay_size = 400  # only share from mature peers
-            # Paper-faithful weighted sharing (Algorithm 1)
-
             ll_cfg.share_paper_batch = True
             ll_cfg.share_loss_norm = "sumw"
 
             # bounded sharing (critical)
-            ll_cfg.share_frac = 0.20
+            ll_cfg.share_frac = 0.05
             ll_cfg.max_peers_per_update = 2
 
             # your stabilizers (critical)
@@ -496,14 +472,14 @@ def create_agents(
                 ll_cfg.share_similarity_threshold = 0.40
             ll_cfg.cka_power = 2.0
             ll_cfg.cka_every_updates = 20
-            ll_cfg.share_max_weight = 0.60
-            ll_cfg.share_weight_ema = 0.90
+            ll_cfg.share_max_weight = 0.40
+            ll_cfg.share_weight_ema = 0.0
 
             # warmup + stop (critical)
-            ll_cfg.share_warmup_updates = 100
-            ll_cfg.share_stop_updates = 5000
+            ll_cfg.share_warmup_updates = 200
+            ll_cfg.share_stop_updates = 2000
 
-            ll_cfg.min_peer_replay_size = 400
+            ll_cfg.min_peer_replay_size = 800
             ll_cfg.cka_probe_n = 64
 
     # --- build tutor agents: single vs multi ---
@@ -1017,44 +993,6 @@ def _sample_topic_for_case2(env) -> int:
     return int(np.random.choice(candidates))
 
 
-# def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
-#     obs = env.reset()
-#     done = False
-#     total_reward = 0.0
-#     steps = 0
-#
-#     topic_id = _sample_topic_for_case2(env)
-#
-#     while not done:
-#         obs_t = add_topic(obs, topic_id)  # topic is part of state (OK)
-#         a_idx = flat_agent.select_action(obs_t)
-#         mode, ll_action_str = flat_agent.decode_action(a_idx)
-#
-#         if mode == "tutee":
-#             next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
-#         else:
-#             next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
-#
-#         # keep next state on the same topic for a valid transition
-#         next_topic_id = topic_id
-#
-#         # optionally switch topics only sometimes (reduces handicap, still realistic)
-#         # switch if topic complete OR with small probability
-#         if env.model.is_topic_complete(topic_id) or random.random() < 0.10:
-#             next_topic_id = _sample_topic_for_case2(env)
-#
-#         next_obs_t = add_topic(next_obs, next_topic_id)
-#
-#         if train:
-#             flat_agent.update(obs_t, a_idx, reward, next_obs_t, done)
-#
-#         total_reward += float(reward)
-#         steps += float(info.get("step_cost", 1))
-#         obs = next_obs
-#         topic_id = next_topic_id
-#
-#     return total_reward, steps
-
 
 # ----------------------------
 # Policy-collapse diagnostics
@@ -1507,19 +1445,19 @@ def main():
     ap.add_argument(
         "--peer_gate_topk",
         type=int,
-        default=1,
+        default=2,
         help="Top-K most similar topics to allow as peers when --peer_gate_action_effects is enabled.",
     )
     ap.add_argument(
         "--peer_gate_sim_threshold",
         type=float,
-        default=0.70,
+        default=0.5,
         help="Minimum cosine similarity required for a topic to be considered an eligible peer under action-effect gating.",
     )
     ap.add_argument(
         "--peer_gate_min_n",
         type=int,
-        default=20,
+        default=50,
         help="Minimum per-action sample count within the log window for that dimension to be trusted in the action-effect vector.",
     )
     ap.add_argument(
@@ -1571,7 +1509,7 @@ def main():
     )
     ap.add_argument("--peer_gate_min_dims", type=int, default=3)
     ap.add_argument("--peer_gate_min_pair_dims", type=int, default=3)
-    ap.add_argument("--peer_gate_update_every", type=int, default=25)
+    ap.add_argument("--peer_gate_update_every", type=int, default=50)
     ap.add_argument("--peer_gate_sim_power", type=float, default=2.0)
     ap.add_argument(
         "--share_similarity_metric",
@@ -1740,6 +1678,9 @@ def main():
             ll_cfg.experience_sharing = False
             ll_cfg.share_mode = "off"
             ll_cfg.min_replay_size = 200
+            # ll_cfg.lr = 3e-4
+            # ll_cfg.target_update_steps = 200
+
 
             flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics)
 
@@ -1808,7 +1749,7 @@ def main():
         window_longest_streak_sum = 0.0
         window_eps_count = 0
         eps_start = 0.35
-        eps_end = 0.03
+        eps_end = 0.05
         # eps_decay_episodes = max(1, args.episodes)
         eps_decay_episodes = 1000
 
@@ -2037,6 +1978,7 @@ def main():
                             if not bool(topic_signal[i]):
                                 # Conservative: DON'T change peers if you have no signal yet
                                 # (or set ag.set_peers([]) to disable sharing for that topic)
+                                ag.set_peers([])
                                 continue
 
                             sims = np.asarray(S_gate[i], dtype=np.float64).copy()
@@ -2045,13 +1987,27 @@ def main():
                             cand = [(float(sims[j]), j) for j in range(num_topics) if j != i]
                             cand.sort(key=lambda x: x[0], reverse=True)
 
-                            chosen_idx = [j for sim, j in cand if sim >= thr][:topk]
-                            if not chosen_idx:
-                                # IMPORTANT fallback: don't accidentally set empty peers
-                                chosen_idx = [j for _, j in cand[:topk]]
+                            if not bool(topic_signal[i]):
+                                ag.set_peers([])  # no signal => disable sharing for this topic
+                                continue
+
+                            chosen = [(float(sim), int(j)) for (sim, j) in cand if float(sim) >= thr][:topk]
+                            if not chosen:
+                                ag.set_peers([])
+                                continue
+
+                            chosen_sims = [sim for (sim, j) in chosen]
+                            chosen_idx = [j for (sim, j) in chosen]
 
                             peers = [tutor_agents[j] for j in chosen_idx]
-                            ag.set_peers(peers)
+
+                            # IMPORTANT: pass sims into set_peers so _apply_peer_gate() actually works
+                            ag.set_peers(
+                                peers,
+                                sims=chosen_sims,
+                                sim_threshold=thr,
+                                sim_power=float(getattr(args, "peer_gate_sim_power", 2.0)),
+                            )
 
                             if bool(getattr(args, "peer_gate_verbose", False)):
                                 sims_str = ", ".join([f"{j}:{float(S_gate[i, j]):.3f}" for j in chosen_idx])
@@ -2203,71 +2159,6 @@ def main():
                         print("  Action-effect vector cosine similarity across topics (window):")
                         print(
                             f"    min={float(vals.min()):.3f} mean={float(vals.mean()):.3f} max={float(vals.max()):.3f} std={float(vals.std()):.3f}")
-
-                # --- dynamic peer gating using action-effect similarity (reduces negative transfer) ---
-                # if (
-                #         args.arch == "hrl"
-                #         and args.ll_mode == "multi"
-                #         and bool(args.experience_sharing)
-                #         and str(args.share_mode) != "off"
-                #         and bool(getattr(args, "peer_gate_action_effects", False))
-                # ):
-                #     # Build per-topic action-effect vectors from the current log window and
-                #     # restrict each topic's peer set to the top-K most similar topics.
-                #     # This prevents negative transfer when topics disagree about action utility.
-                #     denom = np.maximum(1, window_tutor_dm_count)
-                #     mean_dm_gate = window_tutor_dm_sum / denom  # [T, A]
-                #
-                #     min_n_gate = int(getattr(args, "peer_gate_min_n", 20))
-                #     V = mean_dm_gate.copy()
-                #
-                #     # mask unreliable dimensions (low support in the window)
-                #     reliable = (window_tutor_dm_count >= min_n_gate).astype(np.float64)
-                #     V = V * reliable
-                #
-                #     topic_signal = (reliable.sum(axis=1) > 0)  # topics with any trusted dims
-                #
-                #     if int(topic_signal.sum()) >= 2:
-                #         norms = np.linalg.norm(V, axis=1, keepdims=True)
-                #         norms = np.maximum(norms, 1e-12)
-                #         Vn = V / norms
-                #         S_gate = Vn @ Vn.T  # cosine similarity (T x T)
-                #
-                #         topk = max(1, int(getattr(args, "peer_gate_topk", 2)))
-                #         thr = float(getattr(args, "peer_gate_sim_threshold", 0.10))
-                #         thr = max(-1.0, min(1.0, thr))
-                #
-                #         for i, ag in enumerate(tutor_agents):
-                #             # if no stable signal for this topic yet: avoid isolating it
-                #             if not bool(topic_signal[i]):
-                #                 ag.set_peers(tutor_agents)
-                #                 continue
-                #
-                #             sims = np.asarray(S_gate[i], dtype=np.float64).copy()
-                #             sims[i] = -1e9  # exclude self
-                #
-                #             # rank candidates
-                #             cand = [(float(sims[j]), j) for j in range(num_topics) if j != i]
-                #             cand.sort(key=lambda x: x[0], reverse=True)
-                #
-                #             # chosen_idx = [j for sim, j in cand if sim >= thr][:topk]
-                #             # if not chosen_idx:
-                #             #     # fall back to top-K even if below threshold (keeps sharing alive)
-                #             #     chosen_idx = [j for _, j in cand[:topk]]
-                #             chosen_idx = [j for sim, j in cand if sim >= thr][:topk]
-                #             if not chosen_idx:
-                #                 ag.set_peers([tutor_agents[j] for j in chosen_idx])
-                #                 continue
-                #
-                #             ag.set_peers([tutor_agents[j] for j in chosen_idx])
-                #
-                #             if bool(getattr(args, "peer_gate_verbose", False)):
-                #                 sims_str = ", ".join([f"{j}:{float(S_gate[i, j]):.3f}" for j in chosen_idx])
-                #                 print(f"  [peer-gate] topic {i}: peers={chosen_idx} sims=({sims_str})")
-                #     else:
-                #         # not enough signal yet -> default all-to-all peers
-                #         for i, ag in enumerate(tutor_agents):
-                #             ag.set_peers(tutor_agents)
 
                 print()
 

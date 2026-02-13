@@ -884,18 +884,30 @@ class DQNLowLevelAgent:
         peer_budget = max(1, int(round(B * share_frac)))
         per_peer = max(1, peer_budget // max(1, len(scored)))
 
+
         # ---- append peer samples ----
-        for sim_w, p in scored:
+        min_w = float(getattr(self.cfg, "share_min_effective_weight", 0.05))
+
+        for base_w, p in scored:
+            # base_w is whatever your scored list computed (cka/qcos/etc.)
+            # Apply peer-gate on top of that (action-effect similarity gate)
+            eff_w = float(self._apply_peer_gate(p, float(base_w)))
+
+            # Drop peers with tiny effective weight (prevents noisy sharing)
+            if eff_w < min_w:
+                continue
+
             ps, pa, pr, ps2, pd = p.replay.sample(per_peer)
+
             s = _cat2(s, ps)
             a = _cat2(a, pa)
             r = _cat2(r, pr)
             s2 = _cat2(s2, ps2)
             d = _cat2(d, pd)
-            w = _cat2(w, np.full((per_peer,), sim_w, dtype=np.float32))
+            w = _cat2(w, np.full((ps.shape[0],), eff_w, dtype=np.float32))
 
-            self._share_peer_samples += int(per_peer)
-            self._share_peer_weight_sum += float(sim_w) * float(per_peer)
+            self._share_peer_samples += int(ps.shape[0])
+            self._share_peer_weight_sum += float(eff_w) * float(ps.shape[0])
 
         return s, a, r, s2, d, w
 
