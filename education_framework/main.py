@@ -343,6 +343,8 @@ def create_agents(
         experience_sharing: bool = False,
         share_mode: str = "weighted_cka",
         topic_cluster_ids=None,  # NEW
+        share_similarity_metric: str = "q_cos",
+        share_probe_peer_frac: float = 0.5,
 ):
     hl_cfg = HighLevelAgentConfig(num_topics=num_topics, use_tutee=use_tutee)
     hl_cfg.device = "cpu"
@@ -395,6 +397,8 @@ def create_agents(
     # --- sharing config (applies to tutor agents only) ---
     ll_cfg.experience_sharing = bool(experience_sharing) and (ll_mode == "multi")
     ll_cfg.share_mode = share_mode if ll_cfg.experience_sharing else "off"
+    ll_cfg.share_similarity_metric = str(share_similarity_metric)
+    ll_cfg.share_probe_peer_frac = float(share_probe_peer_frac)
 
     if ll_cfg.experience_sharing:
         if ll_cfg.share_mode == "mutual":
@@ -434,7 +438,13 @@ def create_agents(
             ll_cfg.max_peers_per_update = 2
 
             # your stabilizers (critical)
-            ll_cfg.share_similarity_threshold = 0.40
+            metric = str(getattr(ll_cfg, "share_similarity_metric", "cka")).lower().strip()
+            if metric in ("q_cos", "qcos", "q_cosine"):
+                ll_cfg.share_similarity_threshold = 0.65
+            elif metric in ("q_argmax", "argmax", "qargmax"):
+                ll_cfg.share_similarity_threshold = 0.55
+            else:
+                ll_cfg.share_similarity_threshold = 0.40
             ll_cfg.cka_power = 2.0
             ll_cfg.cka_every_updates = 20
             ll_cfg.share_max_weight = 0.60
@@ -677,28 +687,39 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
     obs = env.reset()
     done = False
     total_reward = 0.0
-    steps = 0
+    steps = 0.0
+
+    # gamma = float(getattr(flat_agent.cfg, "gamma", 0.99))   # use agent gamma
+    # beta  = float(getattr(flat_agent.cfg, "shaping_beta", 0.5))  # add to cfg, or hardcode 0.5
+    gamma =  0.99   # use agent gamma
+    beta  =  0.5  # add to cfg, or hardcode 0.5
+
+    def phi(o):
+        # Use global progress only (fair / objective-aligned). Two good choices:
+        # 1) mean mastery over topics (assumes mastery block is first T entries)
+        T = int(env.num_topics)
+        mastery = np.asarray(o[:T], dtype=np.float32)
+        return float(np.mean(mastery))
+        # Alternatively: return -float(np.sum(1.0 - mastery))  # equivalent monotone
 
     while not done:
         a_idx = flat_agent.select_action(obs)
         mode, topic_id, ll_action_str = flat_agent.decode_action(a_idx)
 
-        # next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
         next_obs, reward_hl, done, info = env.step_tutor(topic_id, ll_action_str)
-        # reward_train = float(info.get("reward_ll", reward_hl))  # local credit
 
-        # alpha = 0.3
-        # reward_train = reward_hl + alpha * (reward_train - reward_hl)
-        reward_train = float(reward_hl)
+        # Potential-based shaping (policy-invariant)
+        shaped = float(reward_hl) + beta * (gamma * phi(next_obs) - phi(obs))
+
         if train:
-            flat_agent.update(obs, a_idx, reward_train, next_obs, done)
+            flat_agent.update(obs, a_idx, shaped, next_obs, done)
 
-        total_reward += float(reward_hl)  # keep global metric consistent across plots
-        # total_reward_train += float(reward_train)
+        total_reward += float(reward_hl)  # compare on true objective
         steps += float(info.get("step_cost", 1.0))
         obs = next_obs
 
     return total_reward, steps, info
+
 
 
 # ----------------------------
@@ -1480,6 +1501,19 @@ def main():
     ap.add_argument("--peer_gate_min_pair_dims", type=int, default=3)
     ap.add_argument("--peer_gate_update_every", type=int, default=25)
     ap.add_argument("--peer_gate_sim_power", type=float, default=2.0)
+    ap.add_argument(
+        "--share_similarity_metric",
+        type=str,
+        default="q_cos",
+        choices=["cka", "q_cos", "q_argmax"],
+        help="Similarity metric used when share_mode=weighted_cka. q_cos / q_argmax are policy-aligned alternatives to CKA.",
+    )
+    ap.add_argument(
+        "--share_probe_peer_frac",
+        type=float,
+        default=0.5,
+        help="Fraction of similarity probe states sampled from the peer replay (0=self-only, 0.5=symmetric).",
+    )
     args = ap.parse_args()
 
     # def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
@@ -1589,6 +1623,8 @@ def main():
                 experience_sharing=args.experience_sharing,
                 share_mode=args.share_mode,
                 topic_cluster_ids=getattr(learner_cfg, "topic_cluster_ids", None),
+                share_similarity_metric=args.share_similarity_metric,
+                share_probe_peer_frac=args.share_probe_peer_frac,
             )
 
             # ---- Ensure LL networks exist with the *correct* observation dims ----

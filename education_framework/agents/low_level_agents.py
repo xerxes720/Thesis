@@ -104,6 +104,16 @@ class LowLevelAgentConfig:
     # "sumw" (your current) vs "mean" (paper-faithful weighting behavior)
     share_loss_norm: str = "mean"
 
+    # Similarity metric used when share_mode == "weighted_cka"
+    # - "cka": linear CKA on hidden reps (your current behavior)
+    # - "q_cos": cosine similarity between per-state Q-vectors (policy-aligned)
+    # - "q_argmax": argmax agreement rate (strict, noisier)
+    share_similarity_metric: str = "cka"
+
+    # Probe distribution for similarity computation:
+    # fraction of probe states drawn from the peer replay (0=self-only, 0.5=symmetric).
+    share_probe_peer_frac: float = 0.0
+
 
 # ---------------- Replay Buffer ----------------
 
@@ -210,6 +220,48 @@ def avg_layer_cka(
         return float(sum(vals) / len(vals))
 
 
+def q_cosine_similarity(
+    net_a: QNetwork,
+    net_b: QNetwork,
+    states: torch.Tensor,
+    center: bool = True,
+    eps: float = 1e-8,
+) -> float:
+    """
+    Cosine similarity between per-state Q vectors, mapped to [0, 1].
+    This is more policy-aligned than CKA because it compares action preferences directly.
+    """
+    with torch.no_grad():
+        qa = net_a(states)
+        qb = net_b(states)
+
+        if center:
+            qa = qa - qa.mean(dim=1, keepdim=True)
+            qb = qb - qb.mean(dim=1, keepdim=True)
+
+        qa = qa / qa.norm(dim=1, keepdim=True).clamp_min(eps)
+        qb = qb / qb.norm(dim=1, keepdim=True).clamp_min(eps)
+
+        cos = (qa * qb).sum(dim=1).mean()  # in [-1, 1]
+        sim01 = ((cos + 1.0) * 0.5).clamp(0.0, 1.0)
+        return float(sim01.item())
+
+
+def q_argmax_agreement(
+    net_a: QNetwork,
+    net_b: QNetwork,
+    states: torch.Tensor,
+) -> float:
+    """
+    Fraction of states where argmax_a(Q) == argmax_b(Q), in [0, 1].
+    """
+    with torch.no_grad():
+        qa = net_a(states)
+        qb = net_b(states)
+        aa = torch.argmax(qa, dim=1)
+        ab = torch.argmax(qb, dim=1)
+        return float((aa == ab).float().mean().item())
+
 class DQNLowLevelAgent:
     """
     Generic DQN low-level agent with optional experience sharing.
@@ -300,9 +352,40 @@ class DQNLowLevelAgent:
         else:
             w_cached = 0.0
 
+        metric = str(getattr(self.cfg, "share_similarity_metric", "cka")).lower().strip()
+        peer_frac = float(getattr(self.cfg, "share_probe_peer_frac", 0.0))
+        peer_frac = max(0.0, min(1.0, peer_frac))
+
+        # Optional symmetric probe: mix in some states from the peer replay
+        probe = probe_states_np
+        if peer_frac > 0.0 and isinstance(probe_states_np, np.ndarray) and probe_states_np.ndim == 2:
+            total_n = int(probe_states_np.shape[0])
+            n_peer = max(0, min(total_n, int(round(total_n * peer_frac))))
+            n_self = total_n - n_peer
+
+            parts = []
+
+            if n_self > 0:
+                idxs = np.random.randint(0, probe_states_np.shape[0], size=n_self)
+                parts.append(np.ascontiguousarray(probe_states_np[idxs], dtype=np.float32))
+
+            if n_peer > 0 and len(peer.replay) >= n_peer:
+                peer_states, _, _, _, _ = peer.replay.sample(n_peer)
+                parts.append(np.ascontiguousarray(peer_states, dtype=np.float32))
+
+            if parts:
+                probe = np.ascontiguousarray(np.concatenate(parts, axis=0), dtype=np.float32)
+
         with torch.no_grad():
-            q_t = torch.from_numpy(probe_states_np).to(self.device)
-            sim = float(avg_layer_cka(self.policy_net, peer.policy_net, q_t, layers))
+            q_t = torch.from_numpy(probe).to(self.device)
+
+            if metric in ("q_cos", "qcos", "q_cosine"):
+                sim = float(q_cosine_similarity(self.policy_net, peer.policy_net, q_t, center=True))
+            elif metric in ("q_argmax", "argmax", "qargmax"):
+                sim = float(q_argmax_agreement(self.policy_net, peer.policy_net, q_t))
+            else:
+                sim = float(avg_layer_cka(self.policy_net, peer.policy_net, q_t, layers))
+
         sim = max(0.0, min(1.0, sim))
 
         # threshold + normalize [tau, 1] -> [0, 1]
