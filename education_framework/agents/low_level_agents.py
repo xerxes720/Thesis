@@ -308,8 +308,8 @@ class DQNLowLevelAgent:
         # optional peer-gating scores (e.g., action-effect similarity computed in main)
         # maps id(peer) -> similarity in [-1, 1]
         self._peer_gate_sims: dict[int, float] = {}
-        self._peer_gate_thr: float = -1.0  # if > -1, peers below this sim are ignored
-        self._peer_gate_power: float = 1.0
+        self._peer_gate_thr: float = 0.2  # if > -1, peers below this sim are ignored
+        self._peer_gate_power: float = 2.0
 
         # self.shared_replay: Optional[ReplayBuffer] = None
         # self.share_ref_net: Optional[QNetwork] = None
@@ -403,12 +403,19 @@ class DQNLowLevelAgent:
         w_target = min(float(w_target), float(w_cap))
 
         # IMPORTANT: if similarity drops below tau, hard-stop sharing (no EMA tail).
-        if w_target <= 0.0:
-            w_new = 0.0
-        elif ema > 0.0:
+        # if w_target <= 0.0:
+        #     w_new = 0.0
+        # elif ema > 0.0:
+        #     w_new = float(ema * float(w_cached) + (1.0 - ema) * float(w_target))
+        # else:
+        #     w_new = float(w_target)
+        # smoother behavior (no hard-stop flip):
+        if ema > 0.0:
             w_new = float(ema * float(w_cached) + (1.0 - ema) * float(w_target))
         else:
             w_new = float(w_target)
+
+        w_new = max(0.0, float(w_new))
 
         self._cka_cache[peer_id] = (int(self.num_updates), float(w_new))
         return float(w_new)

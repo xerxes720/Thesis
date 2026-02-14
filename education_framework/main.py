@@ -408,7 +408,7 @@ def create_agents(
         # ll_cfg.target_update_steps = 100
         # ll_cfg.min_replay_size = max(ll_cfg.min_replay_size, ll_cfg.batch_size)
         ll_cfg.per_topic_replay = True
-        ll_cfg.per_topic_sample_mode = "uniform"
+        ll_cfg.per_topic_sample_mode = "current"
         ll_cfg.per_topic_buffer_size = max(1000, int(ll_cfg.buffer_size) // max(1, int(num_topics)))
 
         # ll_cfg.target_update_steps = 200  # keep k=5 rule
@@ -457,6 +457,7 @@ def create_agents(
         elif ll_cfg.share_mode == "weighted_cka":
             ll_cfg.share_paper_batch = True
             ll_cfg.share_loss_norm = "sumw"
+            ll_cfg.per_topic_sample_mode = "uniform"
 
             # bounded sharing (critical)
             ll_cfg.share_frac = 0.05
@@ -477,7 +478,7 @@ def create_agents(
 
             # warmup + stop (critical)
             ll_cfg.share_warmup_updates = 200
-            ll_cfg.share_stop_updates = 2000
+            ll_cfg.share_stop_updates = 10**9
 
             ll_cfg.min_peer_replay_size = 800
             ll_cfg.cka_probe_n = 64
@@ -1691,7 +1692,7 @@ def main():
 
             # Stabilize flat across seeds: keep replay separated per chosen topic
             ll_cfg.per_topic_replay = True
-            ll_cfg.per_topic_sample_mode = "current"
+            ll_cfg.per_topic_sample_mode = "uniform"
             ll_cfg.per_topic_buffer_size = max(1000, int(ll_cfg.buffer_size) // max(1, int(bundle.n_topics)))
 
             # Warmup scaled for per-topic buffers (same logic you use elsewhere)

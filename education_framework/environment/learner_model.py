@@ -958,8 +958,8 @@ class KDDLearnerModel:
             k = 10.0
             m0 = 0.55
             p_succ = 1.0 / (1.0 + math.exp(-k * (m - m0)))
-            # if random.random() > p_succ:
-            #     return 0.0  # failed retrieval => no mastery gain
+            if random.random() > p_succ:
+                return 0.0  # failed retrieval => no mastery gain
 
         # --- 4) fix only helps when there is "something to fix" (struggle signal)
         # if a == LowLevelAction.TUTEE_FIX:

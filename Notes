@@ -27,3 +27,25 @@ optimize hyperparameters for convergence
 شرط مستری لرنر برای توتی برای احتمال پاسخ درست باید متناسب با همان تاپیک باشد.
 
 پیشرفت tutee نقشی در تمرین مدل ندارد میشود سیستمی پیاده کرد که تاثیر روی تصمیم به توضیح بیشتر و یا قرارگیری آن بذارد
+
+3) Add “placebo” controls to show it’s not just “extra reward”
+
+Two very convincing controls:
+
+Control A: Random tutee policy
+
+Same environment + tutee actions exist
+
+but the tutee action is chosen randomly (or at fixed frequency)
+
+If your learned policy beats random, you show:
+
+“Benefit comes from learning when to use it, not from always having it.”
+
+Control B: Shuffled/neutral bonus
+
+Keep an action that gives the same average bonus magnitude, but make it independent of mastery regime (or shuffled across steps/topics)
+
+If your real tutee mechanism beats the neutral bonus, you show:
+
+“The structure (desirable difficulty / readiness) matters, not just injecting extra mastery.”
