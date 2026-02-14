@@ -313,8 +313,8 @@ def build_kc_to_topic_by_clustering(
 
 @dataclass
 class TrainConfig:
-    n_topics: int = 7
-    max_depth: int = 7
+    n_topics: int = 5
+    max_depth: int = 6
     min_samples_leaf: int = 80
     ema_alpha: float = 0.2
     seed: int = 0
@@ -322,21 +322,21 @@ class TrainConfig:
     schema_max_rows: int = 2_000_000
 
     # quality tree constraints
-    min_leaf_action_count: int = 50
+    min_leaf_action_count: int = 150
 
     # quality labeling: treat small deltas as neutral to avoid sign/semantic mismatch
     # quality_eps: float = 0.01  # mastery-delta noise floor for leaf-wise action scoring
 
     quality_eps: float = 0.01  # upper cap (kept for backward compat)
-    quality_eps_min: float = 1e-4  # floor to avoid exact-zero issues
-    quality_eps_frac: float = 0.05  # neutral_eps_k = min(cap, max(floor, frac*(q80-q20)))
+    quality_eps_min: float = 1e-3  # floor to avoid exact-zero issues
+    quality_eps_frac: float = 0.10  # neutral_eps_k = min(cap, max(floor, frac*(q80-q20)))
 
     # build_decision_tree.py (where your build config lives)
     action_label_mode: str = "schema"  # "schema" | "cluster"
     cluster_k: int = 5
     cluster_min_actions_per_topic: int = 3
     cluster_min_count_per_action: int = 50  # per topic, for counting "present"
-    leaf_shrinkage_prior: float = 10.0  # pseudo-count for per-leaf smoothing
+    leaf_shrinkage_prior: float = 20.0  # pseudo-count for per-leaf smoothing
     force_leaf_preference: bool = True  # if leaf becomes all-neutral, force best/worst
     force_good_if_none: bool = True
     force_bad_if_none: bool = True
@@ -348,78 +348,36 @@ class TrainConfig:
     topic_gain_temp: float = 2.0
 
     # --- mastery-aware action effect estimation ---
-    gain_mpre_max: float = 0.85  # rows above this mastery_pre do NOT drive per-topic gains
-    cutoffs_mpre_max: float = 0.85  # rows above this do NOT drive topic cutoffs
-    leaf_score_mpre_max: float = 0.90  # rows above this do NOT drive leaf action scores
+    gain_mpre_max: float = 0.75  # rows above this mastery_pre do NOT drive per-topic gains
+    cutoffs_mpre_max: float = 0.75  # rows above this do NOT drive topic cutoffs
+    leaf_score_mpre_max: float = 0.80  # rows above this do NOT drive leaf action scores
 
     mpre_weight_power: float = 1.0  # weight ∝ (1 - mastery_pre)^power (set 0.0 to disable)
     residualize_by_mpre_bins: bool = True  # subtract baseline Δmastery per mastery bin
 
-    # NOTE: KDD has no explicit tutee signal. Tutee effects are modeled mechanistically at runtime.
+    # --- mastery-bin conditioned tutor gains (data-driven, defensible) ---
+    use_gain_by_mpre_bins: bool = True
+    mpre_bins: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0)  # edges, len = n_bins + 1
+
+    # For bin-conditioned gains we avoid "balanced_primary" forcing.
+    # Use only "linear" or "exp_z" here.
+    topic_gain_mode_bins: str = "linear"  # "linear" | "exp_z"
+    min_gain_bin_action_count: int = 50   # min samples per (topic, bin, action) to trust bin mean
+
+    apply_topic_gain_inside_bank: bool = False
 
 
-# def _rank_to_quality(action_ids: List[int], scores: List[float]) -> Dict[int, str]:
-#     """Map 8 actions to 5 categories by rank: 1/2/2/2/1 buckets."""
-#     pairs = sorted(zip(action_ids, scores), key=lambda x: x[1])  # ascending
-#     # worst..best
-#     buckets = {
-#         "very_bad": [pairs[0][0]],
-#         "bad": [pairs[1][0], pairs[2][0]],
-#         "neutral": [pairs[3][0], pairs[4][0]],
-#         "good": [pairs[5][0], pairs[6][0]],
-#         "very_good": [pairs[7][0]],
-#     }
-#     out: Dict[int, str] = {}
-#     for q, ids in buckets.items():
-#         for a in ids:
-#             out[int(a)] = q
-#     return out
 
-# def _rank_to_quality(action_ids: List[int], scores: List[float], eps: float = 0.003) -> Dict[int, str]:
-#     """Map actions to {very_good, good, neutral, bad, very_bad} using a magnitude-aware hybrid rule.
-#
-#     Rationale:
-#       - Avoid labeling empirically positive actions as 'bad/very_bad', because downstream transitions
-#         treat bad/very_bad as mastery decay.
-#       - Preserve the policy-shaping benefit of relative ranking by ranking within the positive set
-#         (and within the negative set), while assigning near-zero effects to 'neutral'.
-#
-#     Rule (per leaf):
-#       - If score >  +eps  => positive set  (eligible for good/very_good)
-#       - If score <  -eps  => negative set  (eligible for bad/very_bad)
-#       - Otherwise         => neutral
-#
-#     Within sets:
-#       - positive: best -> very_good (if ≥2 positives), remaining -> good
-#       - negative: worst -> very_bad (if ≥2 negatives), remaining -> bad
-#
-#     Notes:
-#       - This may yield fewer than 5 labels in a given leaf (e.g., no negatives).
-#       - All actions always receive a label.
-#     """
-#     if len(action_ids) != len(scores):
-#         raise ValueError(f"action_ids and scores must have same length, got {len(action_ids)} and {len(scores)}")
-#
-#     out: Dict[int, str] = {int(a): "neutral" for a in action_ids}
-#
-#     pos = [(int(a), float(s)) for a, s in zip(action_ids, scores) if s > eps]
-#     neg = [(int(a), float(s)) for a, s in zip(action_ids, scores) if s < -eps]
-#
-#     if pos:
-#         pos_sorted = sorted(pos, key=lambda x: x[1])  # ascending; last is best
-#         best_a = pos_sorted[-1][0]
-#         out[best_a] = "very_good" if len(pos_sorted) >= 2 else "good"
-#         for a, _ in pos_sorted[:-1]:
-#             out[a] = "good"
-#
-#     if neg:
-#         neg_sorted = sorted(neg, key=lambda x: x[1])  # ascending; first is worst (most negative)
-#         worst_a = neg_sorted[0][0]
-#         out[worst_a] = "very_bad" if len(neg_sorted) >= 2 else "bad"
-#         for a, _ in neg_sorted[1:]:
-#             out[a] = "bad"
-#
-#     return out
+def _mpre_bin_id(x: float, edges: np.ndarray) -> int:
+    # edges: length n_bins+1
+    if not np.isfinite(x):
+        return 0
+    n_bins = int(edges.size - 1)
+    if n_bins <= 1:
+        return 0
+    # digitize against interior edges
+    b = int(np.digitize([float(x)], edges[1:-1], right=False)[0])
+    return int(np.clip(b, 0, n_bins - 1))
 
 def _compute_topic_action_gains(means_by_topic: np.ndarray, cfg: TrainConfig) -> np.ndarray:
     n_topics, n_actions = means_by_topic.shape
@@ -666,7 +624,7 @@ def _assign_discovered_modes_to_action_ids(centroids: np.ndarray, feature_names:
     using independent semantic scores, then resolve collisions by priority.
     """
     K = int(centroids.shape[0])
-    if K != 5:
+    if K != n_actions:
         raise ValueError(f"Expected K=5 centroids, got K={K}")
 
     fn = [f.lower().strip() for f in feature_names]
@@ -1094,6 +1052,14 @@ def train_bundle_from_kdd_csv(
     topic_cutoffs: Dict[int, tuple[float, float, float, float]] = {}
     topic_neutral_eps: Dict[int, float] = {}
     dm_used_by_topic: Dict[int, np.ndarray] = {}
+    mpre_edges = np.asarray(getattr(cfg, "mpre_bins", (0.0, 0.25, 0.5, 0.75, 1.0)), dtype=np.float32)
+    if mpre_edges.ndim != 1 or mpre_edges.size < 2:
+        raise ValueError("mpre_bins must be a 1D sequence of edges with length >= 2.")
+    n_mpre_bins = int(mpre_edges.size - 1)
+
+    # topic -> bin -> action -> mean residual Δmastery
+    topic_action_mean_bin: Dict[int, Dict[int, Dict[int, float]]] = {}
+
 
     for k in range(cfg.n_topics):
         topic_action_mean[k] = {}
@@ -1142,6 +1108,20 @@ def train_bundle_from_kdd_csv(
                 # weighted mean; if you want unweighted, just use dm_used[m].mean()
                 topic_action_mean[k][a] = float(np.average(dm_used[m], weights=w[m]))
 
+        topic_action_mean_bin[k] = {}
+        for b in range(n_mpre_bins):
+            lo = float(mpre_edges[b])
+            hi = float(mpre_edges[b + 1])
+            topic_action_mean_bin[k][b] = {}
+            for a in range(5):
+                mb = tutor_mask & (aa == a) & (mp >= lo) & (mp < hi) & (mp <= cfg.gain_mpre_max)
+                if int(mb.sum()) > 0:
+                    topic_action_mean_bin[k][b][a] = float(np.average(dm_used[mb], weights=w[mb]))
+                else:
+                    # fallback to topic mean (keeps heterogeneity without inventing bin effects)
+                    topic_action_mean_bin[k][b][a] = float(topic_action_mean[k].get(a, 0.0))
+
+
         # topic_cutoffs: only from learning region (mpre <= cutoffs_mpre_max)
         m_cut = tutor_mask & (mp <= cfg.cutoffs_mpre_max)
         all_tutor_deltas = dm_used[m_cut].tolist()
@@ -1183,19 +1163,70 @@ def train_bundle_from_kdd_csv(
     #
     # --- NEW: per-topic per-action gain multipliers (data-driven) ---
     means_by_topic = np.zeros((cfg.n_topics, 5), dtype=np.float32)
-    # dm_used =
+    means_by_topic_bin = np.zeros((cfg.n_topics, n_mpre_bins, 5), dtype=np.float32)
+    counts_by_topic_bin_action = np.zeros((cfg.n_topics, n_mpre_bins, 5), dtype=np.int32)
+
     for k in range(cfg.n_topics):
         mp = np.asarray(mastery_pre[k], dtype=np.float32)
         dm_used = np.asarray(dm_used_by_topic.get(k, np.zeros((0,), dtype=np.float32)), dtype=np.float32)
         aa = np.asarray(act_id[k], dtype=np.int32)
         tutor_mask = (aa >= 0) & (aa <= 4) & np.isfinite(dm_used) & np.isfinite(mp)
 
+        # overall means (kept for backward compatibility + logging)
         for a in range(5):
             m = tutor_mask & (aa == a) & (mp <= cfg.gain_mpre_max)
             means_by_topic[k, a] = float(dm_used[m].mean()) if int(m.sum()) else float(
-                topic_action_mean.get(k, {}).get(a, 0.0))
+                topic_action_mean.get(k, {}).get(a, 0.0)
+            )
 
-    topic_tutor_action_gain = _compute_topic_action_gains(means_by_topic, cfg)  # shape (n_topics, 5)
+        # bin-conditioned means (defensible state dependence)
+        for b in range(n_mpre_bins):
+            lo = float(mpre_edges[b])
+            hi = float(mpre_edges[b + 1])
+            for a in range(5):
+                m = tutor_mask & (aa == a) & (mp >= lo) & (mp < hi) & (mp <= cfg.gain_mpre_max)
+                c = int(m.sum())
+                counts_by_topic_bin_action[k, b, a] = c
+                if c >= int(getattr(cfg, "min_gain_bin_action_count", 75)):
+                    means_by_topic_bin[k, b, a] = float(dm_used[m].mean())
+                else:
+                    # conservative fallback: do not fabricate bin effects
+                    means_by_topic_bin[k, b, a] = float(means_by_topic[k, a])
+
+    # base (topic-only) gains as before
+    topic_tutor_action_gain = _compute_topic_action_gains(means_by_topic, cfg)
+
+    # bin-conditioned gains (no forced diversity)
+    topic_tutor_action_gain_by_mpre_bin = None
+    if bool(getattr(cfg, "use_gain_by_mpre_bins", True)) and n_mpre_bins > 1:
+        tmp_cfg = cfg
+        # temporarily use bin-specific mode (linear/exp_z) to avoid balanced_primary forcing
+        setattr(tmp_cfg, "topic_gain_mode", str(getattr(cfg, "topic_gain_mode_bins", "linear")))
+        topic_tutor_action_gain_by_mpre_bin = np.ones((cfg.n_topics, n_mpre_bins, 5), dtype=np.float32)
+        for b in range(n_mpre_bins):
+            topic_tutor_action_gain_by_mpre_bin[:, b, :] = _compute_topic_action_gains(means_by_topic_bin[:, b, :], tmp_cfg)
+        # restore original topic_gain_mode (important if later code assumes it)
+        setattr(tmp_cfg, "topic_gain_mode", str(getattr(cfg, "topic_gain_mode", "linear")))
+
+    if topic_tutor_action_gain_by_mpre_bin is not None:
+        thr = int(getattr(cfg, "min_gain_bin_action_count", 75))
+        print("[DEBUG bin action counts + trust + primary]:")
+        for k in range(cfg.n_topics):
+            for b in range(n_mpre_bins):
+                lo = float(mpre_edges[b]); hi = float(mpre_edges[b+1])
+                cnts = counts_by_topic_bin_action[k, b].tolist()
+                trusted = [int(c >= thr) for c in cnts]
+                prim = int(np.argmax(topic_tutor_action_gain_by_mpre_bin[k, b]))
+                print(f"  topic {k} bin {b} [{lo:.2f},{hi:.2f}): counts={cnts} trusted={trusted} primary={prim}")
+
+    if topic_tutor_action_gain_by_mpre_bin is not None:
+        print("[DEBUG gain primary action per topic per mastery-bin]:")
+        for k in range(cfg.n_topics):
+            per_bin = {}
+            for b in range(n_mpre_bins):
+                per_bin[b] = int(np.argmax(topic_tutor_action_gain_by_mpre_bin[k, b]))
+            print(f"  topic {k}:", per_bin)
+
 
     print("[DEBUG gain primary action per topic]:",
           {k: int(np.argmax(topic_tutor_action_gain[k])) for k in range(cfg.n_topics)})
@@ -1253,7 +1284,15 @@ def train_bundle_from_kdd_csv(
                 vals = [float(dmk_used[i]) for i in idxs2 if act_id[k][i] == a]
                 cnt = len(vals)
                 ssum = float(np.sum(vals)) if cnt else 0.0
-                topic_mean = float(topic_action_mean.get(k, {}).get(a, 0.0))
+                # topic_mean = float(topic_action_mean.get(k, {}).get(a, 0.0))
+                # shrink toward the topic mean of the leaf's typical mastery region (bin-consistent smoothing)
+                if len(idxs2) > 0 and k in topic_action_mean_bin:
+                    leaf_meds = float(np.median([float(mastery_pre[k][i]) for i in idxs2]))
+                    b_leaf = _mpre_bin_id(leaf_meds, mpre_edges)
+                    topic_mean = float(topic_action_mean_bin[k].get(b_leaf, {}).get(a, topic_action_mean.get(k, {}).get(a, 0.0)))
+                else:
+                    topic_mean = float(topic_action_mean.get(k, {}).get(a, 0.0))
+
                 # scores[a] = (ssum + prior * topic_mean) / (cnt + prior)
                 prior0 = float(cfg.leaf_shrinkage_prior)
                 # shrink more when cnt is tiny; shrink less when cnt is large
@@ -1288,8 +1327,9 @@ def train_bundle_from_kdd_csv(
             action_ids = list(range(8))
             leaf_to_action_score[leaf] = {a: float(scores[a]) for a in action_ids}
 
-            for a in range(5):
-                scores[a] = float(scores[a]) * float(topic_tutor_action_gain[k, a])
+            if bool(getattr(cfg, "apply_topic_gain_inside_bank", False)):
+                for a in range(5):
+                    scores[a] = float(scores[a]) * float(topic_tutor_action_gain[k, a])
 
             # Tutor qualities come from KDD-derived leaf scores.
             tutor_ids = [0, 1, 2, 3, 4]
@@ -1469,6 +1509,9 @@ def train_bundle_from_kdd_csv(
         topic_beta_bad_mult=topic_beta_bad_mult,
         topic_beta_very_bad_mult=topic_beta_very_bad_mult,
         topic_tutor_action_gain=topic_tutor_action_gain,
+        # topic_tutor_action_gain=topic_tutor_action_gain,
+        topic_tutor_action_gain_by_mpre_bin=topic_tutor_action_gain_by_mpre_bin,
+        tutor_gain_mpre_bins=mpre_edges,
 
     )
 
@@ -1493,8 +1536,8 @@ def main() -> None:
     ap.add_argument("--out", required=True)
 
     ap.add_argument("--n_topics", type=int, default=7)
-    ap.add_argument("--max_depth", type=int, default=7)
-    ap.add_argument("--min_leaf", type=int, default=50)
+    ap.add_argument("--max_depth", type=int, default=6)
+    ap.add_argument("--min_leaf", type=int, default=150)
     ap.add_argument("--ema_alpha", type=float, default=0.2)
     ap.add_argument("--seed", type=int, default=0)
 
@@ -1509,8 +1552,8 @@ def main() -> None:
     ap.add_argument("--corrects_col", default="Corrects")
 
     ap.add_argument("--kc_map_json", default=None)
-    ap.add_argument("--cluster_max_kcs", type=int, default=250)
-    ap.add_argument("--cluster_min_kc_freq", type=int, default=50)
+    ap.add_argument("--cluster_max_kcs", type=int, default=300)
+    ap.add_argument("--cluster_min_kc_freq", type=int, default=250)
 
     ap.add_argument("--no_aux", action="store_true")
     ap.add_argument("--cluster_mode", default="behavior", choices=["behavior", "cooccur"],
@@ -1538,7 +1581,7 @@ def main() -> None:
     ap.add_argument("--cluster_k", type=int, default=5)
     ap.add_argument("--cluster_min_actions_per_topic", type=int, default=3)
     ap.add_argument("--cluster_min_count_per_action", type=int, default=50)
-    ap.add_argument("--leaf_shrinkage_prior", type=float, default=10.0)
+    ap.add_argument("--leaf_shrinkage_prior", type=float, default=20.0)
     ap.add_argument("--no_force_leaf_preference", action="store_true",
                     help="Disable forcing best/worst when leaf would be degenerate.")
     ap.add_argument("--no_force_good_if_none", action="store_true",
@@ -1552,8 +1595,16 @@ def main() -> None:
     ap.add_argument("--topic_gain_lo", type=float, default=0.80)
     ap.add_argument("--topic_gain_hi", type=float, default=1.20)
     ap.add_argument("--topic_gain_temp", type=float, default=2.0)
-    ap.add_argument("--quality_eps_min", type=float, default=1e-4)
-    ap.add_argument("--quality_eps_frac", type=float, default=0.05)
+    ap.add_argument("--quality_eps_min", type=float, default=1e-3)
+    ap.add_argument("--quality_eps_frac", type=float, default=0.10)
+    ap.add_argument("--no_gain_by_mpre_bins", action="store_true",
+                    help="Disable topic×mastery-bin tutor action gains.")
+    ap.add_argument("--topic_gain_mode_bins", type=str, default="linear", choices=["linear", "exp_z"],
+                    help="Gain mode for mastery-bin gains (avoid balanced_primary here).")
+    ap.add_argument("--min_gain_bin_action_count", type=int, default=75,
+                    help="Min count for (topic, bin, action) when estimating bin-conditioned gains.")
+    ap.add_argument("--apply_topic_gain_inside_bank", action="store_true",
+                    help="Multiply leaf action scores by topic gain inside the quality bank (not recommended if gains are also applied at runtime).")
 
     args = ap.parse_args()
 
@@ -1581,6 +1632,11 @@ def main() -> None:
         topic_gain_temp=float(args.topic_gain_temp),
         quality_eps_min=float(args.quality_eps_min),
         quality_eps_frac=float(args.quality_eps_frac),
+        use_gain_by_mpre_bins=(not bool(args.no_gain_by_mpre_bins)),
+        topic_gain_mode_bins=str(args.topic_gain_mode_bins),
+        min_gain_bin_action_count=int(args.min_gain_bin_action_count),
+        apply_topic_gain_inside_bank=bool(args.apply_topic_gain_inside_bank),
+
     )
 
     train_bundle_from_kdd_csv(

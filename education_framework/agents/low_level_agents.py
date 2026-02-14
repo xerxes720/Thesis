@@ -113,6 +113,9 @@ class LowLevelAgentConfig:
     # Probe distribution for similarity computation:
     # fraction of probe states drawn from the peer replay (0=self-only, 0.5=symmetric).
     share_probe_peer_frac: float = 0.0
+    # soft target update (Polyak). If None, use hard update every target_update_steps.
+    target_soft_tau: float | None = None
+    use_huber_loss: bool = False
 
 
 # ---------------- Replay Buffer ----------------
@@ -624,14 +627,25 @@ class DQNLowLevelAgent:
         td = (q_sa - target)
         # loss = (w_t * (td ** 2)).sum() / (w_t.sum().clamp_min(1e-8))
 
-        norm_mode = str(getattr(self.cfg, "share_loss_norm", "mean"))
-
-        if norm_mode == "sumw":
-            # your previous behavior
-            loss = (w_t * (td ** 2)).sum() / (w_t.sum().clamp_min(1e-8))
+        use_huber = bool(getattr(self.cfg, "use_huber_loss", False))
+        if use_huber:
+            loss_per = torch.nn.functional.smooth_l1_loss(q_sa, target, reduction="none")
         else:
-            # paper-faithful: weights scale sample contribution but do not renormalize by sum(w)
-            loss = (w_t * (td ** 2)).mean()
+            loss_per = (q_sa - target) ** 2
+
+        norm_mode = str(getattr(self.cfg, "share_loss_norm", "mean"))
+        if norm_mode == "sumw":
+            loss = (w_t * loss_per).sum() / (w_t.sum().clamp_min(1e-8))
+        else:
+            loss = (w_t * loss_per).mean()
+        # norm_mode = str(getattr(self.cfg, "share_loss_norm", "mean"))
+        #
+        # if norm_mode == "sumw":
+        #     # your previous behavior
+        #     loss = (w_t * (td ** 2)).sum() / (w_t.sum().clamp_min(1e-8))
+        # else:
+        #     # paper-faithful: weights scale sample contribution but do not renormalize by sum(w)
+        #     loss = (w_t * (td ** 2)).mean()
 
         # loss_per = torch.nn.functional.smooth_l1_loss(q_sa, target, reduction="none")  # Huber
         # loss = (w_t * loss_per).sum() / w_t.sum().clamp_min(1e-8)
@@ -643,8 +657,16 @@ class DQNLowLevelAgent:
         self.num_updates += 1
 
         # target net update
-        if self.num_updates % max(1, int(self.cfg.target_update_steps)) == 0:
-            self.target_net.load_state_dict(self.policy_net.state_dict())
+        tau = getattr(self.cfg, "target_soft_tau", None)
+        if tau is not None and float(tau) > 0.0:
+            # Polyak / soft update every gradient step
+            with torch.no_grad():
+                for p, pt in zip(self.policy_net.parameters(), self.target_net.parameters()):
+                    pt.data.mul_(1.0 - float(tau)).add_(p.data, alpha=float(tau))
+        else:
+            # fallback: hard copy
+            if self.num_updates % max(1, int(self.cfg.target_update_steps)) == 0:
+                self.target_net.load_state_dict(self.policy_net.state_dict())
 
     # -------- internals --------
 

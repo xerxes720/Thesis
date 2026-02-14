@@ -1,140 +1,245 @@
 import os
 import glob
+import re
+from collections import OrderedDict
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# -----------------------------
-# Configure your run directories
-# -----------------------------
-# Point these to the folders that contain seed subfolders with metrics.csv inside.
-# The script will search recursively for "**/seed_*/metrics.csv".
+"""
+plot_compare.py (hardened)
 
-COND_DIRS = {
-    "single-agent": "../runs",
-    "single-ll": "../runs",
-    "multi-agent": "../runs",
-    "weighted transfer": "../runs",
-    "tutee": "../runs",
+Goals:
+- Avoid loading the wrong runs (no substring "contains" filtering).
+- Handle multiple seeds correctly.
+- Prevent double-counting a seed when multiple reruns exist.
+- Align curves by explicit 'episode' values (no index-based x).
+- Warn loudly when expected seeds/columns are missing.
 
-}
+Expected run tags (from your run_all.ps1):
+  flat_baseline
+  paper_multi_no_es
+  paper_multi_weighted_cka
+  tutee_no_es
+  tutee_weighted_cka
+"""
 
-COND_FILTERS = {
-    "single-agent": ["flat_single"],
-    "single-ll": ["single_ll"],
-    "multi-agent":  ["multi_no_es"],                 # no experience sharing
-    "weighted transfer": ["multi_weighted_cka"],     # experience sharing (weighted CKA)
-    "tutee": ["tutee_weighted_cka"],                 # tutee + (weighted CKA) in your names
-}
+# -----------------------------------------------------------------------------
+# Where your runs live
+# -----------------------------------------------------------------------------
+RUNS_DIR = os.environ.get("RUNS_DIR", "../runs")
 
-# Needed for "average reward over all agents" proxy
-NUM_TOPICS = 7  # <- set this to bundle.n_topics in your experiment
-# NUM_TOPICS = 8  # or pull from config if you have it
+# -----------------------------------------------------------------------------
+# Conditions (exact run_tag matching)
+# -----------------------------------------------------------------------------
+CONDITIONS = OrderedDict([
+    ("flat", {
+        "label": "Flat (DQN)",
+        "tags": ["flat_baseline"],
+    }),
+    ("single", {
+        "label": "Single (DQN)",
+        "tags": ["paper_single"],
+    }),
+    ("paper_no_es", {
+        "label": "HRL multi (no ES)",
+        "tags": ["paper_multi_no_es"],
+    }),
+    ("paper_es", {
+        "label": "HRL multi + ES (wCKA)",
+        "tags": ["paper_multi_weighted_cka"],
+    }),
+    ("tutee_no_es", {
+        "label": "+Tutee (no ES)",
+        "tags": ["tutee_no_es"],
+    }),
+    ("tutee_es", {
+        "label": "+Tutee + ES (wCKA)",
+        "tags": ["tutee_weighted_cka"],
+    }),
+])
 
-SMOOTH_W = 50  # paper-like smoothing; tweak to 50/200 if you want
+# Which conditions to show per plot
+FIG5_CONDS = ["flat", "paper_no_es", "paper_es", "tutee_es"]
+FIG6_CONDS = ["flat", "paper_no_es", "paper_es", "tutee_es"]
+FIG7_CONDS = ["single","paper_no_es", "paper_es", "tutee_no_es", "tutee_es"]
+
+# smoothing window (paper-ish)
+SMOOTH_W = 50
+
+# if True: plot faint per-seed raw curves in background
+PLOT_ALL_SEEDS = True
+
+# If you want to enforce that each condition has the same seeds,
+# list them here; otherwise leave as None.
+EXPECTED_SEEDS = [0, 23, 48]  # e.g., [0, 23, 48]
 
 
+# -----------------------------------------------------------------------------
+# Utilities
+# -----------------------------------------------------------------------------
 def _rolling_mean(y: np.ndarray, w: int) -> np.ndarray:
     y = np.asarray(y, dtype=float)
     if w <= 1:
         return y
-    # keep same length; simple centered-ish effect via trailing mean
     s = pd.Series(y)
     return s.rolling(window=w, min_periods=max(1, w // 10)).mean().to_numpy()
 
 
-def _find_metrics_csvs(path_or_glob: str):
-    # 1) exact file
-    if os.path.isfile(path_or_glob) and path_or_glob.endswith(".csv"):
-        return [path_or_glob]
-
-    # 2) directory -> search typical layouts
-    if os.path.isdir(path_or_glob):
-        patterns = [
-            os.path.join(path_or_glob, "**", "metrics.csv"),
-            os.path.join(path_or_glob, "**", "metrics__*.csv"),
-            os.path.join(path_or_glob, "**", "seed_*", "metrics.csv"),
-            os.path.join(path_or_glob, "**", "seed_*", "metrics__*.csv"),
-            os.path.join(path_or_glob, "**", "*.csv"),
-        ]
-        out = []
-        for pat in patterns:
-            out.extend(glob.glob(pat, recursive=True))
-        return sorted(set(out))
-
-    # 3) assume it is already a glob pattern
-    return sorted(set(glob.glob(path_or_glob, recursive=True)))
+def _find_metrics_csvs(root: str):
+    """
+    Only pick files that look like the training metrics.
+    This avoids accidentally plotting summaries or other csvs.
+    """
+    patterns = [
+        os.path.join(root, "**", ".csv"),
+        os.path.join(root, "**", "*.csv"),
+    ]
+    out = []
+    for pat in patterns:
+        out.extend(glob.glob(pat, recursive=True))
+    return sorted(set(out))
 
 
-def _load_curves_for_condition(root_dir: str, must_contain=None):
-    paths = _find_metrics_csvs(root_dir)
+def _infer_seed_from_path(p: str):
+    """
+    Extract seed from common patterns:
+      - .../seed_23/...
+      - ...__seed=23__...
+      - ...seed=23...
+    """
+    s = p.replace("\\", "/")
+    m = re.search(r"(?:/seed_(\d+)(?:/|$))", s)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(?:__seed=|seed[_=])(\d+)", s)
+    return int(m.group(1)) if m else None
 
-    if must_contain:
-        must_contain = list(must_contain)
 
-        # def token_match(p: str) -> bool:
-        #     base = os.path.basename(p)
-        #     # strip extension, split your run naming convention
-        #     base = base.replace(".csv", "")
-        #     tokens = set(base.split("__"))
-        #     return all(req in tokens for req in must_contain)
+def _path_tokens(p: str):
+    s = p.replace("\\", "/").lower()
+    parts = []
+    for seg in s.split("/"):
+        if not seg:
+            continue
+        parts.append(seg)
+        parts.extend([t for t in seg.split("__") if t])
+    return parts
 
-        paths = [p for p in paths if all(s in p for s in must_contain)]
+
+def _matches_exact_run_tag(p: str, tag: str) -> bool:
+    """
+    Exact run_tag match; prevents substring mistakes.
+    Accepts:
+      - token 'tag=<tag>' in filename tokens
+      - token 'run_tag=<tag>'
+      - directory segment exactly equal to '<tag>'
+    """
+    tag = tag.lower()
+    toks = _path_tokens(p)
+
+    if tag in toks:
+        return True
+    if f"tag={tag}" in toks:
+        return True
+    if f"run_tag={tag}" in toks:
+        return True
+
+    s = p.replace("\\", "/").lower()
+    if re.search(rf"(?:^|__)tag={re.escape(tag)}(?:__|\.csv$)", s):
+        return True
+    if re.search(rf"(?:^|__)run_tag={re.escape(tag)}(?:__|\.csv$)", s):
+        return True
+    return False
+
+
+def _select_latest_per_seed(paths):
+    """
+    If you have reruns of the same (tag, seed), keep only the most recently modified file.
+    This prevents double-counting a seed.
+    """
+    by_seed = {}
+    for p in paths:
+        seed = _infer_seed_from_path(p)
+        mtime = os.path.getmtime(p)
+        key = seed if seed is not None else p  # if seed missing, keep unique
+        if key not in by_seed or mtime > by_seed[key][0]:
+            by_seed[key] = (mtime, p)
+    return [v[1] for v in by_seed.values()]
+
+
+def _load_condition_dfs(run_tags, root_dir=RUNS_DIR, verbose=True):
+    """
+    Load all metrics dfs for a condition defined by one or more exact run_tags.
+    """
+    candidates = _find_metrics_csvs(root_dir)
+
+    matched = []
+    for p in candidates:
+        for tag in run_tags:
+            if _matches_exact_run_tag(p, tag):
+                matched.append(p)
+                break
+
+    matched = sorted(set(matched))
+    matched = _select_latest_per_seed(matched)
+
     dfs = []
-    for p in sorted(paths):
-        df = pd.read_csv(p)
+    meta = []  # (seed, path)
+    for p in matched:
+        try:
+            df = pd.read_csv(p)
+        except Exception:
+            continue
 
-        # Accept both naming conventions if you had older logs
+        # normalize column names
         if "steps" not in df.columns and "steps_cost" in df.columns:
             df = df.rename(columns={"steps_cost": "steps"})
 
         required = {"episode", "reward", "steps"}
-        if not required.issubset(set(df.columns)):
+        if not required.issubset(df.columns):
             continue
 
-        ll_cols = [c for c in df.columns if c.startswith("ll_reward_")]
-
-        keep = ["episode", "reward", "steps"] + ll_cols
-
-        if "arch" in df.columns:
-            keep = ["arch"] + keep
-        if "use_tutee" in df.columns:
-            keep.append("use_tutee")
-        if "n_ll_agents" in df.columns:
-            keep.append("n_ll_agents")
-        if "tutee_reward_total" in df.columns:
-            keep.append("tutee_reward_total")
-        if "avg_agent_reward" in df.columns:
-            keep.append("avg_agent_reward")
-        if "avg_reward_per_learning_agent" in df.columns:
-            keep.append("avg_reward_per_learning_agent")
-        if "avg_reward_per_topic_slot" in df.columns:
-            keep.append("avg_reward_per_topic_slot")
+        # keep relevant columns if present (avoid dragging huge logs)
+        keep = ["episode", "reward", "steps"]
+        opt_cols = [
+            "avg_reward_per_topic_slot",
+            "avg_reward_per_learning_agent",
+            "avg_agent_reward",
+            "use_tutee",
+            "arch",
+            "n_ll_agents",
+        ]
+        for c in opt_cols:
+            if c in df.columns:
+                keep.append(c)
 
         df = df[keep].copy()
-        df = df.sort_values("episode").reset_index(drop=True)
+
+        # sort and de-dup episodes (keep last if logging duplicates)
+        df = df.sort_values("episode")
+        df = df.drop_duplicates(subset=["episode"], keep="last").reset_index(drop=True)
+
         dfs.append(df)
+        meta.append((_infer_seed_from_path(p), p))
 
-    return dfs
+    if verbose:
+        seeds = [m[0] for m in meta]
+        print(f"[LOAD] tags={run_tags}  files={len(meta)}  seeds={sorted([s for s in seeds if s is not None])}")
+        for s, p in meta:
+            print(f"   - seed={s}  {p}")
+
+        if EXPECTED_SEEDS is not None:
+            missing = sorted(set(EXPECTED_SEEDS) - set([s for s in seeds if s is not None]))
+            if missing:
+                print(f"[WARN] Missing seeds for tags={run_tags}: {missing}")
+
+    return dfs, meta
 
 
-def _pad_stack(arrs):
+def _mean_curve(dfs, col: str):
     """
-    Stack 1D arrays of different lengths into (n, Lmax) with NaNs padding.
-    """
-    if not arrs:
-        return None
-    L = max(len(a) for a in arrs)
-    out = np.full((len(arrs), L), np.nan, dtype=float)
-    for i, a in enumerate(arrs):
-        out[i, :len(a)] = a
-    return out
-
-
-def _mean_curve(dfs, col: str, cumulative: bool = False):
-    """
-    Mean across seeds by episode number using an outer-join on 'episode'.
-    Returns x (episode array) and mean_y.
+    Mean across seeds by outer-joining on 'episode'.
     """
     if not dfs:
         return None, None
@@ -142,33 +247,6 @@ def _mean_curve(dfs, col: str, cumulative: bool = False):
     merged = None
     for i, df in enumerate(dfs):
         d = df[["episode", col]].copy()
-        y = d[col].to_numpy(dtype=float)
-        if cumulative:
-            y = np.cumsum(y)
-        d[col] = y
-        d = d.rename(columns={col: f"{col}_{i}"})
-
-        merged = d if merged is None else merged.merge(d, on="episode", how="outer")
-
-    merged = merged.sort_values("episode").reset_index(drop=True)
-    ycols = [c for c in merged.columns if c.startswith(f"{col}_")]
-    mean = merged[ycols].to_numpy(dtype=float)
-    mean = np.nanmean(mean, axis=1)
-
-    x = merged["episode"].to_numpy(dtype=int)
-    return x, mean
-
-def _mean_and_std_curve(dfs, col: str, cumulative: bool = False):
-    if not dfs:
-        return None, None, None
-
-    merged = None
-    for i, df in enumerate(dfs):
-        d = df[["episode", col]].copy()
-        y = d[col].to_numpy(dtype=float)
-        if cumulative:
-            y = np.cumsum(y)
-        d[col] = y
         d = d.rename(columns={col: f"{col}_{i}"})
         merged = d if merged is None else merged.merge(d, on="episode", how="outer")
 
@@ -176,178 +254,92 @@ def _mean_and_std_curve(dfs, col: str, cumulative: bool = False):
     ycols = [c for c in merged.columns if c.startswith(f"{col}_")]
     mat = merged[ycols].to_numpy(dtype=float)
 
-    mean = np.nanmean(mat, axis=1)
-    std  = np.nanstd(mat, axis=1)
-
     x = merged["episode"].to_numpy(dtype=int)
-    return x, mean, std
+    y = np.nanmean(mat, axis=1)
+    return x, y
 
 
-# def _representative_curve(dfs, col: str, cumulative: bool = False):
-#     """
-#     Pick a single 'representative' seed curve (first one found) to label as non-AVG.
-#     """
-#     if not dfs:
-#         return None, None
-#     y = dfs[0][col].to_numpy(dtype=float)
-#     if cumulative:
-#         y = np.cumsum(y)
-#     x = np.arange(1, len(y) + 1)
-#     return x, y
-
-def _all_seed_curves(dfs, col: str, cumulative: bool = False):
-    """
-    Yield (x, y) for each seed separately so matplotlib does not connect seeds together.
-    Uses df["episode"] as x (important if episodes are missing).
-    """
+def _all_seed_curves(dfs, col: str):
     for df in dfs:
         x = df["episode"].to_numpy(dtype=int)
         y = df[col].to_numpy(dtype=float)
-        if cumulative:
-            y = np.cumsum(y)
         yield x, y
 
+
+# -----------------------------------------------------------------------------
+# Plots
+# -----------------------------------------------------------------------------
 def plot_fig5_reward_per_episode():
-    single_dfs = _load_curves_for_condition(COND_DIRS["single-agent"], COND_FILTERS["single-agent"])
-    multi_dfs = _load_curves_for_condition(COND_DIRS["multi-agent"], COND_FILTERS["multi-agent"])
-    tutee_dfs = _load_curves_for_condition(COND_DIRS["tutee"], COND_FILTERS["tutee"])
-
-    print("Loaded:", len(single_dfs), len(multi_dfs), len(tutee_dfs))
-
     plt.figure(figsize=(7.2, 4.2))
 
-    # representative raw (one seed)
-    # plot all seeds (thin)
-    for x, y in _all_seed_curves(single_dfs, "reward", cumulative=False):
-        plt.plot(x, y, alpha=0.15, linewidth=1.0, label=None)
+    for key in FIG5_CONDS:
+        spec = CONDITIONS[key]
+        dfs, _meta = _load_condition_dfs(spec["tags"], verbose=True)
 
-    for x, y in _all_seed_curves(multi_dfs, "reward", cumulative=False):
-        plt.plot(x, y, alpha=0.15, linewidth=1.0, label=None)
+        if PLOT_ALL_SEEDS:
+            for x, y in _all_seed_curves(dfs, "reward"):
+                plt.plot(x, y, alpha=0.12, linewidth=1.0)
 
-    for x, y in _all_seed_curves(tutee_dfs, "reward", cumulative=False):
-        plt.plot(x, y, alpha=0.15, linewidth=1.0, label=None)
+        x, y = _mean_curve(dfs, "reward")
+        if x is None:
+            print(f"[WARN] No data for {spec['label']} ({spec['tags']})")
+            continue
 
-    # mean across seeds + smoothing
-    xs_avg, ys_avg = _mean_curve(single_dfs, "reward", cumulative=False)
-    xm_avg, ym_avg = _mean_curve(multi_dfs, "reward", cumulative=False)
-    xt_avg, yt_avg = _mean_curve(tutee_dfs, "reward", cumulative=False)
-
-    if xs_avg is not None: plt.plot(xs_avg, _rolling_mean(ys_avg, SMOOTH_W), linewidth=2.5, label="Single-agent (Avg)")
-    if xm_avg is not None: plt.plot(xm_avg, _rolling_mean(ym_avg, SMOOTH_W), linewidth=2.5, label="Multi-agent (Avg)")
-    if xt_avg is not None: plt.plot(xt_avg, _rolling_mean(yt_avg, SMOOTH_W), linewidth=2.5, label="Tutee (Avg)")
+        plt.plot(x, _rolling_mean(y, SMOOTH_W), linewidth=2.5, label=spec["label"])
 
     plt.xlabel("Training Episode")
-    plt.ylabel("Cumulative Reward Obtained")  # paper wording: cumulative *within episode*
+    plt.ylabel("Episode Reward (sum within episode)")
     plt.tight_layout()
     plt.legend()
     plt.show()
 
 
 def plot_fig6_steps_per_episode():
-    single_dfs = _load_curves_for_condition(COND_DIRS["single-agent"], COND_FILTERS["single-agent"])
-    multi_dfs  = _load_curves_for_condition(COND_DIRS["multi-agent"],  COND_FILTERS["multi-agent"])
-    tutee_dfs  = _load_curves_for_condition(COND_DIRS["tutee"],        COND_FILTERS["tutee"])
-
     plt.figure(figsize=(7.2, 4.2))
 
-    # 1) mean per-episode steps across seeds (NO cumulative here)
-    xs, ys = _mean_curve(single_dfs, "steps", cumulative=False)
-    xm, ym = _mean_curve(multi_dfs,  "steps", cumulative=False)
-    xt, yt = _mean_curve(tutee_dfs,  "steps", cumulative=False)
+    for key in FIG6_CONDS:
+        spec = CONDITIONS[key]
+        dfs, _meta = _load_condition_dfs(spec["tags"], verbose=False)
 
-    # 2) smooth the per-episode signal (this is the right place to smooth)
-    if xs is not None: ys_s = _rolling_mean(ys, SMOOTH_W)
-    if xm is not None: ym_s = _rolling_mean(ym, SMOOTH_W)
-    if xt is not None: yt_s = _rolling_mean(yt, SMOOTH_W)
+        x, y = _mean_curve(dfs, "steps")
+        if x is None:
+            print(f"[WARN] No data for {spec['label']} ({spec['tags']})")
+            continue
 
-    # Choose ONE of these two:
-
-    # A) Paper-style "steps per episode" (recommended)
-    if xs is not None: plt.plot(xs, ys_s, linewidth=2.5, label="Single-agent (Avg)")
-    if xm is not None: plt.plot(xm, ym_s, linewidth=2.5, label="Multi-agent (Avg)")
-    if xt is not None: plt.plot(xt, yt_s, linewidth=2.5, label="Tutee (Avg)")
-    plt.ylabel("Steps per Episode (to completion)")
-
-    # B) If you truly want cumulative over training, cumsum AFTER smoothing:
-    # if xs is not None: plt.plot(xs, np.cumsum(ys_s), linewidth=2.5, label="Single-agent (Avg)")
-    # if xm is not None: plt.plot(xm, np.cumsum(ym_s), linewidth=2.5, label="Multi-agent (Avg)")
-    # if xt is not None: plt.plot(xt, np.cumsum(yt_s), linewidth=2.5, label="Tutee (Avg)")
-    # plt.ylabel("Cumulative Steps (over Training)")
-
+        plt.plot(x, _rolling_mean(y, SMOOTH_W), linewidth=2.5, label=spec["label"])
 
     plt.xlabel("Training Episode")
+    plt.ylabel("Steps per Episode (to completion)")
     plt.tight_layout()
     plt.legend()
     plt.show()
-
-
-
 
 
 def plot_average_reward_over_all_agents():
-    single_dfs = _load_curves_for_condition(COND_DIRS["single-ll"], COND_FILTERS["single-ll"])
-    multi_dfs = _load_curves_for_condition(COND_DIRS["multi-agent"], COND_FILTERS["multi-agent"])
-    tutee_dfs = _load_curves_for_condition(COND_DIRS["tutee"], COND_FILTERS["tutee"])
-    dfs_weighted = _load_curves_for_condition(COND_DIRS["weighted transfer"], COND_FILTERS["weighted transfer"])
-
-    def avg_agent_reward_curve(dfs):
-        ys = []
-        for df in dfs:
-            if "avg_reward_per_topic_slot" not in df.columns:
-                continue
-            ys.append(df["avg_reward_per_topic_slot"].to_numpy(dtype=float))
-
-        mat = _pad_stack(ys)
-        if mat is None:
-            return None, None
-        mean = np.nanmean(mat, axis=0)
-        x = np.arange(1, len(mean) + 1)
-        return x, _rolling_mean(mean, SMOOTH_W)
-
+    """
+    Uses avg_reward_per_topic_slot. If it's missing, we SKIP (no silent fallback).
+    This prevents accidentally plotting a different metric and thinking it's Fig.7.
+    """
     plt.figure(figsize=(7.2, 4.2))
 
-    x1, y1 = avg_agent_reward_curve(single_dfs)
-    x2, y2 = avg_agent_reward_curve(multi_dfs)
-    x3, y3 = avg_agent_reward_curve(dfs_weighted)
-    x4, y4 = avg_agent_reward_curve(tutee_dfs)
+    for key in FIG7_CONDS:
+        spec = CONDITIONS[key]
+        dfs, _meta = _load_condition_dfs(spec["tags"], verbose=False)
 
-    if x1 is not None: plt.plot(x1, y1, linewidth=2.0, label="Single-agent")
-    if x2 is not None: plt.plot(x2, y2, linewidth=2.0, label="Multi-agent")
-    if x3 is not None: plt.plot(x3, y3, linewidth=2.0, label="Weighted Transfer")
-    if x4 is not None: plt.plot(x4, y4, linewidth=2.0, label="Tutee")
+        dfs = [d for d in dfs if "avg_reward_per_topic_slot" in d.columns]
+        x, y = _mean_curve(dfs, "avg_reward_per_topic_slot")
+        if x is None:
+            print(f"[WARN] Missing avg_reward_per_topic_slot for {spec['label']} ({spec['tags']}). Skipping.")
+            continue
+
+        plt.plot(x, _rolling_mean(y, SMOOTH_W), linewidth=2.5, label=spec["label"])
 
     plt.xlabel("Training Episode")
-    plt.ylabel("Average Reward over all Agents")
+    plt.ylabel("Average Reward over all Agents (topic-slot average)")
     plt.tight_layout()
     plt.legend()
     plt.show()
 
-
-# def plot_fig7_avg_reward_over_all_agents():
-#     # HRL single vs HRL multi (+ optional transfer/tutee if you want)
-#     single_ll_dfs = _load_curves_for_condition(COND_DIRS["single-ll"], COND_FILTERS["single-ll"])
-#     multi_dfs     = _load_curves_for_condition(COND_DIRS["multi-agent"], COND_FILTERS["multi-agent"])
-#
-#     plt.figure(figsize=(7.2, 4.2))
-#
-#     col = "avg_reward_per_topic_slot"  # <-- IMPORTANT
-#
-#     for x, y in _all_seed_curves(single_ll_dfs, col):
-#         plt.plot(x, y, alpha=0.15, linewidth=1.0)
-#     for x, y in _all_seed_curves(multi_dfs, col):
-#         plt.plot(x, y, alpha=0.15, linewidth=1.0)
-#
-#     xs, ys = _mean_curve(single_ll_dfs, col)
-#     xm, ym = _mean_curve(multi_dfs, col)
-#
-#     if xs is not None: plt.plot(xs, _rolling_mean(ys, SMOOTH_W), linewidth=2.5, label="HRL single (Avg per topic-slot)")
-#     if xm is not None: plt.plot(xm, _rolling_mean(ym, SMOOTH_W), linewidth=2.5, label="HRL multi (Avg per topic-slot)")
-#
-#     plt.xlabel("Training Episode")
-#     plt.ylabel("Average Reward over all agents (topic slots)")
-#     plt.tight_layout()
-#     plt.legend()
-#     plt.show()
 
 if __name__ == "__main__":
     plot_fig5_reward_per_episode()

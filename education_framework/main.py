@@ -117,7 +117,7 @@ def topic_entropy(topic_ids):
 class KDDEnvConfig:
     num_topics: int = 7
     max_steps: int = 200
-    initial_mastery: float = 0.2
+    initial_mastery: float = 0.1
     lambda_step: float = 0.004  # NEW: reward penalty per step-cost unit
     rho_diminish: float = 0.0  # paper-like diminishing returns; 0 disables
 
@@ -616,17 +616,21 @@ class FlatAgent:
     # -------- observation shaping (flat-only) --------
 
     def _expand_obs(self, obs) -> np.ndarray:
-        """Expand the raw env observation with a per-topic grouped view (+ topic id)."""
+        """Expand raw env obs by appending a per-topic grouped view (+ normalized topic id)."""
         x = np.asarray(obs, dtype=np.float32)
 
         T = int(self.num_topics)
         n_blocks = 7
         tail = 2
         expected = n_blocks * T + tail
-        if x.shape[0] != expected:
-            return x
 
-        mastery = x[0:T]
+        if x.shape[0] != expected:
+            raise ValueError(
+                f"FlatAgent obs shape mismatch: got {x.shape[0]}, expected {expected} "
+                f"(T={T}, blocks={n_blocks}, tail={tail})."
+            )
+
+        mastery = x[0 * T:1 * T]
         cfa = x[1 * T:2 * T]
         hint = x[2 * T:3 * T]
         t_ema = x[3 * T:4 * T]
@@ -634,13 +638,11 @@ class FlatAgent:
         opp = x[5 * T:6 * T]
         done = x[6 * T:7 * T]
 
-        # NEW: explicit topic id feature (normalized 0..1)
-        tid = (np.arange(T, dtype=np.float32) / max(1, T - 1))
+        tid = np.arange(T, dtype=np.float32) / max(1, T - 1)
 
-        # per-topic grouped features now include tid as the last column
-        per_topic = np.stack([mastery, cfa, hint, t_ema, inc, opp, done], axis=1).reshape(-1)
-
-        return np.concatenate([x, per_topic.astype(np.float32, copy=False)], axis=0)
+        per_topic = np.stack([mastery, cfa, hint, t_ema, inc, opp, done, tid], axis=1).reshape(-1).astype(np.float32,
+                                                                                                          copy=False)
+        return np.concatenate([x, per_topic], axis=0)
 
     def _valid_action_indices(self, obs) -> List[int]:
         """Return the indices of actions whose topic is NOT completed (masking)."""
@@ -701,11 +703,10 @@ class FlatAgent:
             q_np = q_np + mask
             return int(q_np.argmax())
 
-    def update(self, obs, a_idx, r, next_obs, done):
-        # Keep training in the same expanded observation space.
+    def update(self, obs, a_idx, r, next_obs, done, topic_id: int | None = None):
         obs_x = self._expand_obs(obs)
         next_obs_x = self._expand_obs(next_obs)
-        self.agent.update(obs_x, a_idx, r, next_obs_x, done)
+        self.agent.update(obs_x, a_idx, r, next_obs_x, done, topic_id=topic_id)
 
 
 def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
@@ -742,13 +743,14 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
 
         next_obs, reward_team, done, info = env.step_tutor(topic_id, ll_action_str)
         reward_train = float(reward_team)
+        # reward_train = float(np.clip(reward_train, -1.0, 1.0))
 
         if beta != 0.0:
             reward_train = reward_train + beta * (gamma * phi(next_obs) - phi(obs))
 
         if train:
             # flat_agent.update(obs, a_idx, shaped, next_obs, done)
-            flat_agent.update(obs, a_idx, reward_train, next_obs, done)
+            flat_agent.update(obs, a_idx, reward_train, next_obs, done, topic_id=int(topic_id))
 
         total_reward += float(reward_team)  # compare on true objective
         steps += float(info.get("step_cost", 1.0))
@@ -1609,7 +1611,7 @@ def main():
 
         env = KDDHierEnv(
             bundle=bundle,
-            cfg=KDDEnvConfig(num_topics=bundle.n_topics, max_steps=args.max_steps, initial_mastery=0.2),
+            cfg=KDDEnvConfig(num_topics=bundle.n_topics, max_steps=args.max_steps, initial_mastery=0.1),
             learner_cfg=learner_cfg,
             seed=seed,
         )
@@ -1673,14 +1675,31 @@ def main():
             flat_agent = None
         else:
             # flat single-agent RL baseline (no HL/LL decomposition)
-            ll_cfg = LowLevelAgentConfig(num_topics=bundle.n_topics)
+            # flat single-agent RL baseline (no HL/LL decomposition)
+            ll_cfg = LowLevelAgentConfig(
+                num_topics=bundle.n_topics,
+                lr=2e-4,
+                gamma=0.985,
+                buffer_size=100000,
+                batch_size=128,
+                train_every_steps=10,
+                target_update_steps=50,
+            )
             ll_cfg.device = "cpu"
             ll_cfg.experience_sharing = False
             ll_cfg.share_mode = "off"
-            ll_cfg.min_replay_size = 200
-            # ll_cfg.lr = 3e-4
-            # ll_cfg.target_update_steps = 200
 
+            # Stabilize flat across seeds: keep replay separated per chosen topic
+            ll_cfg.per_topic_replay = True
+            ll_cfg.per_topic_sample_mode = "current"
+            ll_cfg.per_topic_buffer_size = max(1000, int(ll_cfg.buffer_size) // max(1, int(bundle.n_topics)))
+
+            # Warmup scaled for per-topic buffers (same logic you use elsewhere)
+            BASE_MIN_REPLAY_SHARED = 1000
+            scaled = int(BASE_MIN_REPLAY_SHARED / max(1, int(bundle.n_topics)))
+            ll_cfg.min_replay_size = max(ll_cfg.batch_size, min(300, max(100, scaled)))
+            # ll_cfg.target_soft_tau = 0.005  # 0.002–0.01 range; 0.005 is a good default
+            # ll_cfg.use_huber_loss = True
 
             flat_agent = FlatAgent(ll_cfg, num_topics=bundle.n_topics)
 
@@ -1770,6 +1789,15 @@ def main():
                 if tutee_agent is not None:
                     tutee_agent.set_epsilon(eps_joint)
             else:
+                # flat-only epsilon schedule (faster decay)
+                eps_start = 0.25
+                eps_end = 0.02
+                eps_decay_episodes = 300  # or 400 if you want it slower
+
+                progress = min(1.0, episode / eps_decay_episodes)
+                eps_flat = eps_start + (eps_end - eps_start) * progress
+                eps_flat = float(np.clip(eps_flat, 0.0, 1.0))
+
                 flat_agent.set_epsilon(eps_flat)
             # ---- reset per-episode sharing counters (MUST be before the episode runs) ----
             if args.arch == "hrl":

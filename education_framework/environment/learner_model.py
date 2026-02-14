@@ -363,6 +363,11 @@ class KDDModelBundle:
 
     topic_tutor_action_gain: Optional[np.ndarray] = None
 
+    # Optional: mastery-bin conditioned tutor gains
+    tutor_gain_mpre_bins: Optional[np.ndarray] = None            # edges, shape (n_bins+1,)
+    topic_tutor_action_gain_by_mpre_bin: Optional[np.ndarray] = None  # shape (n_topics, n_bins, 5)
+
+
 
 
 # ----------------------------
@@ -373,8 +378,8 @@ class KDDModelBundle:
 class KDDLearnerConfig:
     n_topics: int = 7
 
-    mastery_threshold: float = 0.80
-    opp_min: int = 0
+    mastery_threshold: float = 0.70
+    opp_min: int = 1
 
     # topic_mastery_thresholds: Optional[List[float]] = field(
     #     default_factory=lambda: [0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82]
@@ -498,7 +503,7 @@ class KDDLearnerModel:
         return cls(cfg=obj["cfg"], bundle=obj["bundle"], seed=seed)
 
     # ---------- env-like API ----------
-    def reset(self, initial_mastery: Union[float, Sequence[float]] = 0.2) -> LearnerState:
+    def reset(self, initial_mastery: Union[float, Sequence[float]] = 0.1) -> LearnerState:
         if isinstance(initial_mastery, (list, tuple, np.ndarray)):
             arr = np.asarray(initial_mastery, dtype=np.float32)
             if arr.shape[0] != self.cfg.n_topics:
@@ -581,11 +586,31 @@ class KDDLearnerModel:
         """
         # TODO
         # return 1.0
+        g_bins = getattr(self.bundle, "topic_tutor_action_gain_by_mpre_bin", None)
+        edges = getattr(self.bundle, "tutor_gain_mpre_bins", None)
+
+        if g_bins is not None and edges is not None:
+            t = int(np.clip(topic_id, 0, g_bins.shape[0] - 1))
+            a = int(np.clip(action_id, 0, g_bins.shape[2] - 1))
+            m = float(self.state.mastery[t])
+            edges = np.asarray(edges, dtype=np.float32)
+            n_bins = int(edges.size - 1)
+            if n_bins > 0:
+                b = int(np.digitize([m], edges[1:-1], right=False)[0]) if n_bins > 1 else 0
+                b = int(np.clip(b, 0, n_bins - 1))
+                return float(g_bins[t, b, a])
+
         g = getattr(self.bundle, "topic_tutor_action_gain", None)
         if g is not None:
             t = int(np.clip(topic_id, 0, g.shape[0] - 1))
             a = int(np.clip(action_id, 0, g.shape[1] - 1))
             return float(g[t, a])
+
+        # g = getattr(self.bundle, "topic_tutor_action_gain", None)
+        # if g is not None:
+        #     t = int(np.clip(topic_id, 0, g.shape[0] - 1))
+        #     a = int(np.clip(action_id, 0, g.shape[1] - 1))
+        #     return float(g[t, a])
         # 2) Fallback to cluster-based gains if enabled in cfg
         cfg = self.cfg
         if not getattr(cfg, "enable_action_heterogeneity", False):
@@ -1377,7 +1402,7 @@ class KDDTrajectoryBuilder:
             ),
             seed=seed,
         )
-        self.sim.reset(initial_mastery=0.2)
+        self.sim.reset(initial_mastery=0.1)
 
     def _extract_kc(self, row: Mapping[str, Any], kc_col: str) -> Optional[str]:
         raw = row.get(kc_col)
@@ -1515,7 +1540,8 @@ class KDDTrajectoryBuilder:
         raw_gain = (float(cfa) - 0.5)  # +0.5 if correct, -0.5 if incorrect
         penalty = 0.15 * (float(hints) > 0) + 0.10 * (float(incorrects) > 0)
         gain = raw_gain * (1.0 - penalty)
-        step = 0.08 * gain * (1.0 - m)
+        # step = 0.08 * gain * (1.0 - m)
+        step = 0.04 * gain * (1.0 - m)
         s.mastery[topic_id] = _clip01(m + step)
 
 
