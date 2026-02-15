@@ -764,7 +764,14 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
 # Episode loop (minimal changes)
 # ----------------------------
 
-def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = True):
+def run_episode(
+    env, high_level_agent, tutor_agents, tutee_agent,
+    train: bool = True, *,
+    tutee_ll_policy: str = "learned",
+    tutee_disable_ll_training: bool = False,
+    control_rng: random.Random | None = None,
+
+):
     obs = env.reset()
     done = False
     total_reward = 0.0
@@ -887,8 +894,37 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
 
             tutee_obs = env.get_ll_observation(topic_id, include_topic_id=True)
 
-            ll_action_idx = tutee_agent.select_action(tutee_obs)
-            ll_action_str = tutee_agent.get_action_meanings()[ll_action_idx]
+            # ll_action_idx = tutee_agent.select_action(tutee_obs)
+            # ll_action_str = tutee_agent.get_action_meanings()[ll_action_idx]
+            # tutee_action_counts[ll_action_str] += 1
+            tutee_action_names = list(tutee_agent.get_action_meanings())
+
+            if tutee_ll_policy == "learned":
+                ll_action_idx = tutee_agent.select_action(tutee_obs)
+            else:
+                # Control A: choose tutee LL action randomly.
+                # Option 1: random among "ready" actions (random_allowed)
+                # Option 2: random among ALL tutee actions (random_all)
+                m_topic = float(tutee_obs[0])  # your tutee obs is [topic_mastery, ...]
+                cfg = tutee_agent.cfg  # NEW: match learned tutee thresholds
+                cap_high = float(getattr(env.model.cfg, "tutee_cap_high", 1.0))  # cap still belongs to learner cfg
+
+                allowed = []
+                if m_topic >= float(cfg.tutee_ready_quiz) and m_topic < cap_high:
+                    allowed.append("tutee_quiz")
+                if m_topic >= float(cfg.tutee_ready_explain) and m_topic < cap_high:
+                    allowed.append("tutee_explain")
+                if m_topic >= float(cfg.tutee_ready_fix) and m_topic < cap_high:
+                    allowed.append("tutee_fix")
+
+                if tutee_ll_policy == "random_all" or not allowed:
+                    allowed = tutee_action_names
+
+                rng = control_rng if control_rng is not None else random
+                ll_action_str = rng.choice(allowed)
+                ll_action_idx = int(tutee_action_names.index(ll_action_str))
+
+            ll_action_str = tutee_action_names[ll_action_idx]
             tutee_action_counts[ll_action_str] += 1
 
             next_obs, reward_hl, done, info = env.step_tutee(topic_id, ll_action_str)
@@ -904,10 +940,12 @@ def run_episode(env, high_level_agent, tutor_agents, tutee_agent, train: bool = 
             tutee_reward_total += reward_team
 
             if train:
-                # high_level_agent.update(obs, hl_action_idx, reward_hl, next_obs, done)
-                # tutee_agent.update(tutee_obs, ll_action_idx, reward_ll, next_tutee_obs, done)
+                # HL always learns (it decides when to use tutor vs tutee mode).
                 high_level_agent.update(obs, hl_action_idx, reward_team, next_obs, done)
-                tutee_agent.update(tutee_obs, ll_action_idx, reward_team, next_tutee_obs, done)
+
+                # Control A: optionally freeze tutee LL learning, and only learn when policy is learned.
+                if (not tutee_disable_ll_training) and (tutee_ll_policy == "learned"):
+                    tutee_agent.update(tutee_obs, ll_action_idx, reward_team, next_tutee_obs, done)
 
             # next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
             # next_tutee_obs = add_topic(next_obs, topic_id)
@@ -1386,6 +1424,19 @@ def main():
     # Option A (fastest): reduce --log_window to 25 (or 20) so the gate updates before sharing becomes active.
     ap.add_argument("--log_window", type=int, default=100)
     ap.add_argument("--use_tutee", action="store_true", default=False)
+    ap.add_argument(
+        "--tutee_ll_policy",
+        type=str,
+        default="learned",
+        choices=["learned", "random_allowed", "random_all"],
+        help="Control A: how tutee low-level action is chosen when HL selects mode=tutee.",
+    )
+    ap.add_argument(
+        "--tutee_disable_ll_training",
+        action="store_true",
+        default=False,
+        help="Control A: if set, do not update the tutee LL DQN (useful for random tutee LL policy).",
+    )
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max_steps", type=int, default=200)
 
@@ -1775,6 +1826,9 @@ def main():
 
         rows = []
 
+        control_rng = random.Random(int(seed) + 99991)
+
+
         for episode in tqdm(range(1, args.episodes + 1), desc=f"Training(seed={seed})"):
             # epsilon schedule
             progress = min(1.0, episode / eps_decay_episodes)
@@ -1825,7 +1879,13 @@ def main():
                     ep_longest_streak,
                     ep_tutor_dm_sum,  # NEW
                     ep_tutor_dm_count,  # NEW
-                ) = run_episode(env, high_level_agent, tutor_agents, tutee_agent, train=True)
+                ) = run_episode(
+                    env, high_level_agent, tutor_agents, tutee_agent,
+                    train=True,
+                    tutee_ll_policy=str(args.tutee_ll_policy),
+                    tutee_disable_ll_training=bool(args.tutee_disable_ll_training),
+                    control_rng=control_rng,
+                )
                 flat_agent_reward = 0.0
             else:
                 total_reward, steps, info = run_episode_flat(env, flat_agent, train=True)

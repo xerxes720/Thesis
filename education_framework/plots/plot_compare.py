@@ -57,12 +57,24 @@ CONDITIONS = OrderedDict([
         "label": "+Tutee + ES (wCKA)",
         "tags": ["tutee_weighted_cka"],
     }),
+    ("tutee_ctrl_randall", {
+        "label": "Tutee control Random all",
+        "tags": ["tutee_controlA_randLL_all"],
+    }),
+    ("tutee_ctrl_rand_allowed", {
+        "label": "Tutee control Random allowed",
+        "tags": ["tutee_controlA_randLL_ready"],
+    }),
 ])
 
 # Which conditions to show per plot
-FIG5_CONDS = ["flat", "paper_no_es", "paper_es", "tutee_es"]
-FIG6_CONDS = ["flat", "paper_no_es", "paper_es", "tutee_es"]
-FIG7_CONDS = ["single","paper_no_es", "paper_es", "tutee_no_es", "tutee_es"]
+# FIG5_CONDS = ["flat", "paper_no_es", "paper_es", "tutee_es"]
+# FIG6_CONDS = ["flat", "paper_no_es", "paper_es", "tutee_es"]
+# FIG7_CONDS = ["single","paper_no_es", "paper_es", "tutee_no_es", "tutee_es"]
+
+FIG5_CONDS = ["flat", "paper_no_es", "paper_es", "tutee_es", "tutee_ctrl_randall", "tutee_ctrl_rand_allowed"]
+FIG6_CONDS = ["flat", "paper_no_es", "paper_es", "tutee_es", "tutee_ctrl_randall", "tutee_ctrl_rand_allowed"]
+FIG7_CONDS = ["tutee_no_es", "paper_no_es", "paper_es", "tutee_es", "tutee_ctrl_randall", "tutee_ctrl_rand_allowed"]
 
 # smoothing window (paper-ish)
 SMOOTH_W = 50
