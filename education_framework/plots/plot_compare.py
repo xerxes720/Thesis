@@ -84,7 +84,8 @@ PLOT_ALL_SEEDS = True
 
 # If you want to enforce that each condition has the same seeds,
 # list them here; otherwise leave as None.
-EXPECTED_SEEDS = [0, 23, 48]  # e.g., [0, 23, 48]
+# EXPECTED_SEEDS = [0, 23, 48]  # e.g., [0, 23, 48]
+EXPECTED_SEEDS = [23]  # e.g., [0, 23, 48]
 
 
 # -----------------------------------------------------------------------------

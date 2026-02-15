@@ -1412,6 +1412,106 @@ def run_policy_collapse_diagnostics(
         if tutee_agent is not None and old_t_eps is not None:
             tutee_agent.set_epsilon(old_t_eps)
 
+def _set_eps_all(high_level_agent, tutor_agents, tutee_agent, eps: float):
+    if high_level_agent is not None:
+        high_level_agent.set_epsilon(float(eps))
+    for ag in tutor_agents:
+        ag.set_epsilon(float(eps))
+    if tutee_agent is not None:
+        tutee_agent.set_epsilon(float(eps))
+
+
+def _post_train_tutee_swap_eval(
+    *,
+    bundle,
+    bundle_path,
+    args,
+    seed: int,
+    learner_cfg: KDDLearnerConfig,
+    high_level_agent,
+    tutor_agents,
+    tutee_agent,
+):
+    if tutee_agent is None:
+        print("[post-eval] Skipped (tutee_agent is None).")
+        return
+
+    policies = ["learned", "random_allowed", "random_all"]
+    E = int(getattr(args, "post_eval_episodes", 200))
+
+    # Save/force greedy
+    old_hl_eps = getattr(high_level_agent.cfg, "epsilon", 0.0) if high_level_agent is not None else 0.0
+    old_ll_eps = [ag.cfg.epsilon for ag in tutor_agents]
+    old_t_eps = tutee_agent.cfg.epsilon
+
+    try:
+        _set_eps_all(high_level_agent, tutor_agents, tutee_agent, eps=0.0)
+
+        # Important: use identical environment randomness per policy by re-instantiating env with same seed.
+        eval_env_seed = int(seed) + 424242
+
+        results = {}
+        for pol in policies:
+            env_eval = KDDHierEnv(
+                bundle=bundle,
+                cfg=KDDEnvConfig(num_topics=bundle.n_topics, max_steps=args.max_steps, initial_mastery=0.1),
+                learner_cfg=learner_cfg,
+                seed=eval_env_seed,
+            )
+
+            # Dedicated RNG for Control-A action randomness (decoupled from env)
+            base_control_seed = int(seed) + 99991
+
+            rews, steps, dones, mastery = [], [], [], []
+            for ep in range(E):
+                # Episode-local RNG so results don't depend on how many random calls happen inside an episode
+                ep_rng = random.Random(base_control_seed + ep)
+
+                r, s, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = run_episode(
+                    env_eval,
+                    high_level_agent,
+                    tutor_agents,
+                    tutee_agent,
+                    train=False,  # freeze learning
+                    tutee_ll_policy=pol,
+                    tutee_disable_ll_training=True,  # freeze tutee LL
+                    control_rng=ep_rng,
+                )
+                rews.append(float(r))
+                steps.append(float(s))
+                dones.append(1.0 if env_eval.model.is_done() else 0.0)
+                mastery.append(float(np.mean(env_eval.model.state.mastery)))
+
+            results[pol] = {
+                "mean_reward": float(np.mean(rews)),
+                "std_reward": float(np.std(rews)),
+                "mean_steps": float(np.mean(steps)),
+                "std_steps": float(np.std(steps)),
+                "completion": float(np.mean(dones)),
+                "mean_mastery": float(np.mean(mastery)),
+            }
+
+        print("\n=== Post-train Tutee Swap Eval (greedy, frozen nets) ===")
+        print(f"- eval_episodes: {E}")
+        print(f"- eval_env_seed: {eval_env_seed}")
+        for pol in policies:
+            m = results[pol]
+            print(
+                f"[{pol:13s}] "
+                f"reward={m['mean_reward']:.4f}±{m['std_reward']:.4f}  "
+                f"steps={m['mean_steps']:.1f}±{m['std_steps']:.1f}  "
+                f"completion={m['completion']:.3f}  "
+                f"mastery={m['mean_mastery']:.4f}"
+            )
+        print("=== End Post-eval ===\n")
+
+    finally:
+        # restore eps
+        if high_level_agent is not None:
+            high_level_agent.set_epsilon(float(old_hl_eps))
+        for ag, e in zip(tutor_agents, old_ll_eps):
+            ag.set_epsilon(float(e))
+        tutee_agent.set_epsilon(float(old_t_eps))
 
 # ----------------------------
 # Main
@@ -1578,6 +1678,8 @@ def main():
         default=0.5,
         help="Fraction of similarity probe states sampled from the peer replay (0=self-only, 0.5=symmetric).",
     )
+    ap.add_argument("--post_eval_tutee_swap", action="store_true", default=False)
+    ap.add_argument("--post_eval_episodes", type=int, default=200)
     args = ap.parse_args()
 
     # def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
@@ -2327,6 +2429,18 @@ def main():
                 cka_states_per_topic=512,
                 seed=seed,
             )
+        if args.arch == "hrl" and use_tutee and bool(getattr(args, "post_eval_tutee_swap", False)):
+            _post_train_tutee_swap_eval(
+                bundle=bundle,
+                bundle_path=bundle_path,
+                args=args,
+                seed=seed,
+                learner_cfg=learner_cfg,
+                high_level_agent=high_level_agent,
+                tutor_agents=tutor_agents,
+                tutee_agent=tutee_agent,
+            )
+
         return {
             "mean_reward_last": mean_reward_tail,
             "mean_steps_last": mean_steps_tail,
