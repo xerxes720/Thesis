@@ -496,10 +496,10 @@ def create_agents(
         tutee_cfg = copy.copy(ll_cfg)
         tutee_cfg.experience_sharing = False
         tutee_cfg.share_mode = "off"
-        tutee_cfg.tutee_ready_quiz = 0.50
-        tutee_cfg.tutee_ready_explain = 0.60
-        tutee_cfg.tutee_ready_fix = 0.65
-        tutee_cfg.tutee_not_ready_penalty = 0.5
+        tutee_cfg.tutee_ready_quiz = 0.40
+        tutee_cfg.tutee_ready_explain = 0.52
+        tutee_cfg.tutee_ready_fix = 0.60
+        tutee_cfg.tutee_not_ready_penalty = 0.4
         tutee_agent = TuteeLowLevelAgent(tutee_cfg)
 
     # --- peers only when multi + sharing enabled ---
@@ -1924,7 +1924,7 @@ def main():
         eps_start = 0.35
         eps_end = 0.05
         # eps_decay_episodes = max(1, args.episodes)
-        eps_decay_episodes = 1000
+        eps_decay_episodes = 1500
 
         rows = []
 

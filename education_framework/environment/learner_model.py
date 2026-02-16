@@ -416,18 +416,18 @@ class KDDLearnerConfig:
 
     # Per-action multipliers (quiz=retrieval, explain=self-explanation, fix=elaboration)
     tutee_mult_quiz: float = 1.0
-    tutee_mult_explain: float = 1.4
-    tutee_mult_fix: float = 1.4
+    tutee_mult_explain: float = 1.35
+    tutee_mult_fix: float = 1.65
 
     # Explicit effort cost in additional "step units" consumed by tutee actions.
     tutee_step_cost_quiz: float = 1.0
-    tutee_step_cost_explain: float = 1.1
-    tutee_step_cost_fix: float = 1.15
+    tutee_step_cost_explain: float = 1.05
+    tutee_step_cost_fix: float = 1.10
 
     # Duration multipliers (affects time_ema only; env also consumes step units via step_cost)
-    tutee_duration_mult_quiz: float = 1.10
-    tutee_duration_mult_explain: float = 1.25
-    tutee_duration_mult_fix: float = 1.20
+    tutee_duration_mult_quiz: float = 1.08
+    tutee_duration_mult_explain: float = 1.22
+    tutee_duration_mult_fix: float = 1.30
 
     tutee_ready_quiz: float = 0.40
     tutee_ready_explain: float = 0.50
@@ -946,10 +946,12 @@ class KDDLearnerModel:
 
         # --- 2) desirable-difficulty bell (peaks at mid mastery, low at extremes)
         # You can tune center/width; these are conservative defaults.
-        center = 0.65
-        width = 0.28
+        center = 0.60
+        width = 0.14
         bell = math.exp(-((m - center) / width) ** 2)
         b *= bell
+        if m >= 0.80:
+            b *= 0.25  # or 0.0 if you want hard stop
 
         # --- 3) success-conditioned retrieval (quiz)
         if a == LowLevelAction.TUTEE_QUIZ:
