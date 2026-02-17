@@ -1,7 +1,7 @@
 # Run with:
 # powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 
-$ErrorActionPreference = "Stop"
+#$ErrorActionPreference = "Stop"
 
 # -----------------------------
 # 0) Rebuild decision tree bundle (YOU REQUESTED THIS AT THE BEGINNING)
@@ -17,201 +17,132 @@ $ErrorActionPreference = "Stop"
 #  --leaf_shrinkage_prior 10 `
 #  --topic_gain_mode balanced_primary `
 #  --quality_eps_frac 0.05 --quality_eps_min 0.0001
+$ErrorActionPreference = 'Stop'
 
-# -----------------------------
-# 1) Core experiment settings
-# -----------------------------
-$bundle   = "education_framework/data/kdd_bundle.joblib"
-#$bundle   = "education_framework/data/kdd_bundle_BIN75.joblib"
+# -----------------------------------------------------------------------------
+# Central runner for: (1) paper re-implementation plots, (2) tutee + controls
+#
+# Trainer:
+#   python -m education_framework.main
+# CSV naming:
+#   <run_tag>__seed=<seed>.csv
+# Output:
+#   education_framework/runs
+# -----------------------------------------------------------------------------
 
-# Suggested: enough for your curves to stabilize without going insane
-$episodes = 1000
-$maxSteps = 400
+$bundle = 'education_framework/data/kdd_bundle.joblib'
+$episodes = 2000
+$maxSteps = 300
 
-# Use 3 seeds for defensibility if you can afford it.
-# For quick iteration keep just @(23).
-$seeds    = @(23)
+$runsDir = 'education_framework/runs'
+$env:RUNS_DIR = $runsDir
 
-# Logging
-$ts = Get-Date -Format "yyyyMMdd_HHmmss"
-New-Item -ItemType Directory -Force -Path "logs" | Out-Null
-$logPath = "logs\run_all_tutee_focus_$ts.log"
-Start-Transcript -Path $logPath -Append | Out-Null
+# Use >=3 seeds for defensibility (committee-friendly). Add more if you can.
+$seeds = @(0,23,48)
 
-function Run-Job {
-  param(
-    [string]$tag,
-    [int]$seed,
-    [string[]]$argsList
-  )
+function Run-Train
+{
+    param(
+        [string]$tag,
+        [int]$seed,
+        [string]$arch = 'hrl',
+        [string]$llMode = 'multi',
+        [switch]$experienceSharing,
+        [string]$shareMode = 'weighted_cka',
+        [switch]$useTutee,
+        [string]$tuteeLLPolicy = 'learned',
+        [switch]$tuteeDisableLLTraining,
 
-  Write-Host ""
-  Write-Host "--------------------------------------------------"
-  Write-Host "RUN: $tag | seed=$seed | episodes=$episodes | max_steps=$maxSteps"
-  Write-Host "--------------------------------------------------"
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$extraArgs
+    )
 
-  $baseArgs = @(
-    "-m", "education_framework.main",
-    "--bundle", $bundle,
-    "--episodes", $episodes,
-    "--max_steps", $maxSteps,
-    "--seed", $seed,
-    "--run_tag", $tag,
-    "--log_ll_action_effects",
-    "--log_ll_agreement",
-    "--log_ll_per_topic"
-  )
+    $arguments = @(
+        '--bundle', $bundle,
+        '--episodes', $episodes,
+        '--max_steps', $maxSteps,
+        '--seed', $seed,
+        '--arch', $arch,
+        '--ll_mode', $llMode,
+        '--run_tag', $tag
+    )
 
-  python @baseArgs @argsList
+    if ($experienceSharing)
+    {
+        $arguments += @('--experience_sharing', '--share_mode', $shareMode)
+    }
+
+    if ($useTutee)
+    {
+        $arguments += @('--use_tutee', '--tutee_ll_policy', $tuteeLLPolicy)
+        if ($tuteeDisableLLTraining)
+        {
+            $arguments += @('--tutee_disable_ll_training')
+        }
+    }
+
+    if ($extraArgs)
+    {
+        $arguments += $extraArgs
+    }
+
+    Write-Host "`n--------------------------------------------------" -ForegroundColor Cyan
+    Write-Host "RUN: $tag | seed=$seed | arch=$arch | ll_mode=$llMode | ES=$( $experienceSharing.IsPresent )($shareMode) | tutee=$( $useTutee.IsPresent )($tuteeLLPolicy)" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------------" -ForegroundColor Cyan
+
+    python -m education_framework.main @arguments
 }
 
-try {
 
-  foreach ($seed in $seeds) {
+# -----------------------------------------------------------------------------
+# 1) Paper re-implementation runs
+#    Plot 1: flat vs HRL multi (no ES)
+#    Plot 2: flat vs HRL multi (no ES)
+#    Plot 3: HRL single vs HRL multi (no ES) vs HRL multi mutual ES vs HRL multi CFA/wCKA ES
+# -----------------------------------------------------------------------------
+#foreach ($seed in $seeds) {
+#    # flat baseline (paper exp1)
+#    Run-Train -tag 'flat_baseline' -seed $seed -arch 'flat' -llMode 'single'
+#
+##     HRL multi (no ES)
+#    Run-Train -tag 'paper_multi_no_es' -seed $seed -arch 'hrl' -llMode 'multi'
+#
+#    # HRL single (shared LL)
+#    Run-Train -tag 'paper_single' -seed $seed -arch 'hrl' -llMode 'single'
+##
+#    # HRL multi + mutual ES (paper ES baseline)
+#    Run-Train -tag 'paper_multi_mutual' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'mutual'
+#
+#    # HRL multi + "CFA" ES (your weighted_cka / wCKA implementation)
+#    Run-Train -tag 'paper_multi_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka'
+#}
 
-    # -----------------------------
-    # 0) Flat baseline (for your first two plots)
-    # -----------------------------
-#    Run-Job -tag "flat_baseline" -seed $seed -argsList @(
-#      "--arch", "flat"
-#    )
-    # -----------------------------
-    # A) "Paper implementation" anchor runs (NO TUTEE)
-    # -----------------------------
 
-#    Run-Job -tag "paper_single" -seed $seed -argsList @(
-#      "--arch", "hrl",
-#      "--ll_mode", "single",
-#      "--share_mode", "off"
-#    )
-
-#     Paper baseline: HRL, multi LL, no experience sharing
-#    Run-Job -tag "paper_multi_no_es" -seed $seed -argsList @(
-#      "--arch", "hrl",
-#      "--ll_mode", "multi",
-#      "--share_mode", "off"
-#    )
-
-#    Run-Job -tag "paper_multi_mutual" -seed $seed -argsList @(
-#      "--arch", "hrl",
-#      "--ll_mode", "multi",
-#      "--experience_sharing",
-#      "--share_mode", "mutual"
-#    )
-    # Paper ES: HRL, multi LL, experience sharing (weighted_cka)
-    # NOTE: I intentionally DO NOT enable peer_gate_action_effects here,
-    # because that is YOUR extension, not the original paper’s mechanism.
-#    Run-Job -tag "paper_multi_weighted_cka" -seed $seed -argsList @(
-#      "--arch", "hrl",
-#      "--ll_mode", "multi",
-#      "--experience_sharing",
-#      "--share_mode", "weighted_cka"
-#    )
-
-    # -----------------------------
-    # B) Your extension: add tutee, hold everything else fixed
-    # -----------------------------
-
-    # Tutee vs no-tutee under the NO-ES backbone
-#    Run-Job -tag "tutee_no_es" -seed $seed -argsList @(
-#      "--arch", "hrl",
-#      "--ll_mode", "multi",
-#      "--share_mode", "off",
-#      "--use_tutee"
-#    )
-
-    # Tutee vs no-tutee under the ES backbone (weighted_cka)
-#    Run-Job -tag "tutee_weighted_cka" -seed $seed -argsList @(
-#      "--arch", "hrl",
-#      "--ll_mode", "multi",
-#      "--experience_sharing",
-#      "--share_mode", "weighted_cka",
-#      "--use_tutee"
-#    )
-
-    # -----------------------------
-    # C) Tutee Control runs:
-    # -----------------------------
-
-    Run-Job -tag "tutee_weighted_cka" -seed $seed -argsList @(
-    "--arch", "hrl",
-    "--ll_mode", "multi",
-    "--experience_sharing",
-    "--share_mode", "weighted_cka",
-    "--use_tutee",
-    "--tutee_ll_policy", "learned",
-    "--post_eval_tutee_swap",
-    "--post_eval_episodes", "200"
-    )
-
-    Run-Job -tag "tutee_controlA_randLL_all" -seed $seed -argsList @(
-    "--arch", "hrl",
-    "--ll_mode", "multi",
-    "--experience_sharing",
-    "--share_mode", "weighted_cka",
-    "--use_tutee",
-    "--tutee_ll_policy", "random_all",
-    "--tutee_disable_ll_training"
-    )
-    Run-Job -tag "tutee_controlA_randLL_ready" -seed $seed -argsList @(
-    "--arch", "hrl",
-    "--ll_mode", "multi",
-    "--experience_sharing",
-    "--share_mode", "weighted_cka",
-    "--use_tutee",
-    "--tutee_ll_policy", "random_allowed",
-    "--tutee_disable_ll_training"
-    )
-#     Random tutee ll action
-#    Run-Job -tag "tutee_controlA_randLL_all" -seed $seed -argsList @(
-#      "--arch", "hrl",
-#      "--ll_mode", "multi",
-#      "--experience_sharing",
-#      "--share_mode", "weighted_cka",
-#      "--use_tutee",
-#      "--tutee_ll_policy", "random_all"
-#      "--tutee_disable_ll_training"
-#    )
-#    Run-Job -tag "tutee_controlA_randLL_ready" -seed $seed -argsList @(
-#      "--arch", "hrl",
-#      "--ll_mode", "multi",
-#      "--experience_sharing",
-#      "--share_mode", "weighted_cka",
-#      "--use_tutee",
-#      "--tutee_ll_policy", "random_allowed"
-#      "--tutee_disable_ll_training"
-#    )
-
-    # -----------------------------
-    # Optional (only if you want it): show that YOUR peer-gate is a stability fix
-    # This is NOT a tutee hyperparameter ablation; it's a "why ES behaves" ablation.
-    # If you want to keep the ablation set minimal, leave this commented.
-    # -----------------------------
-    # Run-Job -tag "paper_multi_weighted_cka_gateAE" -seed $seed -argsList @(
-    #   "--arch", "hrl",
-    #   "--ll_mode", "multi",
-    #   "--experience_sharing",
-    #   "--share_mode", "weighted_cka",
-    #   "--peer_gate_action_effects",
-    #   "--peer_gate_topk", "2"
-    # )
+# -----------------------------------------------------------------------------
+# 2) Tutee main + controls (defensibility)
+# -----------------------------------------------------------------------------
+foreach ($seed in $seeds)
+{
+    # HRL multi + "CFA" ES (your weighted_cka / wCKA implementation)
+#    Run-Train -tag 'paper_multi_weighted_cka_forget' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka' --enable_forgetting --forget_rate 5e-5 --forget_floor 0.25 --retention_decay 0.9995
+    # +Tutee (no ES)
+    #Run-Train -tag 'tutee_no_es' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee --hl_eps_start 0.50 --hl_eps_end 0.15 --hl_eps_decay_episodes 2000 --hl_eps_floor 0.06
     #
-    # Run-Job -tag "tutee_weighted_cka_gateAE" -seed $seed -argsList @(
-    #   "--arch", "hrl",
-    #   "--ll_mode", "multi",
-    #   "--experience_sharing",
-    #   "--share_mode", "weighted_cka",
-    #   "--peer_gate_action_effects",
-    #   "--peer_gate_topk", "2",
-    #   "--use_tutee"
-    # )
-
-  }
-
-  Write-Host ""
-  Write-Host "ALL TUTEE-FOCUSED RUNS DONE."
-
+    # +Tutee + ES (CFA/wCKA)
+    Run-Train -tag 'tutee_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'learned'  --debug_bad_episodes --debug_bad_dm_threshold -0.15 --debug_bad_min_mastery_threshold 0.35 --post_eval_tutee_swap --post_eval_episodes 200
+    #
+    # Control A: HL can choose tutee, but tutee LL is random (ALL actions) and we disable its LL training
+    Run-Train -tag 'tutee_controlA_randLL_all' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'random_all' -tuteeDisableLLTraining
+    #
+    # Control A (variant): random only among "ready"/allowed tutee actions
+    Run-Train -tag 'tutee_controlA_randLL_ready' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee -tuteeLLPolicy 'random_allowed'  -tuteeDisableLLTraining
 }
-finally {
-  Stop-Transcript | Out-Null
-}
+
+
+# -----------------------------------------------------------------------------
+# Plotting
+# -----------------------------------------------------------------------------
+#python education_framework/plots/plot_compare.py --runs_dir $runsDir --preset paper_reimpl --expected_seeds ($seeds -join ',') --no_show
+#python education_framework/plots/plot_compare.py --runs_dir $runsDir --preset tutee_defense --expected_seeds ($seeds -join ',') --no_show
+
+Write-Host "`nAll done. Figures are under: $runsDir/figs/" -ForegroundColor Green

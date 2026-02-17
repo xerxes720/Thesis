@@ -452,7 +452,7 @@ class KDDLearnerConfig:
     teach_boost_inc_fix: float = 0.25
     teach_boost_decay: float = 0.95  # per step
     teach_boost_max: float = 1.0
-    teach_boost_beta_scale: float = 1.5  # tutor update multiplier range: 1 .. 1+0.5
+    teach_boost_beta_scale: float = 1.50  # tutor update multiplier range: 1 .. 1+0.5
 
     force_end_on_all_complete: bool = True
     step_penalty: float = 0.0  # start small; tune 0.001..0.01
@@ -879,7 +879,10 @@ class KDDLearnerModel:
         # action_scale = 1.0
         # if action_id is not None:
         #     action_scale = self._tutor_action_gain(topic_id, int(action_id))
-        scale = (1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)) * diff_scale
+        scale = diff_scale
+        if quality == "very_good" or quality == "good":
+            scale = (1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)) * diff_scale
+        # scale = (1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)) * diff_scale
         if action_id is not None:
             scale *= self._tutor_action_gain(topic_id, int(action_id))
 
@@ -956,7 +959,7 @@ class KDDLearnerModel:
             # probability of successful retrieval increases with mastery
             # simple logistic; tune slope if needed
             k = 10.0
-            m0 = 0.55
+            m0 = 0.45
             p_succ = 1.0 / (1.0 + math.exp(-k * (m - m0)))
             if random.random() > p_succ:
                 return 0.0  # failed retrieval => no mastery gain
@@ -967,6 +970,7 @@ class KDDLearnerModel:
         #     # If you know these EMAs are in raw units, clamp aggressively.
         #     struggle = float(s.inc_ema[topic_id] + s.hint_ema[topic_id])
         #     struggle = max(0.0, min(1.0, struggle))
+        #     struggle = max(struggle, 0.15)  # training floor
         #     b *= struggle
         #     if b <= 0.0:
         #         return 0.0

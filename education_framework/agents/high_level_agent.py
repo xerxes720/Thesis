@@ -50,7 +50,7 @@ class HighLevelAgentConfig:
     max_grad_norm: float = 10.0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"  # change to "cuda" if you want
 
-    tutee_ready_min: float = 0.50
+    tutee_ready_min: float = 0.40
     tutee_cap_high: float = 0.95
 
 

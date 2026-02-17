@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import joblib
-import numpy as np
 import torch
 from tqdm import tqdm
 from collections import defaultdict
@@ -770,7 +769,10 @@ def run_episode(
     tutee_ll_policy: str = "learned",
     tutee_disable_ll_training: bool = False,
     control_rng: random.Random | None = None,
-
+    episode_idx: int | None = None,
+    debug_bad_episodes: bool = False,
+    debug_bad_dm_threshold: float = -0.15,
+    debug_bad_min_mastery_threshold: float = 0.35,
 ):
     obs = env.reset()
     done = False
@@ -813,7 +815,28 @@ def run_episode(
         for a in tutee_action_names:
             tutee_action_counts[a] = 0
 
+    # ----------------------------
+    # BAD-EP debug instrumentation
+    # ----------------------------
+    min_mastery_before_step = float("inf")
+    min_mastery_after_step = float("inf")
+    worst_dm = 0.0
+    worst_is_tutee = False
+    worst_topic = -1
+    worst_ll_action = ""
+    worst_mode = ""
+    worst_m_before = float("nan")
+    worst_m_after = float("nan")
     while not done:
+        # min mastery before the decision is applied
+        if hasattr(env, "model") and hasattr(env.model, "state") and hasattr(env.model.state, "mastery"):
+            try:
+                mmin = float(np.min(env.model.state.mastery))
+                if mmin < min_mastery_before_step:
+                    min_mastery_before_step = mmin
+            except Exception:
+                pass
+
         hl_action_idx = high_level_agent.select_action(obs)
         mode, topic_id = high_level_agent.decode_action(hl_action_idx)
         step_topic_count[topic_id] = step_topic_count.get(topic_id, 0) + 1
@@ -853,6 +876,14 @@ def run_episode(
             next_obs, reward_hl, done, info = env.step_tutor(topic_id, ll_action_str)
             m_new_topic = float(env.model.state.mastery[int(topic_id)])
             dm = m_new_topic - m_prev_topic
+            if dm < worst_dm:
+                worst_dm = float(dm)
+                worst_is_tutee = False
+                worst_topic = int(topic_id)
+                worst_ll_action = str(ll_action_str)
+                worst_mode = "tutor"
+                worst_m_before = float(m_prev_topic)
+                worst_m_after = float(m_new_topic)
             if 0 <= int(topic_id) < num_topics and 0 <= int(ll_action_idx) < A:
                 tutor_dm_sum[int(topic_id), int(ll_action_idx)] += float(dm)
                 tutor_dm_count[int(topic_id), int(ll_action_idx)] += 1
@@ -927,7 +958,21 @@ def run_episode(
             ll_action_str = tutee_action_names[ll_action_idx]
             tutee_action_counts[ll_action_str] += 1
 
+            # next_obs, reward_hl, done, info = env.step_tutee(topic_id, ll_action_str)
+            m_prev_topic = float(env.model.state.mastery[int(topic_id)])
             next_obs, reward_hl, done, info = env.step_tutee(topic_id, ll_action_str)
+            m_new_topic = float(env.model.state.mastery[int(topic_id)])
+            dm = m_new_topic - m_prev_topic
+
+            # update worst per-step delta mastery
+            if dm < worst_dm:
+                worst_dm = float(dm)
+                worst_is_tutee = True
+                worst_topic = int(topic_id)
+                worst_ll_action = str(ll_action_str)
+                worst_mode = "tutee"
+                worst_m_before = float(m_prev_topic)
+                worst_m_after = float(m_new_topic)
             # reward_ll = float(info.get("reward_ll", reward_hl))
             reward_team = float(info.get("reward_team", reward_hl))
             # next_tutee_obs = add_topic(next_obs, topic_id)
@@ -967,7 +1012,15 @@ def run_episode(
         # Steps should reflect the simulator's effective step cost (tutee consumes more budget).
         steps += float(info.get("step_cost", 1))
         obs = next_obs
-        # if step_topic_count[topic_id] > 20:
+        # min mastery after the env transition
+        if hasattr(env, "model") and hasattr(env.model, "state") and hasattr(env.model.state, "mastery"):
+            try:
+                mmin = float(np.min(env.model.state.mastery))
+                if mmin < min_mastery_after_step:
+                    min_mastery_after_step = mmin
+            except Exception:
+                pass
+    # if step_topic_count[topic_id] > 20:
         #     print(f"WARNING: Topic {topic_id} selected {step_topic_count[topic_id]} times in one episode!")
 
     # env.model.state.teach_boost *= float(env.model.cfg.teach_boost_decay)
@@ -990,6 +1043,56 @@ def run_episode(
 
     # longest consecutive same-topic streak in hl_topic_seq
     longest_streak = 0
+
+    # ----------------------------
+    # Print BAD-EP line (optional)
+    # ----------------------------
+    if debug_bad_episodes:
+
+        # detect hitting the episode cap
+        hit_cap = False
+        try:
+            hit_cap = bool(getattr(env, "step_count", 0) >= getattr(env, "max_steps", 0))
+        except Exception:
+            hit_cap = False
+        if not hit_cap:
+            try:
+                hit_cap = bool(float(steps) >= float(getattr(env, "max_steps", 0)) - 1e-6)
+            except Exception:
+                hit_cap = False
+
+        # fallback if trackers never updated
+        if (not np.isfinite(min_mastery_before_step)) or (min_mastery_before_step == float("inf")):
+            try:
+                min_mastery_before_step = float(np.min(mastery_vec))
+            except Exception:
+                min_mastery_before_step = float("nan")
+
+        if (not np.isfinite(min_mastery_after_step)) or (min_mastery_after_step == float("inf")):
+            try:
+                min_mastery_after_step = float(np.min(mastery_vec))
+            except Exception:
+                min_mastery_after_step = float("nan")
+
+        completed_flag = 1 if (hasattr(env, "model") and env.model.is_done()) else 0
+        warmup_ok = (episode_idx is None) or (episode_idx >= 800)  # tune: 500/800/1000
+        bad = (
+                hit_cap
+                or (float(worst_dm) < float(debug_bad_dm_threshold))
+                or (float(min_mastery_after_step) < float(debug_bad_min_mastery_threshold))
+        )
+
+        if bad and warmup_ok:
+            ep_str = str(episode_idx) if episode_idx is not None else "?"
+            print(
+                "[BAD EP] "
+                f"ep={ep_str} steps={float(steps):.1f} completed={completed_flag} "
+                f"hl_tutee={int(tutee_hl_count)} tutee_actions={int(sum(tutee_action_counts.values()))} "
+                f"m_min_pre={float(min_mastery_before_step):.3f} m_min_post={float(min_mastery_after_step):.3f} "
+                f"worst_dM={float(worst_dm):.3f} "
+                f"worst=(mode={worst_mode},tutee={int(worst_is_tutee)},topic={worst_topic},a={worst_ll_action},"
+                f"{float(worst_m_before):.3f}->{float(worst_m_after):.3f})"
+            )
 
     if len(hl_topic_seq) > 0:
         cur = 1
@@ -1680,6 +1783,29 @@ def main():
     )
     ap.add_argument("--post_eval_tutee_swap", action="store_true", default=False)
     ap.add_argument("--post_eval_episodes", type=int, default=200)
+    # --- debugging: print per-episode line when an episode "goes bad" ---
+    ap.add_argument(
+        "--debug_bad_episodes",
+        action="store_true",
+        default=False,
+        help=(
+            "If set, prints a [BAD EP] line when an episode hits the max_steps cap, "
+            "has worst per-step mastery delta below a threshold, or ends with very low min mastery."
+        ),
+    )
+    ap.add_argument(
+        "--debug_bad_dm_threshold",
+        type=float,
+        default=-0.15,
+        help="Threshold for worst per-step delta mastery (topic mastery delta) to trigger [BAD EP].",
+    )
+    ap.add_argument(
+        "--debug_bad_min_mastery_threshold",
+        type=float,
+        default=0.35,
+        help="Threshold for min mastery (across topics) to trigger [BAD EP].",
+    )
+
     args = ap.parse_args()
 
     # def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
@@ -1987,6 +2113,10 @@ def main():
                     tutee_ll_policy=str(args.tutee_ll_policy),
                     tutee_disable_ll_training=bool(args.tutee_disable_ll_training),
                     control_rng=control_rng,
+                    episode_idx=int(episode),
+                    debug_bad_episodes=bool(getattr(args, "debug_bad_episodes", False)),
+                    debug_bad_dm_threshold=float(getattr(args, "debug_bad_dm_threshold", -0.15)),
+                    debug_bad_min_mastery_threshold=float(getattr(args, "debug_bad_min_mastery_threshold", 0.35)),
                 )
                 flat_agent_reward = 0.0
             else:
