@@ -293,6 +293,7 @@ class LearnerState:
     teach_boost: np.ndarray = None  # type: ignore
     last_practice_step: np.ndarray = None  # type: ignore
     retention: np.ndarray = None  # type: ignore
+    last_forget_step: np.ndarray = None
 
     def __post_init__(self) -> None:
         n = int(self.n_topics)
@@ -306,6 +307,7 @@ class LearnerState:
         self.teach_boost = np.zeros(n, dtype=np.float32)  # new
         self.last_practice_step = np.zeros(n, dtype=np.int32)
         self.retention = np.zeros(n, dtype=np.float32)  # 0..1
+        self.last_forget_step = np.zeros(n, dtype=np.int32)
 
     def copy(self) -> "LearnerState":
         s = LearnerState(n_topics=self.n_topics)
@@ -319,6 +321,7 @@ class LearnerState:
         s.teach_boost = self.teach_boost.copy()
         s.last_practice_step = self.last_practice_step.copy()
         s.retention = self.retention.copy()
+        s.last_forget_step = self.last_forget_step.copy()
 
         return s
 
@@ -407,7 +410,7 @@ class KDDLearnerConfig:
     #     [0.95, 0.95, 0.90, 1.15, 1.10],  # cluster 2: remediation/review-heavy
     # ])
 
-    # --- tutee (protégé / learning-by-teaching) simulation ---
+    # --- tutee (protege / learning-by-teaching) simulation ---
     # Conservative, bounded mastery bonus with explicit cost.
     # Ablate 0.03 0.06 0.08
     tutee_bonus_base: float = 0.05
@@ -416,13 +419,13 @@ class KDDLearnerConfig:
 
     # Per-action multipliers (quiz=retrieval, explain=self-explanation, fix=elaboration)
     tutee_mult_quiz: float = 1.0
-    tutee_mult_explain: float = 1.4
-    tutee_mult_fix: float = 1.4
+    tutee_mult_explain: float = 1.15
+    tutee_mult_fix: float = 1.20
 
     # Explicit effort cost in additional "step units" consumed by tutee actions.
     tutee_step_cost_quiz: float = 1.0
-    tutee_step_cost_explain: float = 1.1
-    tutee_step_cost_fix: float = 1.15
+    tutee_step_cost_explain: float = 1.0
+    tutee_step_cost_fix: float = 1.0
 
     # Duration multipliers (affects time_ema only; env also consumes step units via step_cost)
     tutee_duration_mult_quiz: float = 1.10
@@ -450,12 +453,12 @@ class KDDLearnerConfig:
     teach_boost_inc_quiz: float = 0.15
     teach_boost_inc_explain: float = 0.30
     teach_boost_inc_fix: float = 0.25
-    teach_boost_decay: float = 0.95  # per step
+    teach_boost_decay: float = 0.97  # per step
     teach_boost_max: float = 1.0
-    teach_boost_beta_scale: float = 1.5  # tutor update multiplier range: 1 .. 1+0.5
+    teach_boost_beta_scale: float = 1.0 # tutor update multiplier range: 1 .. 1+0.5
 
     force_end_on_all_complete: bool = True
-    step_penalty: float = 0.0  # start small; tune 0.001..0.01
+    step_penalty: float = 0.01  # start small; tune 0.001..0.01
     # paper_var_weights: List[float] = field(default_factory=lambda: [0.2, 0.7, 0.1])
 
     # Per-topic observation noise scale (affects neutral noise and/or cfa sampling jitter if you want)
@@ -521,6 +524,7 @@ class KDDLearnerModel:
         self.state.teach_boost[:] = 0.0
         self.state.last_practice_step[:] = 0
         self.state.retention[:] = float(self.cfg.retention_init)  # whatever you define as init, e.g. 0.1
+        self.state.last_forget_step[:] = 0
 
         return self.state.copy()
 
@@ -554,30 +558,40 @@ class KDDLearnerModel:
         )
 
     def _apply_forgetting_all_except(self, practiced_topic: int, step_cost: float) -> None:
-        s = self.state
         cfg = self.cfg
+        if float(cfg.forget_rate) <= 0.0:
+            return
 
-        # decay retention slightly every step
-        s.retention *= float(cfg.retention_decay)
+        s = self.state
+        now = int(s.total_steps) + max(1, int(step_cost))
 
-        # apply forgetting to all other topics based on time since last practice
-        now = int(s.total_steps + max(1, int(step_cost)))
         for k in range(cfg.n_topics):
             if k == practiced_topic:
+                # keep aligned so we don't accumulate dt for practiced topic
+                s.last_forget_step[k] = now
                 continue
-            if bool(self._topic_completed[k]):
-                continue  # NEW: don't forget completed topics
-            dt = max(0, now - int(s.last_practice_step[k]))
-            if dt == 0:
+            if self._topic_completed[k]:
+                s.last_forget_step[k] = now
                 continue
 
-            # retention reduces forgetting (tutee can improve retention)
+            dt_inc = max(0, now - int(s.last_forget_step[k]))
+            s.last_forget_step[k] = now
+            if dt_inc <= 0:
+                continue
+
+            m = float(s.mastery[k])
+            if m <= float(cfg.forget_floor):
+                continue
+
             r = float(s.retention[k])  # 0..1
             eff_forget = float(cfg.forget_rate) * (1.0 - 0.7 * r)
 
-            m = float(s.mastery[k])
-            m2 = m - eff_forget * float(dt) * max(0.0, m - float(cfg.forget_floor))
-            s.mastery[k] = _clip01(m2)
+            # incremental decay
+            m2 = m - eff_forget * float(dt_inc) * max(0.0, (m - float(cfg.forget_floor)))
+            s.mastery[k] = np.float32(max(float(cfg.forget_floor), m2))
+
+            # retention also decays with time
+            s.retention[k] = np.float32(float(s.retention[k]) * (float(cfg.retention_decay) ** float(dt_inc)))
 
     def _tutor_action_gain(self, topic_id: int, action_id: int) -> float:
         """
@@ -879,7 +893,9 @@ class KDDLearnerModel:
         # action_scale = 1.0
         # if action_id is not None:
         #     action_scale = self._tutor_action_gain(topic_id, int(action_id))
-        scale = (1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)) * diff_scale
+        scale = diff_scale
+        if quality == "very_good" or quality == "good":
+            scale = (1.0 + float(self.cfg.teach_boost_beta_scale) * float(boost)) * diff_scale
         if action_id is not None:
             scale *= self._tutor_action_gain(topic_id, int(action_id))
 
@@ -891,6 +907,7 @@ class KDDLearnerModel:
             m2 = m + beta * scale * (1.0 - m)
         elif quality == "bad":
             beta = float(params.beta_bad) * self._beta_mult("topic_beta_bad_mult", topic_id)
+
             m2 = m - beta * scale * m
         elif quality == "very_bad":
             beta = float(params.beta_very_bad) * self._beta_mult("topic_beta_very_bad_mult", topic_id)
@@ -922,10 +939,10 @@ class KDDLearnerModel:
             mult = 0.0
 
         base = float(cfg.tutee_bonus_base)
-        return max(0.0, base * mult * math.sqrt(1.0 - float(mastery)))
+        # Teaching helps once you "know something" (avoid making tutee strongest at low mastery)
+        return max(0.0, base * mult * math.sqrt(max(0.0, float(mastery))))
 
     import math
-    import random
 
     def _apply_tutee_bonus(self, topic_id: int, a: LowLevelAction) -> float:
         """Apply tutee bonus and return the applied delta."""
@@ -946,8 +963,8 @@ class KDDLearnerModel:
 
         # --- 2) desirable-difficulty bell (peaks at mid mastery, low at extremes)
         # You can tune center/width; these are conservative defaults.
-        center = 0.65
-        width = 0.28
+        center = min(0.75, max(0.60, float(self._topic_threshold(topic_id)) - 0.02))
+        width = 0.18
         bell = math.exp(-((m - center) / width) ** 2)
         b *= bell
 
@@ -958,22 +975,22 @@ class KDDLearnerModel:
             k = 10.0
             m0 = 0.55
             p_succ = 1.0 / (1.0 + math.exp(-k * (m - m0)))
-            if random.random() > p_succ:
+            if self.rng.random() > p_succ:
                 return 0.0  # failed retrieval => no mastery gain
 
         # --- 4) fix only helps when there is "something to fix" (struggle signal)
-        # if a == LowLevelAction.TUTEE_FIX:
-        #     # Use EMAs you already track (values are normalized later; keep it simple)
-        #     # If you know these EMAs are in raw units, clamp aggressively.
-        #     struggle = float(s.inc_ema[topic_id] + s.hint_ema[topic_id])
-        #     struggle = max(0.0, min(1.0, struggle))
-        #     b *= struggle
-        #     if b <= 0.0:
-        #         return 0.0
+        if a == LowLevelAction.TUTEE_FIX:
+            # Use EMAs you already track (values are normalized later; keep it simple)
+            # If you know these EMAs are in raw units, clamp aggressively.
+            struggle = float(s.inc_ema[topic_id] + s.hint_ema[topic_id])
+            struggle = max(0.0, min(1.0, struggle))
+            b *= struggle
+            if b <= 0.0:
+                return 0.0
 
         # --- 5) keep your diminishing returns (optional)
         # Your original (1-m)*2 is fine; with bell this becomes "mid-mastery sweet spot".
-        b *= (1.0 - m) * 2.0
+        # b *= (1.0 - m) * 2.0
 
         # --- 6) apply
         if b > 0.0:
@@ -990,6 +1007,8 @@ class KDDLearnerModel:
             incorrects: int,
             duration: float,
             step_cost: int = 1,
+            update_opp: bool = True,
+            update_emas: bool = True,
     ) -> None:
         if self.bundle is None:
             alpha = 0.2
@@ -997,16 +1016,21 @@ class KDDLearnerModel:
             alpha = float(self.bundle.ema_alpha)
 
         s = self.state
-        s.opp[topic_id] += 1
+        if update_opp:
+            s.opp[topic_id] += 1
         s.total_steps += int(max(1, step_cost))
 
-        s.cfa_ema[topic_id] = _clip01((1.0 - alpha) * float(s.cfa_ema[topic_id]) + alpha * float(cfa))
-        s.hint_ema[topic_id] = _clip01(
-            (1.0 - alpha) * float(s.hint_ema[topic_id]) + alpha * (float(hints) / max(self.cfg.hints_norm, 1e-6)))
-        s.time_ema[topic_id] = _clip01(
-            (1.0 - alpha) * float(s.time_ema[topic_id]) + alpha * (float(duration) / max(self.cfg.time_norm, 1e-6)))
-        s.inc_ema[topic_id] = _clip01(
-            (1.0 - alpha) * float(s.inc_ema[topic_id]) + alpha * (float(incorrects) / max(self.cfg.inc_norm, 1e-6)))
+        # IMPORTANT: tutee-mode represents "tutor teaches someone else" (protégé effect).
+        # It should not contaminate the *learner's* observational performance EMAs (cfa/hints/time/inc)
+        # nor inflate the learner's opportunity counter (opp). Use update_opp/update_emas to control this.
+        if update_emas:
+            s.cfa_ema[topic_id] = _clip01((1.0 - alpha) * float(s.cfa_ema[topic_id]) + alpha * float(cfa))
+            s.hint_ema[topic_id] = _clip01(
+                (1.0 - alpha) * float(s.hint_ema[topic_id]) + alpha * (float(hints) / max(self.cfg.hints_norm, 1e-6)))
+            s.time_ema[topic_id] = _clip01(
+                (1.0 - alpha) * float(s.time_ema[topic_id]) + alpha * (float(duration) / max(self.cfg.time_norm, 1e-6)))
+            s.inc_ema[topic_id] = _clip01(
+                (1.0 - alpha) * float(s.inc_ema[topic_id]) + alpha * (float(incorrects) / max(self.cfg.inc_norm, 1e-6)))
 
     # ---------- core step ----------
     def _paper_vars(self, s: LearnerState) -> np.ndarray:
@@ -1240,6 +1264,7 @@ class KDDLearnerModel:
             # self._apply_mastery_quality_update(topic_id, "good")
             # Mechanistic bounded bonus
             tutee_bonus = self._apply_tutee_bonus(topic_id, action_meta.action)
+
             # NEW: increase per-topic teach_boost (protégé / self-explanation effect)
             cfg = self.cfg
             if action_meta.action == LowLevelAction.TUTEE_EXPLAIN:
@@ -1249,9 +1274,15 @@ class KDDLearnerModel:
             else:  # TUTEE_QUIZ
                 inc = float(cfg.teach_boost_inc_quiz)
 
-            s.teach_boost[topic_id] = min(float(cfg.teach_boost_max), float(s.teach_boost[topic_id]) + inc)
+            # s.teach_boost[topic_id] = min(float(cfg.teach_boost_max), float(s.teach_boost[topic_id]) + inc)
             # NEW: tutee increases retention for this topic (reduces future forgetting)
-            s.retention[topic_id] = _clip01(float(s.retention[topic_id]) + float(self.cfg.retention_from_tutee))
+            # s.retention[topic_id] = _clip01(float(s.retention[topic_id]) + float(self.cfg.retention_from_tutee))
+            # AFTER computing tutee_bonus ...
+            if tutee_bonus > 0.0:
+                s.teach_boost[topic_id] = min(float(cfg.teach_boost_max), float(s.teach_boost[topic_id]) + inc)
+                if float(cfg.retention_from_tutee) > 0.0:
+                    s.retention[topic_id] = _clip01(float(s.retention[topic_id]) + float(self.cfg.retention_from_tutee))
+
 
 
 
@@ -1280,6 +1311,8 @@ class KDDLearnerModel:
             incorrects=incorrects,
             duration=duration,
             step_cost=step_cost,
+            update_opp=(not is_tutee),
+            update_emas=(not is_tutee),
         )
         self.state.last_practice_step[topic_id] = int(self.state.total_steps)
 

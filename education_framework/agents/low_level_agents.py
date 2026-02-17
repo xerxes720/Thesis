@@ -66,7 +66,7 @@ class LowLevelAgentConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     # --- tutee readiness thresholds (copied from KDDLearnerConfig when building tutee agent) ---
-    tutee_ready_quiz: float = 0.40
+    tutee_ready_quiz: float = 0.45
     tutee_ready_explain: float = 0.50
     tutee_ready_fix: float = 0.55
     tutee_not_ready_penalty: float = 0.0  # no longer used

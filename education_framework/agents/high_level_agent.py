@@ -50,9 +50,13 @@ class HighLevelAgentConfig:
     max_grad_norm: float = 10.0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"  # change to "cuda" if you want
 
-    tutee_ready_min: float = 0.50
+    tutee_ready_min: float = 0.25
     tutee_cap_high: float = 0.95
 
+    # Global guard: only allow HL to choose tutee-mode if the weakest *active* topic
+    # is at least this mastery. Prevents "teach-while-gap-collapses" under forgetting.
+    # Set <= tutee_ready_min to effectively disable.
+    tutee_global_min_guard: float = 0.0
 
 class ReplayBuffer:
     def __init__(self, capacity: int):
@@ -145,6 +149,17 @@ class HighLevelAgent:
 
         # 2) if tutee exists, mask tutee_topic_t if not in mastery band OR completed
         if self.cfg.use_tutee:
+            # 2a) GLOBAL readiness guard: if any *incomplete* topic is below the guard,
+            #     disallow all tutee actions. Prevents HL from over-using tutee while
+            #     forgetting collapses a neglected topic.
+            guard = float(getattr(self.cfg, "tutee_global_min_guard", 0.0))
+            if guard > 0.0:
+                active = topic_complete <= 0.5
+                if np.any(active):
+                    m_min_active = float(np.min(mastery[active]))
+                    if m_min_active < guard:
+                        valid[T:T + T] = False
+
             for t in range(T):
                 if (topic_complete[t] > 0.5) or (mastery[t] < self.cfg.tutee_ready_min) or (
                         mastery[t] > self.cfg.tutee_cap_high):

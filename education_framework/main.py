@@ -120,6 +120,7 @@ class KDDEnvConfig:
     initial_mastery: float = 0.1
     lambda_step: float = 0.004  # NEW: reward penalty per step-cost unit
     rho_diminish: float = 0.0  # paper-like diminishing returns; 0 disables
+    include_teach_boost_obs: bool = False
 
 
 class KDDHierEnv:
@@ -201,22 +202,24 @@ class KDDHierEnv:
             dtype=np.float32,
         )
 
-        obs = np.concatenate(
-            [
-                s.mastery.astype(np.float32),
-                s.cfa_ema.astype(np.float32),
-                s.hint_ema.astype(np.float32),
-                s.time_ema.astype(np.float32),
-                s.inc_ema.astype(np.float32),
+        blocks = [
+            s.mastery.astype(np.float32),
+            s.cfa_ema.astype(np.float32),
+            s.hint_ema.astype(np.float32),
+            s.time_ema.astype(np.float32),
+            s.inc_ema.astype(np.float32),
+            opp_norm,
+            topic_complete,
+        ]
 
-                # NEW blocks:
-                opp_norm,  # length = num_topics
-                topic_complete,  # length = num_topics
+        if getattr(self.cfg, "include_teach_boost_obs", False):
+            tb_max = max(1e-6, float(self.model.cfg.teach_boost_max))
+            teach_boost_norm = np.clip(s.teach_boost.astype(np.float32) / tb_max, 0.0, 1.0)
+            blocks.append(teach_boost_norm)
 
-                np.array([global_mastery, total_steps_norm], dtype=np.float32),
-            ],
-            axis=0,
-        )
+        blocks.append(np.array([global_mastery, total_steps_norm], dtype=np.float32))
+
+        obs = np.concatenate(blocks, axis=0)
         return obs.astype(np.float32)
 
     def get_ll_observation(self, topic_id: int, include_topic_id: bool = True) -> List[float]:
@@ -227,11 +230,14 @@ class KDDHierEnv:
         """
         x = np.asarray(self.get_observation(), dtype=np.float32)
 
-        n_blocks = 7  # mastery,cfa,hint,time,inc,opp_norm,topic_complete
-        tail = 2  # global_mastery,total_steps_norm
+        tail = 2
         T = int(self.num_topics)
-        expected = n_blocks * T + tail
 
+        if x.shape[0] < tail or (x.shape[0] - tail) % T != 0:
+            return x.tolist()
+
+        n_blocks = (x.shape[0] - tail) // T
+        expected = n_blocks * T + tail
         if x.shape[0] != expected:
             return x.tolist()
 
@@ -248,9 +254,6 @@ class KDDHierEnv:
         if include_topic_id:
             t_norm = float(t) / float(max(1, T - 1))
             feats.append(t_norm)
-            # onehot = np.zeros((T,), dtype=np.float32)
-            # onehot[t] = 1.0
-            # feats.extend(onehot.tolist())
 
         return np.asarray(feats, dtype=np.float32).tolist()
 
@@ -496,10 +499,9 @@ def create_agents(
         tutee_cfg = copy.copy(ll_cfg)
         tutee_cfg.experience_sharing = False
         tutee_cfg.share_mode = "off"
-        tutee_cfg.tutee_ready_quiz = 0.50
-        tutee_cfg.tutee_ready_explain = 0.60
-        tutee_cfg.tutee_ready_fix = 0.65
-        tutee_cfg.tutee_not_ready_penalty = 0.5
+        tutee_cfg.tutee_ready_quiz = 0.40
+        tutee_cfg.tutee_ready_explain = 0.50
+        tutee_cfg.tutee_ready_fix = 0.55
         tutee_agent = TuteeLowLevelAgent(tutee_cfg)
 
     # --- peers only when multi + sharing enabled ---
@@ -1680,6 +1682,19 @@ def main():
     )
     ap.add_argument("--post_eval_tutee_swap", action="store_true", default=False)
     ap.add_argument("--post_eval_episodes", type=int, default=200)
+    ap.add_argument("--obs_include_teach_boost", action="store_true", default=False)
+    # --- Forgetting / retention (off by default for backward compatibility) ---
+    ap.add_argument("--enable_forgetting", action="store_true", default=False)
+    ap.add_argument("--forget_rate", type=float, default=5e-5)
+    ap.add_argument("--forget_floor", type=float, default=0.30)
+    ap.add_argument("--retention_from_tutee", type=float, default=0.05)
+    ap.add_argument("--retention_decay", type=float, default=0.9995)
+
+
+    # ap.add_argument("--hl_eps_start", type=float, default=None)
+    # ap.add_argument("--hl_eps_end", type=float, default=None)
+    # ap.add_argument("--hl_eps_decay_episodes", type=int, default=None)
+    # ap.add_argument("--hl_eps_floor", type=float, default=0.0)
     args = ap.parse_args()
 
     # def _metrics_filename(*, seed: int, use_tutee: bool) -> str:
@@ -1757,6 +1772,19 @@ def main():
         out_dir.mkdir(parents=True, exist_ok=True)
 
         learner_cfg = KDDLearnerConfig(n_topics=bundle.n_topics)
+        # --- Enable forgetting safely (optional) ---
+        if args.enable_forgetting:
+            learner_cfg.forget_rate = float(args.forget_rate)
+            learner_cfg.forget_floor = float(args.forget_floor)
+            learner_cfg.retention_decay = float(args.retention_decay)
+
+            # retention_from_tutee only matters when tutee actions exist
+            learner_cfg.retention_from_tutee = float(args.retention_from_tutee) if use_tutee else 0.0
+        else:
+            # Explicitly keep old behavior
+            learner_cfg.forget_rate = 0.0
+            learner_cfg.retention_from_tutee = 0.0
+            learner_cfg.retention_decay = 1.0
         if tutee_bonus_base is not None:
             learner_cfg.tutee_bonus_base = float(tutee_bonus_base)
             learner_cfg.tutee_reward_lambda = 0.0
@@ -1765,7 +1793,12 @@ def main():
 
         env = KDDHierEnv(
             bundle=bundle,
-            cfg=KDDEnvConfig(num_topics=bundle.n_topics, max_steps=args.max_steps, initial_mastery=0.1),
+            cfg=KDDEnvConfig(
+                num_topics=bundle.n_topics,
+                max_steps=args.max_steps,
+                initial_mastery=0.1,
+                include_teach_boost_obs=args.obs_include_teach_boost,  # NEW
+            ),
             learner_cfg=learner_cfg,
             seed=seed,
         )
@@ -1922,9 +1955,16 @@ def main():
         window_longest_streak_sum = 0.0
         window_eps_count = 0
         eps_start = 0.35
-        eps_end = 0.05
+        eps_end = 0.02
         # eps_decay_episodes = max(1, args.episodes)
-        eps_decay_episodes = 1000
+        eps_decay_episodes = 1400
+
+        # For tutee runs:
+        # hl_eps_start = float(eps_start if args.hl_eps_start is None else args.hl_eps_start)
+        # hl_eps_end = float(eps_end if args.hl_eps_end is None else args.hl_eps_end)
+        # hl_eps_decay_episodes = int(
+        #     eps_decay_episodes if args.hl_eps_decay_episodes is None else args.hl_eps_decay_episodes)
+        # hl_eps_floor = float(args.hl_eps_floor) if args.use_tutee else 0.0
 
         rows = []
 
@@ -1942,9 +1982,24 @@ def main():
                 eps_joint = float(np.clip(eps_joint, 0.0, 1.0))
                 high_level_agent.set_epsilon(eps_joint)
                 for ag in tutor_agents:
-                    ag.set_epsilon(eps_joint)
+                    ag.set_epsilon(float(eps_flat))
                 if tutee_agent is not None:
-                    tutee_agent.set_epsilon(eps_joint)
+                    tutee_agent.set_epsilon(float(eps_flat))
+
+                # # HL epsilon (optionally overridden; mainly for tutee runs)
+                # hl_progress = min(1.0, episode / max(1, hl_eps_decay_episodes))
+                # hl_eps_flat = hl_eps_start + (hl_eps_end - hl_eps_start) * hl_progress
+                # hl_eps_flat = max(0.0, float(hl_eps_flat))
+                #
+                # # keep your same "joint epsilon" transform for consistency
+                # hl_eps_joint = 1.0 - math.sqrt(max(0.0, 1.0 - hl_eps_flat))
+                # hl_eps_joint = float(np.clip(hl_eps_joint, 0.0, 1.0))
+                #
+                # # optional floor to keep sampling tutee late
+                # if hl_eps_floor > 0.0:
+                #     hl_eps_joint = max(hl_eps_joint, hl_eps_floor)
+                #
+                # high_level_agent.set_epsilon(hl_eps_joint)
             else:
                 # flat-only epsilon schedule (faster decay)
                 eps_start = 0.25
