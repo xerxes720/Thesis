@@ -49,7 +49,7 @@ $runsDir = 'education_framework/runs'
 $env:RUNS_DIR = $runsDir
 
 # Use >=3 seeds for defensibility (committee-friendly). Add more if you can.
-$seeds = @(23)
+$seeds = @(0,23,48)
 
 function Run-Train
 {
@@ -111,7 +111,7 @@ function Run-Train
 #    Plot 2: flat vs HRL multi (no ES)
 #    Plot 3: HRL single vs HRL multi (no ES) vs HRL multi mutual ES vs HRL multi CFA/wCKA ES
 # -----------------------------------------------------------------------------
-#foreach ($seed in $seeds) {
+foreach ($seed in $seeds) {
 #    # flat baseline (paper exp1)
 #    Run-Train -tag 'flat_baseline' -seed $seed -arch 'flat' -llMode 'single'
 #
@@ -125,8 +125,8 @@ function Run-Train
 #    Run-Train -tag 'paper_multi_mutual' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'mutual'
 #
 #    # HRL multi + "CFA" ES (your weighted_cka / wCKA implementation)
-    Run-Train -tag 'paper_multi_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka'
-#}
+#    Run-Train -tag 'paper_multi_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka'
+}
 
 
 # -----------------------------------------------------------------------------
@@ -136,17 +136,18 @@ foreach ($seed in $seeds)
 {
     # HRL multi + "CFA" ES (your weighted_cka / wCKA implementation)
 #    Run-Train -tag 'paper_multi_weighted_cka_forget' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka' --enable_forgetting --forget_rate 5e-5 --forget_floor 0.25 --retention_decay 0.9995
+
     # +Tutee (no ES)
-    #Run-Train -tag 'tutee_no_es' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee --hl_eps_start 0.50 --hl_eps_end 0.15 --hl_eps_decay_episodes 2000 --hl_eps_floor 0.06
-    #
+    Run-Train -tag 'tutee_no_es' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee -tuteeLLPolicy 'learned' -shareMode 'off' --post_eval_tutee_swap --post_eval_episodes 200 --save_run_diagnostics
+
     # +Tutee + ES (CFA/wCKA)
-#    Run-Train -tag 'tutee_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'learned' -experienceSharing -shareMode 'weighted_cka' --post_eval_tutee_swap --post_eval_episodes 200
-    #
-#    # Control A: HL can choose tutee, but tutee LL is random (ALL actions) and we disable its LL training
-#    Run-Train -tag 'tutee_controlA_randLL_all' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'random_all' -tuteeDisableLLTraining
-#    #
-#    # Control A (variant): random only among "ready"/allowed tutee actions
-#    Run-Train -tag 'tutee_controlA_randLL_ready' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee -tuteeLLPolicy 'random_allowed'  -tuteeDisableLLTraining
+    Run-Train -tag 'tutee_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'learned' -experienceSharing -shareMode 'weighted_cka' --post_eval_tutee_swap --post_eval_episodes 200 --save_run_diagnostics
+
+    # Control A: HL can choose tutee, but tutee LL is random (ALL actions) and we disable its LL training
+    Run-Train -tag 'tutee_controlA_randLL_all' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'random_all' -experienceSharing -shareMode 'weighted_cka' -tuteeDisableLLTraining --save_run_diagnostics
+
+    # Control A (variant): random only among "ready"/allowed tutee actions
+    Run-Train -tag 'tutee_controlA_randLL_ready' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee -tuteeLLPolicy 'random_allowed' -experienceSharing -shareMode 'weighted_cka' -tuteeDisableLLTraining --save_run_diagnostics
 }
 
 

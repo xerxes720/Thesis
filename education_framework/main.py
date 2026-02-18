@@ -107,6 +107,15 @@ def topic_entropy(topic_ids):
     ent_max = math.log(len(c) + 1e-12)
     return float(ent / (ent_max + 1e-12))
 
+def topic_entropy_from_counts(counts: List[int]) -> float:
+    total = sum(counts)
+    if total <= 0:
+        return 0.0
+    probs = [c / total for c in counts if c > 0]
+    ent = -sum(p * math.log(p + 1e-12) for p in probs)
+    ent_max = math.log(len(probs) + 1e-12)
+    return float(ent / (ent_max + 1e-12))
+
 
 # ----------------------------
 # Environment wrapper (KDD)
@@ -777,7 +786,7 @@ def run_episode(
     obs = env.reset()
     done = False
     total_reward = 0.0
-    steps = 0
+    steps = 0.0
 
     # Track HL topic streaks (diagnose "stuck on one topic")
     hl_topic_seq: List[int] = []
@@ -869,6 +878,8 @@ def run_episode(
             ll_action_str = tutor_agent.get_action_meanings()[ll_action_idx]
             tutor_action_counts[ll_action_str] += 1
             topic_tutor_action_counts[int(topic_id)][ll_action_str] += 1
+
+
 
             # next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
 
@@ -1607,6 +1618,62 @@ def _post_train_tutee_swap_eval(
                 f"mastery={m['mean_mastery']:.4f}"
             )
         print("=== End Post-eval ===\n")
+        # =========================
+        # Save post-eval tutee swap
+        # =========================
+        try:
+            out_dir = Path(getattr(args, "out_dir", "education_framework/runs"))
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            run_tag = (getattr(args, "run_tag", "") or "run").strip() or "run"
+            seed_int = int(getattr(args, "seed", seed))  # falls back to local seed var if needed
+
+            # Example filename: mytag__seed=23__post_eval_tutee_swap.csv
+            csv_path = out_dir / f"{run_tag}__seed={seed_int}__post_eval_tutee_swap.csv"
+
+            # You likely have these variables already in the post-eval block:
+            # - policies: list[str]
+            # - results: dict[policy -> metrics dict]
+            # - E: eval episodes count (or post_eval_episodes)
+            # - eval_env_seed: the seed used for eval env reset (if you set one)
+            # - bundle_path: path to your bundle (if you have it)
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow([
+                    "run_tag",
+                    "seed",
+                    "eval_episodes",
+                    "eval_env_seed",
+                    "policy",
+                    "mean_reward",
+                    "std_reward",
+                    "mean_steps",
+                    "std_steps",
+                    "completion",
+                    "mean_mastery",
+                ])
+
+                for pol in policies:
+                    m = results[pol]
+                    w.writerow([
+                        run_tag,
+                        seed_int,
+                        int(E),
+                        int(eval_env_seed),
+                        str(pol),
+                        float(m["mean_reward"]),
+                        float(m["std_reward"]),
+                        float(m["mean_steps"]),
+                        float(m["std_steps"]),
+                        float(m["completion"]),
+                        float(m["mean_mastery"]),
+                    ])
+
+            print(f"[post-eval] Saved tutee swap CSV: {csv_path}")
+
+        except Exception as e:
+            print(f"[post-eval] WARNING: failed to write tutee swap CSV: {e}")
+
 
     finally:
         # restore eps
@@ -1642,29 +1709,6 @@ def main():
     )
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max_steps", type=int, default=200)
-
-    # ---- sensitivity sweep for mechanistic tutee strength ----
-    # Example:
-    #   python main.py --bundle ... --episodes 2000 --max_steps 300 \
-    #     --sweep_bases 0.005,0.01,0.015,0.02,0.03 --sweep_seeds 0,1,2
-    # ap.add_argument(
-    #     "--sweep_bases",
-    #     type=str,
-    #     default="",
-    #     help="Comma-separated list of tutee_bonus_base values to sweep (enables sweep mode).",
-    # )
-    # ap.add_argument(
-    #     "--sweep_seeds",
-    #     type=str,
-    #     default="",
-    #     help="Comma-separated list of seeds to run for each sweep setting (default: seed,seed+1,seed+2).",
-    # )
-    # ap.add_argument(
-    #     "--sweep_out_dir",
-    #     type=str,
-    #     default="runs/sweep",
-    #     help="Output directory for sweep runs and summary.csv.",
-    # )
     ap.add_argument(
         "--eval_window",
         type=int,
@@ -1804,6 +1848,17 @@ def main():
         type=float,
         default=0.35,
         help="Threshold for min mastery (across topics) to trigger [BAD EP].",
+    )
+    ap.add_argument(
+        "--out_dir",
+        type=str,
+        default="education_framework/runs",
+        help="Directory to write metrics CSV and diagnostics JSON."
+    )
+    ap.add_argument(
+        "--save_run_diagnostics",
+        action="store_true",
+        help="If set, write an end-window diagnostics JSON for Table 4.2 / mechanism checks."
     )
 
     args = ap.parse_args()
@@ -2001,7 +2056,7 @@ def main():
         print(f"- Out dir:         {out_dir}")
 
         window_rewards: List[float] = []
-        window_steps: List[int] = []
+        window_steps: List[float] = []
         window_mastery: List[float] = []
         window_done: List[int] = []
 
@@ -2056,7 +2111,14 @@ def main():
 
         control_rng = random.Random(int(seed) + 99991)
 
+        from collections import deque, defaultdict
 
+        ewN = int(max(1, args.eval_window))
+        ew_topic_counts = deque(maxlen=ewN)
+        ew_tutor_action_counts = deque(maxlen=ewN)
+        ew_tutee_action_counts = deque(maxlen=ewN)
+        ew_hl_counts = deque(maxlen=ewN)  # tuples (tutor_hl, tutee_hl)
+        ew_mastery_vecs = deque(maxlen=ewN)
         for episode in tqdm(range(1, args.episodes + 1), desc=f"Training(seed={seed})"):
             # epsilon schedule
             progress = min(1.0, episode / eps_decay_episodes)
@@ -2211,11 +2273,16 @@ def main():
                 # denom = num_topics + (1 if (use_tutee and tutee_agent is not None) else 0)
                 denom = num_topics
                 avg_reward_per_topic_slot = agent_reward_sum / max(1, denom)
+            total_hl = int(tutor_hl_count) + int(tutee_hl_count)
+            hl_tutee_rate = (float(tutee_hl_count) / total_hl) if total_hl > 0 else 0.0
+            topic_ent_ep = topic_entropy_from_counts([int(x) for x in topic_counts]) if args.arch == "hrl" else 0.0
 
             rows.append([
                 episode, float(total_reward), float(steps), mean_mastery, min_mastery, completed,
                 float(flat_agent_reward),
                 float(avg_agent_reward),  # NEW: correct Fig.7 signal
+                float(hl_tutee_rate),
+                float(topic_ent_ep),
 
                 # ---- sharing diagnostics ----
                 int(n_ll_agents),
@@ -2233,7 +2300,7 @@ def main():
                 avg_reward_per_topic_slot,
             ])
             window_rewards.append(float(total_reward))
-            window_steps.append(int(steps))
+            window_steps.append(float(steps))
             window_mastery.append(mean_mastery)
             window_done.append(completed)
 
@@ -2364,6 +2431,13 @@ def main():
                 if ep_longest_streak is not None:
                     window_longest_streak_sum += float(ep_longest_streak)
 
+            if args.arch == "hrl":
+                ew_topic_counts.append([int(x) for x in topic_counts])
+                ew_tutor_action_counts.append({str(k): int(v) for k, v in tutor_action_counts.items()})
+                ew_tutee_action_counts.append({str(k): int(v) for k, v in tutee_action_counts.items()})
+                ew_hl_counts.append((int(tutor_hl_count), int(tutee_hl_count)))
+                if 'ep_mastery_vec' in locals() and ep_mastery_vec is not None:
+                    ew_mastery_vecs.append([float(x) for x in ep_mastery_vec.tolist()])
             if episode % args.log_window == 0:
                 w = args.log_window
                 mean_reward_w = sum(window_rewards) / max(1, len(window_rewards))
@@ -2509,10 +2583,12 @@ def main():
                     if use_tutee and tutee_agent is not None:
                         window_tutee_action_counts = {a: 0 for a in tutee_action_names}
 
+
+
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
             "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward",
-            "avg_agent_reward",
+            "avg_agent_reward","hl_tutee_rate","topic_entropy_ep",
 
             # ---- sharing diagnostics ----
             "n_ll_agents",
@@ -2523,6 +2599,7 @@ def main():
             "share_mean_peer_weight",
             "share_eligible_peers_mean",
             "share_selected_peers_mean",
+
         ]
         header += [f"ll_reward_{i}" for i in range(num_topics)]
         header += ["tutee_reward_total"]
@@ -2547,6 +2624,31 @@ def main():
         mean_mastery_tail = float(np.mean([r[3] for r in tail]))
         min_mastery_tail = float(np.mean([r[4] for r in tail]))
         completion_rate_tail = float(np.mean([r[5] for r in tail]))
+        import json
+        from collections import defaultdict
+
+        def _sum_dicts(dicts):
+            out = defaultdict(int)
+            for d in dicts:
+                for k, v in d.items():
+                    out[str(k)] += int(v)
+            return dict(out)
+
+        def _normalize_dist(d):
+            s = float(sum(d.values()))
+            if s <= 0:
+                return {k: 0.0 for k in d}
+            return {k: float(v) / s for k, v in d.items()}
+
+        # if bool(args.save_run_diagnostics) and args.arch == "hrl":
+        #     ew = int(max(1, min(args.eval_window, len(rows))))
+        #
+        #     # We can reconstruct end-window episode indices:
+        #     end_rows = rows[-ew:]
+        #     # BUT rows currently don’t include the raw count dicts.
+        #     # So: simplest is to ALSO accumulate end-window counts during training.
+        #     # If you want minimal changes: add these accumulators in the training loop (see Patch 5).
+
         # ---- optional: run collapse diagnostics after training ----
         if args.arch == "hrl" and args.diag_policy_collapse:
             run_policy_collapse_diagnostics(
@@ -2570,6 +2672,69 @@ def main():
                 tutor_agents=tutor_agents,
                 tutee_agent=tutee_agent,
             )
+        import json
+        from collections import defaultdict
+
+        if bool(args.save_run_diagnostics) and args.arch == "hrl":
+            # aggregate end-window HL mode-rate
+            tutor_hl_sum = sum(x[0] for x in ew_hl_counts)
+            tutee_hl_sum = sum(x[1] for x in ew_hl_counts)
+            total_hl_sum = tutor_hl_sum + tutee_hl_sum
+            hl_tutee_rate_end = (tutee_hl_sum / total_hl_sum) if total_hl_sum > 0 else 0.0
+
+            # aggregate topic entropy (over end-window total counts)
+            topic_total = [0 for _ in range(num_topics)]
+            for tc in ew_topic_counts:
+                for i in range(num_topics):
+                    topic_total[i] += int(tc[i])
+            topic_entropy_end = topic_entropy_from_counts(topic_total)
+
+            # aggregate action counts
+            tutor_tot = defaultdict(int)
+            for d in ew_tutor_action_counts:
+                for k, v in d.items():
+                    tutor_tot[k] += int(v)
+
+            tutee_tot = defaultdict(int)
+            for d in ew_tutee_action_counts:
+                for k, v in d.items():
+                    tutee_tot[k] += int(v)
+
+            # mastery per-topic (mean over end-window)
+            mastery_per_topic_mean = None
+            if len(ew_mastery_vecs) > 0:
+                M = np.asarray(ew_mastery_vecs, dtype=np.float32)  # [W, T]
+                mastery_per_topic_mean = [float(x) for x in M.mean(axis=0).tolist()]
+
+            diag = {
+                "arch": str(args.arch),
+                "ll_mode": str(args.ll_mode),
+                "experience_sharing": int(bool(args.experience_sharing)),
+                "share_mode": str(args.share_mode),
+                "use_tutee": int(bool(use_tutee)),
+                "seed": int(seed),
+                "episodes": int(args.episodes),
+                "max_steps": int(args.max_steps),
+                "eval_window": int(min(args.eval_window, len(rows))),
+                "end_window": {
+                    "mean_reward": float(mean_reward_tail),
+                    "mean_steps_cost": float(mean_steps_tail),
+                    "completion_rate": float(completion_rate_tail),
+                    "mastery_mean": float(mean_mastery_tail),
+                    "mastery_min_mean": float(min_mastery_tail),
+                    "hl_tutee_rate": float(hl_tutee_rate_end),
+                    "topic_entropy": float(topic_entropy_end),
+                    "tutor_action_dist": {k: float(v) for k, v in _normalize_dist(dict(tutor_tot)).items()},
+                    "tutee_action_dist": {k: float(v) for k, v in _normalize_dist(dict(tutee_tot)).items()},
+                    "mastery_per_topic_mean": mastery_per_topic_mean,
+                },
+            }
+
+            tag = (args.run_tag or "run").strip() or "run"
+            diag_path = out_dir / f"{tag}__seed={int(seed)}__diagnostics.json"
+            with open(diag_path, "w", encoding="utf-8") as jf:
+                json.dump(diag, jf, indent=2)
+            print(f"Wrote diagnostics: {diag_path}")
 
         return {
             "mean_reward_last": mean_reward_tail,
@@ -2582,7 +2747,7 @@ def main():
     # ----------------------------
     # Single-run mode (backwards compatible)
     # ----------------------------
-    out_dir = Path("education_framework/runs")
+    out_dir = Path(args.out_dir)
     metrics = _train_one_run(seed=int(args.seed), use_tutee=bool(args.use_tutee), tutee_bonus_base=None,
                              out_dir=out_dir)
     print("Training finished.")

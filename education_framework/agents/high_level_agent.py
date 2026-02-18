@@ -29,6 +29,8 @@ def _to_i64_batch(x) -> np.ndarray:
         arr = np.stack(x, axis=0)
     return np.ascontiguousarray(arr, dtype=np.int64)
 
+
+
 @dataclass
 class HighLevelAgentConfig:
     num_topics: int
@@ -127,6 +129,44 @@ class HighLevelAgent:
         mode = "tutor" if mode_str == "tutor" else "tutee"
         return mode, topic_id
 
+    def _valid_action_mask_batch(self, obs_batch: np.ndarray) -> np.ndarray:
+        """
+        obs_batch: [B, obs_dim] float32
+        returns:   [B, num_actions] bool
+        Action order is: tutor_topic_0..T-1, then tutee_topic_0..T-1 (if enabled).  :contentReference[oaicite:3]{index=3}
+        """
+        B = int(obs_batch.shape[0])
+        T = int(self.cfg.num_topics)
+
+        mastery = obs_batch[:, 0:T]
+        topic_complete = obs_batch[:, 6 * T:7 * T]  # matches select_action()
+
+        valid = np.zeros((B, self.num_actions), dtype=np.bool_)
+
+        # tutor actions (0..T-1)
+        tutor_ok = (topic_complete <= 0.5)
+        valid[:, :T] = tutor_ok
+
+        # tutee actions (T..2T-1)
+        if self.cfg.use_tutee:
+            tutee_ok = tutor_ok & (mastery >= self.cfg.tutee_ready_min) & (mastery <= self.cfg.tutee_cap_high)
+            valid[:, T:T + T] = tutee_ok
+
+        # fallback (same spirit as select_action): if a row has no valid actions,
+        # allow non-complete tutor topics; if none, allow all tutor topics.
+        any_valid = valid.any(axis=1)
+        if not np.all(any_valid):
+            rows = np.where(~any_valid)[0]
+            any_tutor = tutor_ok.any(axis=1)
+            for i in rows:
+                valid[i, :] = False
+                if bool(any_tutor[i]):
+                    valid[i, :T] = tutor_ok[i]
+                else:
+                    valid[i, :T] = True
+
+        return valid
+
     def select_action(self, obs: List[float]) -> int:
         self._ensure_networks(input_dim=len(obs))
         obs_np = np.asarray(obs, dtype=np.float32)
@@ -221,12 +261,24 @@ class HighLevelAgent:
         # Q(s,a)
         q_sa = self.policy_net(s_t).gather(1, a_t).squeeze(1)
 
-        # Double DQN:
-        # a* = argmax_a Q_policy(s', a)
+        # --- Double DQN, but masked to VALID actions at s' ---
         with torch.no_grad():
-            next_actions = torch.argmax(self.policy_net(s2_t), dim=1, keepdim=True)
+            valid2_np = self._valid_action_mask_batch(s2_np)  # [B, A]
+            valid2_t = torch.from_numpy(valid2_np).to(self.device)
+
+            q2_policy = self.policy_net(s2_t)  # [B, A]
+            q2_policy = q2_policy.masked_fill(~valid2_t, -1e9)
+
+            next_actions = torch.argmax(q2_policy, dim=1, keepdim=True)  # [B, 1]
             next_q = self.target_net(s2_t).gather(1, next_actions).squeeze(1)
             target = r_t + self.cfg.gamma * (1.0 - d_t) * next_q
+
+        # Double DQN:
+        # a* = argmax_a Q_policy(s', a)
+        # with torch.no_grad():
+        #     next_actions = torch.argmax(self.policy_net(s2_t), dim=1, keepdim=True)
+        #     next_q = self.target_net(s2_t).gather(1, next_actions).squeeze(1)
+        #     target = r_t + self.cfg.gamma * (1.0 - d_t) * next_q
 
         # q_probs = torch.softmax(q_sa, dim=0)
         # entropy = -(q_probs * torch.log(q_probs + 1e-8)).sum()

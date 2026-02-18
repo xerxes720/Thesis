@@ -569,6 +569,48 @@ def run_suite_thesis(args):
         save_path=_sp(out, "06_tutee_mastery_no_es.png"),
     )
 
+    # 1) reward
+    _plot_metric(
+        title="Final (ES backbone): Reward per Episode",
+        cond_keys=["paper_cfa", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"],
+        metric="reward",
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        smooth_w=args.smooth_w,
+        show_seeds=args.show_seeds,
+        show_band=args.show_band,
+        verbose=args.verbose,
+        save_path=_sp(out, "F1_final_es_reward.png"),
+    )
+
+    # 2) steps/cost
+    _plot_metric(
+        title="Final (ES backbone): Steps per Episode (Cost)",
+        cond_keys=["paper_cfa", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"],
+        metric="steps",
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        smooth_w=args.smooth_w,
+        show_seeds=args.show_seeds,
+        show_band=args.show_band,
+        verbose=args.verbose,
+        save_path=_sp(out, "F2_final_es_steps.png"),
+    )
+
+    # 3) mastery
+    _plot_metric(
+        title="Final (ES backbone): Mean Mastery per Episode",
+        cond_keys=["paper_cfa", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"],
+        metric="mastery_mean",
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        smooth_w=args.smooth_w,
+        show_seeds=args.show_seeds,
+        show_band=args.show_band,
+        verbose=args.verbose,
+        save_path=_sp(out, "F3_final_es_mastery.png"),
+    )
+
     _print_end_window_table(
         cond_keys=_tutee_end_table_keys(args),
         runs_dir=args.runs_dir,
