@@ -125,7 +125,7 @@ function Run-Train
 #    Run-Train -tag 'paper_multi_mutual' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'mutual'
 #
 #    # HRL multi + "CFA" ES (your weighted_cka / wCKA implementation)
-#    Run-Train -tag 'paper_multi_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka'
+    Run-Train -tag 'paper_multi_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka'
 #}
 
 
@@ -140,7 +140,7 @@ foreach ($seed in $seeds)
     #Run-Train -tag 'tutee_no_es' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee --hl_eps_start 0.50 --hl_eps_end 0.15 --hl_eps_decay_episodes 2000 --hl_eps_floor 0.06
     #
     # +Tutee + ES (CFA/wCKA)
-    Run-Train -tag 'tutee_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'learned' -experienceSharing -shareMode 'weighted_cka' --post_eval_tutee_swap --post_eval_episodes 200
+#    Run-Train -tag 'tutee_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'learned' -experienceSharing -shareMode 'weighted_cka' --post_eval_tutee_swap --post_eval_episodes 200
     #
 #    # Control A: HL can choose tutee, but tutee LL is random (ALL actions) and we disable its LL training
 #    Run-Train -tag 'tutee_controlA_randLL_all' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'random_all' -tuteeDisableLLTraining

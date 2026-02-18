@@ -418,7 +418,7 @@ def create_agents(
     # In multi-agent, each topic policy sees fewer transitions; increase update frequency.
     if ll_mode == "multi":
         # Sharing warmup expressed in gradient updates; if we update more often, warmup should shrink.
-        ll_cfg.share_warmup_updates = max(200, int(ll_cfg.share_warmup_updates) // max(1, num_topics))
+        ll_cfg.share_warmup_updates = max(50, int(ll_cfg.share_warmup_updates) // max(1, num_topics))
 
     # --- make min_replay_size smaller ONLY for multi-agent (data-starved per-topic buffers) ---
     # --- scale min_replay_size for per-topic replay buffers (fixes delayed multi "takeoff") ---
@@ -459,27 +459,27 @@ def create_agents(
             ll_cfg.per_topic_sample_mode = "uniform"
 
             # bounded sharing (critical)
-            ll_cfg.share_frac = 0.05
-            ll_cfg.max_peers_per_update = 2
+            ll_cfg.share_frac = 0.15
+            ll_cfg.max_peers_per_update = 3
 
             # your stabilizers (critical)
             metric = str(getattr(ll_cfg, "share_similarity_metric", "cka")).lower().strip()
             if metric in ("q_cos", "qcos", "q_cosine"):
-                ll_cfg.share_similarity_threshold = 0.65
+                ll_cfg.share_similarity_threshold = 0.55
             elif metric in ("q_argmax", "argmax", "qargmax"):
                 ll_cfg.share_similarity_threshold = 0.55
             else:
                 ll_cfg.share_similarity_threshold = 0.40
             ll_cfg.cka_power = 2.0
             ll_cfg.cka_every_updates = 20
-            ll_cfg.share_max_weight = 0.40
+            ll_cfg.share_max_weight = 0.60
             ll_cfg.share_weight_ema = 0.0
 
             # warmup + stop (critical)
-            ll_cfg.share_warmup_updates = 200
+            ll_cfg.share_warmup_updates = 50
             ll_cfg.share_stop_updates = 10**9
 
-            ll_cfg.min_peer_replay_size = 800
+            ll_cfg.min_peer_replay_size = max(ll_cfg.batch_size, int(ll_cfg.min_replay_size))
             ll_cfg.cka_probe_n = 64
 
     # --- build tutor agents: single vs multi ---
