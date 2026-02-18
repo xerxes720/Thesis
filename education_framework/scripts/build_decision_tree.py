@@ -23,6 +23,17 @@ python -m education_framework.scripts.build_decision_tree   --csv education_fram
 t   --out education_framework/data/kdd_bundle.joblib   --n_topics 7 --max_depth 7 --min_leaf 50 --ema_alpha 0.2 --seed 0   --cluster_mode behavior -
 -action_mode discover --n_actions 5   --action_features hints,incorrects,duration,opp   --action_min_cluster_frac 0.06 --action_label_mode schema   --leaf_shrinkage_prior 10   --topic_gain_mode balanced_primary   --quality_eps_frac 0.05 --quality_eps_min 0.0001
 
+#python -m education_framework.scripts.build_decision_tree
+#--csv education_framework/data/algebra_2005_2006_train.txt
+#--out education_framework/data/kdd_bundle_BIN75.joblib
+#--n_topics 5 --ema_alpha 0.2 --seed 0
+#--cluster_mode behavior
+#--action_mode discover --n_actions 5
+#--action_features hints,incorrects,duration,opp
+#--action_label_mode schema
+#--topic_gain_mode balanced_primary
+#--quality_eps_frac 0.05 --quality_eps_min 0.0001
+#--topic_gain_mode_bins linear
 """
 
 import argparse

@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
 """
 plot_compare.py (paper + tutee suites)
 
@@ -22,6 +21,7 @@ Key properties (defensibility):
 - Prints end-window (last W episodes) summary table per condition.
 
 Run examples:
+  python -m education_framework.plots.plot_compare --suite thesis
   python -m education_framework.plots.plot_compare --suite paper
   python -m education_framework.plots.plot_compare --suite tutee
   python -m education_framework.plots.plot_compare --suite paper --runs_dir education_framework/runs --expected_seeds 0,23,48 --save_dir education_framework/figs
@@ -40,7 +40,6 @@ Expected run_tag names (from run_all.ps1):
   tutee_controlA_randLL_all
   tutee_controlA_randLL_ready
 """
-
 
 # -----------------------------------------------------------------------------
 # Condition registry (exact run_tag matching)
@@ -67,12 +66,6 @@ CONDITIONS = OrderedDict([
         "label": "HRL multi-LL + ES (sim-weighted)",
         "tags": ["paper_multi_weighted_cka"],
     }),
-    ("paper_cfa_forget", {
-        # Your implementation is weighted_cka; label as CFA-like / similarity-weighted ES.
-        "label": "HRL multi-LL + ES + forget (sim-weighted)",
-        "tags": ["paper_multi_weighted_cka_forget"],
-    }),
-
 
     ("tutee_no_es", {
         "label": "+Tutee (no ES)",
@@ -187,11 +180,12 @@ def _select_latest_per_seed(paths: List[str]) -> List[str]:
 class LoadedCondition:
     key: str
     label: str
-    dfs: List[pd.DataFrame]          # per-seed dfs
-    seeds: List[Optional[int]]       # aligned to dfs
+    dfs: List[pd.DataFrame]  # per-seed dfs
+    seeds: List[Optional[int]]  # aligned to dfs
 
 
-def _load_condition(run_tags: List[str], root_dir: str, expected_seeds: Optional[List[int]], verbose: bool) -> LoadedCondition:
+def _load_condition(run_tags: List[str], root_dir: str, expected_seeds: Optional[List[int]],
+                    verbose: bool) -> LoadedCondition:
     candidates = _find_metrics_csvs(root_dir)
 
     matched: List[str] = []
@@ -224,7 +218,8 @@ def _load_condition(run_tags: List[str], root_dir: str, expected_seeds: Optional
         keep = ["episode", "reward", "steps"]
 
         # keep the additional metrics you want to defend with
-        for c in ["mastery_mean", "mastery_min", "completed", "avg_reward_per_topic_slot", "avg_reward_per_learning_agent", "avg_agent_reward"]:
+        for c in ["mastery_mean", "mastery_min", "completed", "avg_reward_per_topic_slot",
+                  "avg_reward_per_learning_agent", "avg_agent_reward"]:
             if c in df.columns:
                 keep.append(c)
 
@@ -264,7 +259,8 @@ def _merge_across_seeds(dfs: List[pd.DataFrame], col: str) -> Optional[pd.DataFr
     return merged.sort_values("episode").reset_index(drop=True)
 
 
-def _mean_sem_curve(dfs: List[pd.DataFrame], col: str) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], int]:
+def _mean_sem_curve(dfs: List[pd.DataFrame], col: str) -> Tuple[
+    Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], int]:
     merged = _merge_across_seeds(dfs, col)
     if merged is None:
         return None, None, None, 0
@@ -303,17 +299,17 @@ def _end_window_stats(df: pd.DataFrame, window: int) -> Dict[str, float]:
 # Plotting
 # -----------------------------------------------------------------------------
 def _plot_metric(
-    *,
-    title: str,
-    cond_keys: List[str],
-    metric: str,
-    runs_dir: str,
-    expected_seeds: Optional[List[int]],
-    smooth_w: int,
-    show_seeds: bool,
-    show_band: bool,
-    verbose: bool,
-    save_path: Optional[str],
+        *,
+        title: str,
+        cond_keys: List[str],
+        metric: str,
+        runs_dir: str,
+        expected_seeds: Optional[List[int]],
+        smooth_w: int,
+        show_seeds: bool,
+        show_band: bool,
+        verbose: bool,
+        save_path: Optional[str],
 ):
     plt.figure(figsize=(7.6, 4.4))
 
@@ -362,11 +358,11 @@ def _plot_metric(
 
 
 def _print_end_window_table(
-    *,
-    cond_keys: List[str],
-    runs_dir: str,
-    expected_seeds: Optional[List[int]],
-    window: int,
+        *,
+        cond_keys: List[str],
+        runs_dir: str,
+        expected_seeds: Optional[List[int]],
+        window: int,
 ):
     rows = []
     for ck in cond_keys:
@@ -391,7 +387,8 @@ def _print_end_window_table(
         return
 
     # stable column order
-    cols = ["condition", "n", "reward", "steps", "mastery_mean", "mastery_min", "completion", "avg_reward_per_topic_slot"]
+    cols = ["condition", "n", "reward", "steps", "mastery_mean", "mastery_min", "completion",
+            "avg_reward_per_topic_slot"]
     cols = [c for c in cols if any(c in r for r in rows)]
 
     print(f"\n=== End-window summary (last {window} episodes) ===")
@@ -459,7 +456,121 @@ def run_suite_paper(args):
     )
 
     _print_end_window_table(
-        cond_keys=["flat", "paper_single", "paper_no_es", "paper_mutual", "paper_cfa"],
+        cond_keys=_tutee_end_table_keys(args),
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        window=args.end_window,
+    )
+
+
+def _tutee_end_table_keys(args) -> List[str]:
+    keys = ["paper_no_es", "tutee_no_es", "tutee_ctrl_ready_no_es", "tutee_ctrl_all_no_es"]
+    if getattr(args, "include_es", False):
+        keys += ["paper_cfa", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"]
+    return keys
+
+
+def _sp(out: Optional[str], fname: str) -> Optional[str]:
+    return os.path.join(out, fname) if out else None
+
+
+def run_suite_thesis(args):
+    """
+    FINAL THESIS FIGURE SET (ordered):
+
+    1-3) Paper re-implementation (Fig.5-7 style)
+    4-6) Contribution: Tutee WITHOUT experience sharing
+
+    Optional appendix: use `--suite tutee --include_es` for +ES tutee ablations.
+    """
+    out = args.save_dir
+
+    # --- 1) Paper: reward (flat vs HRL multi no-ES) ---
+    _plot_metric(
+        title="Paper Re-implementation: Reward per Episode (Flat vs HRL multi no-ES)",
+        cond_keys=["flat", "paper_no_es"],
+        metric="reward",
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        smooth_w=args.smooth_w,
+        show_seeds=args.show_seeds,
+        show_band=args.show_band,
+        verbose=args.verbose,
+        save_path=_sp(out, "01_paper_reward.png"),
+    )
+
+    # --- 2) Paper: steps (flat vs HRL multi no-ES) ---
+    _plot_metric(
+        title="Paper Re-implementation: Steps per Episode (Flat vs HRL multi no-ES)",
+        cond_keys=["flat", "paper_no_es"],
+        metric="steps",
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        smooth_w=args.smooth_w,
+        show_seeds=args.show_seeds,
+        show_band=args.show_band,
+        verbose=args.verbose,
+        save_path=_sp(out, "02_paper_steps.png"),
+    )
+
+    # --- 3) Paper: avg reward over agents (single vs multi + ES variants) ---
+    _plot_metric(
+        title="Paper Re-implementation: Avg Reward over Agents (single vs multi + ES variants)",
+        cond_keys=["paper_single", "paper_no_es", "paper_mutual", "paper_cfa"],
+        metric="avg_reward_per_topic_slot",
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        smooth_w=args.smooth_w,
+        show_seeds=args.show_seeds,
+        show_band=args.show_band,
+        verbose=args.verbose,
+        save_path=_sp(out, "03_paper_avg_reward_agents.png"),
+    )
+
+    # --- 4) Contribution: reward (no ES) ---
+    _plot_metric(
+        title="Contribution: Tutee (No ES) — Reward per Episode",
+        cond_keys=["paper_no_es", "tutee_no_es", "tutee_ctrl_ready_no_es", "tutee_ctrl_all_no_es"],
+        metric="reward",
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        smooth_w=args.smooth_w,
+        show_seeds=args.show_seeds,
+        show_band=args.show_band,
+        verbose=args.verbose,
+        save_path=_sp(out, "04_tutee_reward_no_es.png"),
+    )
+
+    # --- 5) Contribution: steps (no ES) ---
+    _plot_metric(
+        title="Contribution: Tutee (No ES) — Steps per Episode",
+        cond_keys=["paper_no_es", "tutee_no_es", "tutee_ctrl_ready_no_es", "tutee_ctrl_all_no_es"],
+        metric="steps",
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        smooth_w=args.smooth_w,
+        show_seeds=args.show_seeds,
+        show_band=args.show_band,
+        verbose=args.verbose,
+        save_path=_sp(out, "05_tutee_steps_no_es.png"),
+    )
+
+    # --- 6) Contribution: mastery (no ES) ---
+    _plot_metric(
+        title="Contribution: Tutee (No ES) — Mean Mastery per Episode",
+        cond_keys=["paper_no_es", "tutee_no_es", "tutee_ctrl_ready_no_es", "tutee_ctrl_all_no_es"],
+        metric="mastery_mean",
+        runs_dir=args.runs_dir,
+        expected_seeds=args.expected_seeds,
+        smooth_w=args.smooth_w,
+        show_seeds=args.show_seeds,
+        show_band=args.show_band,
+        verbose=args.verbose,
+        save_path=_sp(out, "06_tutee_mastery_no_es.png"),
+    )
+
+    _print_end_window_table(
+        cond_keys=_tutee_end_table_keys(args),
         runs_dir=args.runs_dir,
         expected_seeds=args.expected_seeds,
         window=args.end_window,
@@ -468,7 +579,10 @@ def run_suite_paper(args):
 
 def run_suite_tutee(args):
     """
-    ROBUST & DEFENSIBLE EXTENSION CLAIMS (recommended minimal set):
+    EXTENSION FIGURES:
+
+    Default: only no-ES tutee figures.
+    Use --include_es to also generate +ES ablation figures.
 
     A) Isolated tutee value (no ES backbone):
        - HRL multi no-ES vs +Tutee no-ES vs random tutee controls (no-ES)
@@ -524,79 +638,92 @@ def run_suite_tutee(args):
         save_path=os.path.join(out, "tutee_A3_mastery_no_es.png") if out else None,
     )
 
-    # B1 reward (with ES)
-    _plot_metric(
-        title="Tutee Value (+ES): Reward per Episode",
-        cond_keys=["paper_cfa", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"],
-        metric="reward",
-        runs_dir=args.runs_dir,
-        expected_seeds=args.expected_seeds,
-        smooth_w=args.smooth_w,
-        show_seeds=args.show_seeds,
-        show_band=args.show_band,
-        verbose=args.verbose,
-        save_path=os.path.join(out, "tutee_B1_reward_es.png") if out else None,
-    )
+    if args.include_es:
+        # B1 reward (with ES)
+        _plot_metric(
+            title="Tutee Value (+ES): Reward per Episode",
+            cond_keys=["paper_cfa", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"],
+            metric="reward",
+            runs_dir=args.runs_dir,
+            expected_seeds=args.expected_seeds,
+            smooth_w=args.smooth_w,
+            show_seeds=args.show_seeds,
+            show_band=args.show_band,
+            verbose=args.verbose,
+            save_path=os.path.join(out, "tutee_B1_reward_es.png") if out else None,
+        )
 
-    # B2 steps (with ES)
-    _plot_metric(
-        title="Tutee Value (+ES): Steps per Episode",
-        cond_keys=["paper_cfa_forget", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"],
-        metric="steps",
-        runs_dir=args.runs_dir,
-        expected_seeds=args.expected_seeds,
-        smooth_w=args.smooth_w,
-        show_seeds=args.show_seeds,
-        show_band=args.show_band,
-        verbose=args.verbose,
-        save_path=os.path.join(out, "tutee_B2_steps_es.png") if out else None,
-    )
+        # B2 steps (with ES)
+        _plot_metric(
+            title="Tutee Value (+ES): Steps per Episode",
+            cond_keys=["paper_cfa", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"],
+            metric="steps",
+            runs_dir=args.runs_dir,
+            expected_seeds=args.expected_seeds,
+            smooth_w=args.smooth_w,
+            show_seeds=args.show_seeds,
+            show_band=args.show_band,
+            verbose=args.verbose,
+            save_path=os.path.join(out, "tutee_B2_steps_es.png") if out else None,
+        )
 
-    # B3 mastery_mean (with ES)
-    _plot_metric(
-        title="Tutee Value (+ES): Mean Mastery per Episode",
-        cond_keys=["paper_cfa_forget", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"],
-        metric="mastery_mean",
-        runs_dir=args.runs_dir,
-        expected_seeds=args.expected_seeds,
-        smooth_w=args.smooth_w,
-        show_seeds=args.show_seeds,
-        show_band=args.show_band,
-        verbose=args.verbose,
-        save_path=os.path.join(out, "tutee_B3_mastery_es.png") if out else None,
-    )
+        # B3 mastery_mean (with ES)
+        _plot_metric(
+            title="Tutee Value (+ES): Mean Mastery per Episode",
+            cond_keys=["paper_cfa", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es"],
+            metric="mastery_mean",
+            runs_dir=args.runs_dir,
+            expected_seeds=args.expected_seeds,
+            smooth_w=args.smooth_w,
+            show_seeds=args.show_seeds,
+            show_band=args.show_band,
+            verbose=args.verbose,
+            save_path=os.path.join(out, "tutee_B3_mastery_es.png") if out else None,
+        )
 
-    # C1/C2: Show your tutee extension beats the paper’s proposed ES variants (mutual, sim-weighted)
-    _plot_metric(
-        title="Tutee vs Paper ES Variants: Reward per Episode",
-        cond_keys=["paper_no_es", "paper_mutual", "paper_cfa", "tutee_es"],
-        metric="reward",
-        runs_dir=args.runs_dir,
-        expected_seeds=args.expected_seeds,
-        smooth_w=args.smooth_w,
-        show_seeds=args.show_seeds,
-        show_band=args.show_band,
-        verbose=args.verbose,
-        save_path=os.path.join(out, "tutee_C1_reward_vs_paper_es.png") if out else None,
-    )
+        # C1/C2: Show your tutee extension beats the paper’s proposed ES variants (mutual, sim-weighted)
+        _plot_metric(
+            title="Tutee vs Paper ES Variants: Reward per Episode",
+            cond_keys=["paper_no_es", "paper_mutual", "paper_cfa", "tutee_es"],
+            metric="reward",
+            runs_dir=args.runs_dir,
+            expected_seeds=args.expected_seeds,
+            smooth_w=args.smooth_w,
+            show_seeds=args.show_seeds,
+            show_band=args.show_band,
+            verbose=args.verbose,
+            save_path=os.path.join(out, "tutee_C1_reward_vs_paper_es.png") if out else None,
+        )
 
-    _plot_metric(
-        title="Tutee vs Paper ES Variants: Mean Mastery per Episode",
-        cond_keys=["paper_no_es", "paper_mutual", "paper_cfa", "tutee_es"],
-        metric="mastery_mean",
-        runs_dir=args.runs_dir,
-        expected_seeds=args.expected_seeds,
-        smooth_w=args.smooth_w,
-        show_seeds=args.show_seeds,
-        show_band=args.show_band,
-        verbose=args.verbose,
-        save_path=os.path.join(out, "tutee_C2_mastery_vs_paper_es.png") if out else None,
-    )
+        _plot_metric(
+            title="Tutee vs Paper ES Variants: Mean Mastery per Episode",
+            cond_keys=["paper_no_es", "paper_mutual", "paper_cfa", "tutee_es"],
+            metric="mastery_mean",
+            runs_dir=args.runs_dir,
+            expected_seeds=args.expected_seeds,
+            smooth_w=args.smooth_w,
+            show_seeds=args.show_seeds,
+            show_band=args.show_band,
+            verbose=args.verbose,
+            save_path=os.path.join(out, "tutee_C2_mastery_vs_paper_es.png") if out else None,
+        )
+        _plot_metric(
+            title="Tutee ES vs Tutee no es: Mean Mastery per Episode",
+            cond_keys=["tutee_no_es", "tutee_es"],
+            metric="steps",
+            runs_dir=args.runs_dir,
+            expected_seeds=args.expected_seeds,
+            smooth_w=args.smooth_w,
+            show_seeds=args.show_seeds,
+            show_band=args.show_band,
+            verbose=args.verbose,
+            save_path=os.path.join(out, "tutee_C3_steps_vs_no_es.png") if out else None,
+        )
 
     _print_end_window_table(
         cond_keys=[
             "paper_no_es", "tutee_no_es", "tutee_ctrl_ready_no_es", "tutee_ctrl_all_no_es",
-            "paper_cfa_forget", "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es",
+             "tutee_es", "tutee_ctrl_ready_es", "tutee_ctrl_all_es",
         ],
         runs_dir=args.runs_dir,
         expected_seeds=args.expected_seeds,
@@ -613,11 +740,14 @@ def _parse_seeds(s: str) -> Optional[List[int]]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--suite", type=str, default="tutee", choices=["paper", "tutee"])
-    ap.add_argument("--runs_dir", type=str, default="education_framework/runs")
+    ap.add_argument("--suite", type=str, default="thesis", choices=["thesis", "paper", "tutee"])
+    ap.add_argument("--include_es", action="store_true", default=False,
+                    help="(suite=tutee) Also generate +ES and vs-paper ES ablation plots. Default: only no-ES tutee plots.")
+    ap.add_argument("--runs_dir", type=str, default=os.environ.get("RUNS_DIR", "education_framework/runs"))
     ap.add_argument("--save_dir", type=str, default="", help="If set, saves PNGs there instead of showing windows.")
-    ap.add_argument("--expected_seeds", type=str, default="0,23,48", help="Comma-separated seeds expected per condition (warn if missing).")
-    ap.add_argument("--smooth_w", type=int, default=50)
+    ap.add_argument("--expected_seeds", type=str, default="0,23,48",
+                    help="Comma-separated seeds expected per condition (warn if missing).")
+    ap.add_argument("--smooth_w", type=int, default=150)
     ap.add_argument("--end_window", type=int, default=100, help="Last-W episodes used for end-window summary table.")
     ap.add_argument("--show_seeds", action="store_true", default=True, help="Plot faint per-seed curves.")
     ap.add_argument("--no_show_seeds", action="store_true", default=False, help="Disable per-seed curves.")
@@ -636,8 +766,10 @@ def main():
 
     if args.suite == "paper":
         run_suite_paper(args)
-    else:
+    elif args.suite == "tutee":
         run_suite_tutee(args)
+    else:
+        run_suite_thesis(args)
 
 
 if __name__ == "__main__":

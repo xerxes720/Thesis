@@ -430,7 +430,7 @@ class KDDLearnerConfig:
     tutee_duration_mult_fix: float = 1.20
 
     tutee_ready_quiz: float = 0.40
-    tutee_ready_explain: float = 0.50
+    tutee_ready_explain: float = 0.45
     tutee_ready_fix: float = 0.55
     tutee_cap_high: float = 0.98
 

@@ -17,6 +17,17 @@
 #  --leaf_shrinkage_prior 10 `
 #  --topic_gain_mode balanced_primary `
 #  --quality_eps_frac 0.05 --quality_eps_min 0.0001
+#python -m education_framework.scripts.build_decision_tree
+#--csv education_framework/data/algebra_2005_2006_train.txt
+#--out education_framework/data/kdd_bundle_BIN75.joblib
+#--n_topics 5 --ema_alpha 0.2 --seed 0
+#--cluster_mode behavior
+#--action_mode discover --n_actions 5
+#--action_features hints,incorrects,duration,opp
+#--action_label_mode schema
+#--topic_gain_mode balanced_primary
+#--quality_eps_frac 0.05 --quality_eps_min 0.0001
+#--topic_gain_mode_bins linear
 $ErrorActionPreference = 'Stop'
 
 # -----------------------------------------------------------------------------
@@ -38,7 +49,7 @@ $runsDir = 'education_framework/runs'
 $env:RUNS_DIR = $runsDir
 
 # Use >=3 seeds for defensibility (committee-friendly). Add more if you can.
-$seeds = @(0,23,48)
+$seeds = @(23)
 
 function Run-Train
 {
@@ -129,13 +140,13 @@ foreach ($seed in $seeds)
     #Run-Train -tag 'tutee_no_es' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee --hl_eps_start 0.50 --hl_eps_end 0.15 --hl_eps_decay_episodes 2000 --hl_eps_floor 0.06
     #
     # +Tutee + ES (CFA/wCKA)
-    Run-Train -tag 'tutee_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'learned'  --debug_bad_episodes --debug_bad_dm_threshold -0.15 --debug_bad_min_mastery_threshold 0.35 --post_eval_tutee_swap --post_eval_episodes 200
+    Run-Train -tag 'tutee_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'learned' -experienceSharing -shareMode 'weighted_cka' --post_eval_tutee_swap --post_eval_episodes 200
     #
-    # Control A: HL can choose tutee, but tutee LL is random (ALL actions) and we disable its LL training
-    Run-Train -tag 'tutee_controlA_randLL_all' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'random_all' -tuteeDisableLLTraining
-    #
-    # Control A (variant): random only among "ready"/allowed tutee actions
-    Run-Train -tag 'tutee_controlA_randLL_ready' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee -tuteeLLPolicy 'random_allowed'  -tuteeDisableLLTraining
+#    # Control A: HL can choose tutee, but tutee LL is random (ALL actions) and we disable its LL training
+#    Run-Train -tag 'tutee_controlA_randLL_all' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'random_all' -tuteeDisableLLTraining
+#    #
+#    # Control A (variant): random only among "ready"/allowed tutee actions
+#    Run-Train -tag 'tutee_controlA_randLL_ready' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee -tuteeLLPolicy 'random_allowed'  -tuteeDisableLLTraining
 }
 
 
