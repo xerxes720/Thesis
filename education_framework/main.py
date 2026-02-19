@@ -505,10 +505,10 @@ def create_agents(
         tutee_cfg = copy.copy(ll_cfg)
         tutee_cfg.experience_sharing = False
         tutee_cfg.share_mode = "off"
-        tutee_cfg.tutee_ready_quiz = 0.50
-        tutee_cfg.tutee_ready_explain = 0.60
-        tutee_cfg.tutee_ready_fix = 0.65
-        tutee_cfg.tutee_not_ready_penalty = 0.5
+        # tutee_cfg.tutee_ready_quiz = 0.50
+        # tutee_cfg.tutee_ready_explain = 0.60
+        # tutee_cfg.tutee_ready_fix = 0.65
+        # tutee_cfg.tutee_not_ready_penalty = 0.5
         tutee_agent = TuteeLowLevelAgent(tutee_cfg)
 
     # --- peers only when multi + sharing enabled ---
@@ -778,6 +778,7 @@ def run_episode(
         train: bool = True, *,
         tutee_ll_policy: str = "learned",
         tutee_disable_ll_training: bool = False,
+        tutee_reward_beta: float = 0.25,
         control_rng: random.Random | None = None,
         episode_idx: int | None = None,
         debug_bad_episodes: bool = False,
@@ -985,6 +986,14 @@ def run_episode(
                 worst_m_after = float(m_new_topic)
             # reward_ll = float(info.get("reward_ll", reward_hl))
             reward_team = float(info.get("reward_team", reward_hl))
+            reward_ll = float(info.get("reward_ll", reward_team))
+
+            beta = float(tutee_reward_beta)
+            if beta < 0.0: beta = 0.0
+            if beta > 1.0: beta = 1.0
+
+            # Mixed reward: team-dominant, local as variance-reduction / credit assignment
+            reward_tutee_train = (1.0 - beta) * reward_team + beta * reward_ll
             # next_tutee_obs = add_topic(next_obs, topic_id)
             # next_tutee_obs = np.concatenate([np.asarray(env.get_ll_observation(topic_id), dtype=np.float32),
             #                             np.array([topic_id], dtype=np.float32)]).tolist()
@@ -1000,7 +1009,7 @@ def run_episode(
 
                 # Control A: optionally freeze tutee LL learning, and only learn when policy is learned.
                 if (not tutee_disable_ll_training) and (tutee_ll_policy == "learned"):
-                    tutee_agent.update(tutee_obs, ll_action_idx, reward_team, next_tutee_obs, done)
+                    tutee_agent.update(tutee_obs, ll_action_idx, float(reward_tutee_train), next_tutee_obs, done)
 
             # next_obs, reward, done, info = env.step_tutee(topic_id, ll_action_str)
             # next_tutee_obs = add_topic(next_obs, topic_id)
@@ -1860,6 +1869,15 @@ def main():
         action="store_true",
         help="If set, write an end-window diagnostics JSON for Table 4.2 / mechanism checks."
     )
+    ap.add_argument(
+        "--tutee_reward_beta",
+        type=float,
+        default=0.25,
+        help=(
+            "Tutee-only credit assignment: train tutee LL on (1-beta)*reward_team + beta*reward_ll. "
+            "Set 0.0 for pure team reward. Recommended 0.2..0.35."
+        ),
+    )
 
     args = ap.parse_args()
 
@@ -2119,6 +2137,8 @@ def main():
         ew_tutee_action_counts = deque(maxlen=ewN)
         ew_hl_counts = deque(maxlen=ewN)  # tuples (tutor_hl, tutee_hl)
         ew_mastery_vecs = deque(maxlen=ewN)
+        tutee_reward_beta = float(getattr(args, "tutee_reward_beta", 0.25)),
+
         for episode in tqdm(range(1, args.episodes + 1), desc=f"Training(seed={seed})"):
             # epsilon schedule
             progress = min(1.0, episode / eps_decay_episodes)
@@ -2174,6 +2194,7 @@ def main():
                     train=True,
                     tutee_ll_policy=str(args.tutee_ll_policy),
                     tutee_disable_ll_training=bool(args.tutee_disable_ll_training),
+                    tutee_reward_beta=float(getattr(args, "tutee_reward_beta", 0.25)),
                     control_rng=control_rng,
                     episode_idx=int(episode),
                     debug_bad_episodes=bool(getattr(args, "debug_bad_episodes", False)),

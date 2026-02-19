@@ -447,6 +447,26 @@ class KDDLearnerConfig:
     # Safety cap for incorrects after penalties (tutee path is otherwise very low-inc).
     tutee_penalty_incorrects_cap: int = 5
 
+    # --- Action differentiation (makes learned tutee policy matter) ---
+    # Each tutee action has a different "sweet spot" in mastery; outside it, the step can be mildly harmful
+    # (represents confusion / poorly-timed self-explanation / wasted effort).
+    tutee_bell_center_explain: float = 0.60
+    tutee_bell_width_explain: float = 0.20
+
+    # Fix: close to threshold but only when struggle is high
+    tutee_bell_center_fix: float = 0.66
+    tutee_bell_width_fix: float = 0.18
+
+    # Quiz: retrieval practice best around/just above threshold
+    tutee_bell_center_quiz: float = 0.73
+    tutee_bell_width_quiz: float = 0.16
+
+    tutee_bell_min: float = 0.22
+
+    # Signed mastery penalties (applied to mastery directly; observable penalties still apply separately)
+    tutee_misapply_mastery_penalty: float = 0.008
+    tutee_quiz_fail_mastery_penalty: float = 0.012
+    tutee_fix_misapply_mastery_penalty: float = 0.010
 
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02
@@ -942,51 +962,80 @@ class KDDLearnerModel:
     import math
     import random
 
-    def _apply_tutee_bonus(self, topic_id: int, a: LowLevelAction) -> float:
-        """Apply tutee bonus and return the applied delta."""
+    def _apply_tutee_bonus(self, topic_id: int, a: LowLevelAction, *, cfa: int) -> float:
+        """Apply a signed tutee mastery delta and return it.
+
+        Goal: make tutee actions meaningfully different so a learned tutee policy can outperform
+        a random-within-window policy. We do this by:
+          - action-specific "sweet spot" (bell curve) in mastery
+          - mild *negative* mastery deltas for badly-timed or failed tutee steps
+        Observable penalties (time/incorrects) are still handled in step().
+        """
         s = self.state
+        cfg = self.cfg
         m = float(s.mastery[topic_id])
 
-        # --- 1) readiness (hard gate or soft gate)
-        # Hard gate (simple & defendable): return 0.0 if not ready
-        if a == LowLevelAction.TUTEE_QUIZ and m < self.cfg.tutee_ready_quiz:
+        # --- 1) readiness (hard gate; if not ready, treat as no-op)
+        if a == LowLevelAction.TUTEE_QUIZ and m < float(cfg.tutee_ready_quiz):
             return 0.0
-        if a == LowLevelAction.TUTEE_EXPLAIN and m < self.cfg.tutee_ready_explain:
+        if a == LowLevelAction.TUTEE_EXPLAIN and m < float(cfg.tutee_ready_explain):
             return 0.0
-        if a == LowLevelAction.TUTEE_FIX and m < self.cfg.tutee_ready_fix:
+        if a == LowLevelAction.TUTEE_FIX and m < float(cfg.tutee_ready_fix):
             return 0.0
 
-        # base magnitude from your existing function
+        # --- 2) action-specific bell (sweet spot)
+        if a == LowLevelAction.TUTEE_QUIZ:
+            center = float(getattr(cfg, "tutee_bell_center_quiz", 0.52))
+            width = float(getattr(cfg, "tutee_bell_width_quiz", 0.18))
+        elif a == LowLevelAction.TUTEE_EXPLAIN:
+            center = float(getattr(cfg, "tutee_bell_center_explain", 0.65))
+            width = float(getattr(cfg, "tutee_bell_width_explain", 0.22))
+        else:  # TUTEE_FIX
+            center = float(getattr(cfg, "tutee_bell_center_fix", 0.75))
+            width = float(getattr(cfg, "tutee_bell_width_fix", 0.18))
+
+        width = max(1e-6, width)
+        bell = math.exp(-((m - center) / width) ** 2)
+
+        bell_min = float(getattr(cfg, "tutee_bell_min", 0.20))
+        if bell < bell_min:
+            # mild harm if you insist on a tutee step at the wrong mastery level
+            pen = float(getattr(cfg, "tutee_misapply_mastery_penalty", 0.0))
+            if pen > 0.0:
+                delta = -pen * (0.5 + 0.5 * m)
+                s.mastery[topic_id] = _clip01(m + delta)
+                return float(delta)
+            return 0.0
+
+        # --- 3) quiz failure can be mildly harmful (retrieval failure / reinforcing wrong trace)
+        if a == LowLevelAction.TUTEE_QUIZ and int(cfa) == 0:
+            pen = float(getattr(cfg, "tutee_quiz_fail_mastery_penalty", 0.0))
+            if pen > 0.0:
+                delta = -pen * (0.5 + 0.5 * m)
+                s.mastery[topic_id] = _clip01(m + delta)
+                return float(delta)
+            return 0.0
+
+        # base magnitude from your existing function (already bounded + mastery-windowed)
         b = float(self._tutee_mastery_bonus(m, a))
 
-        # --- 2) desirable-difficulty bell (peaks at mid mastery, low at extremes)
-        # You can tune center/width; these are conservative defaults.
-        center = 0.65
-        width = 0.28
-        bell = math.exp(-((m - center) / width) ** 2)
+        # bell weighting
         b *= bell
-
-        # --- 3) success-conditioned retrieval (quiz)
-        if a == LowLevelAction.TUTEE_QUIZ:
-            # probability of successful retrieval increases with mastery
-            # simple logistic; tune slope if needed
-            k = 10.0
-            m0 = 0.45
-            p_succ = 1.0 / (1.0 + math.exp(-k * (m - m0)))
-            if random.random() > p_succ:
-                return 0.0  # failed retrieval => no mastery gain
 
         # --- 4) FIX only helps when there is "something to fix" (struggle signal)
         if a == LowLevelAction.TUTEE_FIX:
-            # inc_ema/hint_ema are already normalized to ~[0,1]; sum -> [0,2]
             struggle = float(s.inc_ema[topic_id]) + float(s.hint_ema[topic_id])
             struggle = max(0.0, min(1.0, struggle))
-            if struggle < float(self.cfg.tutee_fix_struggle_min):
-                return 0.0  # wasted diagnostic step (no measurable struggle)
+            if struggle < float(cfg.tutee_fix_struggle_min):
+                pen = float(getattr(cfg, "tutee_fix_misapply_mastery_penalty", 0.0))
+                if pen > 0.0:
+                    delta = -pen * (0.5 + 0.5 * m)
+                    s.mastery[topic_id] = _clip01(m + delta)
+                    return float(delta)
+                return 0.0
             b *= struggle
 
-        # --- 5) keep your diminishing returns (optional)
-        # Your original (1-m)*2 is fine; with bell this becomes "mid-mastery sweet spot".
+        # --- 5) diminishing returns: larger at lower mastery
         b *= (1.0 - m) * 2.0
 
         # --- 6) apply
@@ -1254,7 +1303,7 @@ class KDDLearnerModel:
 
         tutee_bonus = 0.0
         if is_tutee:
-            tutee_bonus = self._apply_tutee_bonus(topic_id, action_meta.action)
+            tutee_bonus = self._apply_tutee_bonus(topic_id, action_meta.action, cfa=cfa)
             # --- Penalties (observable cost channels only) ---
             cfg = self.cfg
             tutee_success = (tutee_bonus > 0.0)
