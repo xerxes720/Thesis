@@ -143,21 +143,38 @@ def _matches_exact_run_tag(p: str, tag: str) -> bool:
       - token 'tag=<tag>' or 'run_tag=<tag>' if you ever revert to that format
       - directory segment exactly equal to '<tag>'
     """
-    tag = tag.lower()
-    toks = _path_tokens(p)
+    tag = tag.lower().strip()
+    s = p.replace("\\", "/").lower()
 
-    if tag in toks:
+    base = os.path.basename(s)
+
+    # --- Hard reject sidecars that share the same prefix ---
+    if base.endswith("__diagnostics.json"):
+        return False
+    if "__post_eval_" in base:
+        return False
+
+    # --- Main rule: ONLY accept exact main metrics CSV ---
+    # e.g. tutee_weighted_cka__seed=48.csv
+    if re.fullmatch(rf"{re.escape(tag)}__seed=\d+\.csv", base):
         return True
+
+    # --- Optional legacy support (only for CSVs, and still not sidecars) ---
+    if not base.endswith(".csv"):
+        return False
+
+    toks = _path_tokens(p)
     if f"tag={tag}" in toks:
         return True
     if f"run_tag={tag}" in toks:
         return True
 
-    s = p.replace("\\", "/").lower()
-    if re.search(rf"(?:^|__)tag={re.escape(tag)}(?:__|\.csv$)", s):
+    # If you also support old formats like: ...__tag=<tag>__seed=48.csv
+    if re.search(rf"(?:^|__)tag={re.escape(tag)}(?:__|\.csv$)", base):
         return True
-    if re.search(rf"(?:^|__)run_tag={re.escape(tag)}(?:__|\.csv$)", s):
+    if re.search(rf"(?:^|__)run_tag={re.escape(tag)}(?:__|\.csv$)", base):
         return True
+
     return False
 
 

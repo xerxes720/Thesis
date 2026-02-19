@@ -107,6 +107,7 @@ def topic_entropy(topic_ids):
     ent_max = math.log(len(c) + 1e-12)
     return float(ent / (ent_max + 1e-12))
 
+
 def topic_entropy_from_counts(counts: List[int]) -> float:
     total = sum(counts)
     if total <= 0:
@@ -486,7 +487,7 @@ def create_agents(
 
             # warmup + stop (critical)
             ll_cfg.share_warmup_updates = 50
-            ll_cfg.share_stop_updates = 10**9
+            ll_cfg.share_stop_updates = 10 ** 9
 
             ll_cfg.min_peer_replay_size = max(ll_cfg.batch_size, int(ll_cfg.min_replay_size))
             ll_cfg.cka_probe_n = 64
@@ -773,15 +774,15 @@ def run_episode_flat(env, flat_agent: FlatAgent, train: bool = True):
 # ----------------------------
 
 def run_episode(
-    env, high_level_agent, tutor_agents, tutee_agent,
-    train: bool = True, *,
-    tutee_ll_policy: str = "learned",
-    tutee_disable_ll_training: bool = False,
-    control_rng: random.Random | None = None,
-    episode_idx: int | None = None,
-    debug_bad_episodes: bool = False,
-    debug_bad_dm_threshold: float = -0.15,
-    debug_bad_min_mastery_threshold: float = 0.35,
+        env, high_level_agent, tutor_agents, tutee_agent,
+        train: bool = True, *,
+        tutee_ll_policy: str = "learned",
+        tutee_disable_ll_training: bool = False,
+        control_rng: random.Random | None = None,
+        episode_idx: int | None = None,
+        debug_bad_episodes: bool = False,
+        debug_bad_dm_threshold: float = -0.15,
+        debug_bad_min_mastery_threshold: float = 0.35,
 ):
     obs = env.reset()
     done = False
@@ -879,8 +880,6 @@ def run_episode(
             tutor_action_counts[ll_action_str] += 1
             topic_tutor_action_counts[int(topic_id)][ll_action_str] += 1
 
-
-
             # next_obs, reward, done, info = env.step_tutor(topic_id, ll_action_str)
 
             m_prev_topic = float(env.model.state.mastery[int(topic_id)])
@@ -947,16 +946,16 @@ def run_episode(
                 # Control A: choose tutee LL action randomly.
                 # Option 1: random among "ready" actions (random_allowed)
                 # Option 2: random among ALL tutee actions (random_all)
-                m_topic = float(tutee_obs[0])  # your tutee obs is [topic_mastery, ...]
-                cfg = tutee_agent.cfg  # NEW: match learned tutee thresholds
-                cap_high = float(getattr(env.model.cfg, "tutee_cap_high", 1.0))  # cap still belongs to learner cfg
+                m_topic = float(tutee_obs[0])  # topic mastery is first
+                lcfg = env.model.cfg  # <-- use learner config (source of readiness thresholds)
+                cap_high = float(getattr(lcfg, "tutee_cap_high", 1.0))
 
                 allowed = []
-                if m_topic >= float(cfg.tutee_ready_quiz) and m_topic < cap_high:
+                if m_topic >= float(getattr(lcfg, "tutee_ready_quiz", 0.0)) and m_topic < cap_high:
                     allowed.append("tutee_quiz")
-                if m_topic >= float(cfg.tutee_ready_explain) and m_topic < cap_high:
+                if m_topic >= float(getattr(lcfg, "tutee_ready_explain", 0.0)) and m_topic < cap_high:
                     allowed.append("tutee_explain")
-                if m_topic >= float(cfg.tutee_ready_fix) and m_topic < cap_high:
+                if m_topic >= float(getattr(lcfg, "tutee_ready_fix", 0.0)) and m_topic < cap_high:
                     allowed.append("tutee_fix")
 
                 if tutee_ll_policy == "random_all" or not allowed:
@@ -1032,7 +1031,7 @@ def run_episode(
             except Exception:
                 pass
     # if step_topic_count[topic_id] > 20:
-        #     print(f"WARNING: Topic {topic_id} selected {step_topic_count[topic_id]} times in one episode!")
+    #     print(f"WARNING: Topic {topic_id} selected {step_topic_count[topic_id]} times in one episode!")
 
     # env.model.state.teach_boost *= float(env.model.cfg.teach_boost_decay)
 
@@ -1146,7 +1145,6 @@ def _sample_topic_for_case2(env) -> int:
     if not candidates:
         candidates = list(range(env.num_topics))
     return int(np.random.choice(candidates))
-
 
 
 # ----------------------------
@@ -1352,8 +1350,8 @@ def run_policy_collapse_diagnostics(
             base_rewards, base_steps, base_done = [], [], []
             for _ in range(eval_episodes):
                 r, s, d = _eval_swap_episode(env, high_level_agent, tutor_agents, tutee_agent, topic_to_agent=None)
-                base_rewards.append(r);
-                base_steps.append(s);
+                base_rewards.append(r)
+                base_steps.append(s)
                 base_done.append(d)
 
             # random permutation mapping
@@ -1362,8 +1360,8 @@ def run_policy_collapse_diagnostics(
             swap_rewards, swap_steps, swap_done = [], [], []
             for _ in range(eval_episodes):
                 r, s, d = _eval_swap_episode(env, high_level_agent, tutor_agents, tutee_agent, topic_to_agent=perm)
-                swap_rewards.append(r);
-                swap_steps.append(s);
+                swap_rewards.append(r)
+                swap_steps.append(s)
                 swap_done.append(d)
 
             print("\n[Swap test]")
@@ -1526,6 +1524,7 @@ def run_policy_collapse_diagnostics(
         if tutee_agent is not None and old_t_eps is not None:
             tutee_agent.set_epsilon(old_t_eps)
 
+
 def _set_eps_all(high_level_agent, tutor_agents, tutee_agent, eps: float):
     if high_level_agent is not None:
         high_level_agent.set_epsilon(float(eps))
@@ -1536,15 +1535,15 @@ def _set_eps_all(high_level_agent, tutor_agents, tutee_agent, eps: float):
 
 
 def _post_train_tutee_swap_eval(
-    *,
-    bundle,
-    bundle_path,
-    args,
-    seed: int,
-    learner_cfg: KDDLearnerConfig,
-    high_level_agent,
-    tutor_agents,
-    tutee_agent,
+        *,
+        bundle,
+        bundle_path,
+        args,
+        seed: int,
+        learner_cfg: KDDLearnerConfig,
+        high_level_agent,
+        tutor_agents,
+        tutee_agent,
 ):
     if tutee_agent is None:
         print("[post-eval] Skipped (tutee_agent is None).")
@@ -1682,6 +1681,7 @@ def _post_train_tutee_swap_eval(
         for ag, e in zip(tutor_agents, old_ll_eps):
             ag.set_epsilon(float(e))
         tutee_agent.set_epsilon(float(old_t_eps))
+
 
 # ----------------------------
 # Main
@@ -2583,12 +2583,10 @@ def main():
                     if use_tutee and tutee_agent is not None:
                         window_tutee_action_counts = {a: 0 for a in tutee_action_names}
 
-
-
         header = [
             "arch", "ll_mode", "experience_sharing", "share_mode", "use_tutee",
             "episode", "reward", "steps", "mastery_mean", "mastery_min", "completed", "flat_agent_reward",
-            "avg_agent_reward","hl_tutee_rate","topic_entropy_ep",
+            "avg_agent_reward", "hl_tutee_rate", "topic_entropy_ep",
 
             # ---- sharing diagnostics ----
             "n_ll_agents",

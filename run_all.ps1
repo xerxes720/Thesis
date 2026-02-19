@@ -49,7 +49,7 @@ $runsDir = 'education_framework/runs'
 $env:RUNS_DIR = $runsDir
 
 # Use >=3 seeds for defensibility (committee-friendly). Add more if you can.
-$seeds = @(0,23,48)
+$seeds = @(0)
 
 function Run-Train
 {
@@ -125,7 +125,7 @@ foreach ($seed in $seeds) {
 #    Run-Train -tag 'paper_multi_mutual' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'mutual'
 #
 #    # HRL multi + "CFA" ES (your weighted_cka / wCKA implementation)
-#    Run-Train -tag 'paper_multi_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka'
+#    Run-Train -tag 'paper_multi_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka' --save_run_diagnostics
 }
 
 
@@ -138,7 +138,7 @@ foreach ($seed in $seeds)
 #    Run-Train -tag 'paper_multi_weighted_cka_forget' -seed $seed -arch 'hrl' -llMode 'multi' -experienceSharing -shareMode 'weighted_cka' --enable_forgetting --forget_rate 5e-5 --forget_floor 0.25 --retention_decay 0.9995
 
     # +Tutee (no ES)
-    Run-Train -tag 'tutee_no_es' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee -tuteeLLPolicy 'learned' -shareMode 'off' --post_eval_tutee_swap --post_eval_episodes 200 --save_run_diagnostics
+#    Run-Train -tag 'tutee_no_es' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee -tuteeLLPolicy 'learned' -shareMode 'off' --post_eval_tutee_swap --post_eval_episodes 200 --save_run_diagnostics
 
     # +Tutee + ES (CFA/wCKA)
     Run-Train -tag 'tutee_weighted_cka' -seed $seed -arch 'hrl' -llMode 'multi' -useTutee  -tuteeLLPolicy 'learned' -experienceSharing -shareMode 'weighted_cka' --post_eval_tutee_swap --post_eval_episodes 200 --save_run_diagnostics

@@ -435,6 +435,18 @@ class KDDLearnerConfig:
     tutee_cap_high: float = 0.98
 
     tutee_reward_lambda: float = 0.0  # start at 0, test 0.1 later
+    tutee_fix_struggle_min: float = 0.15
+    # --- Penalties for failed / misapplied tutee steps (observable cost channels only) ---
+    # Failed retrieval (quiz wrong) => slightly more incorrects + longer time.
+    tutee_quiz_fail_extra_incorrects: int = 1
+    tutee_quiz_fail_duration_mult: float = 1.15
+
+    # Misapplied tutee (no learning bonus) => wasted time (no extra incorrect by default).
+    tutee_misapply_duration_mult: float = 1.10
+
+    # Safety cap for incorrects after penalties (tutee path is otherwise very low-inc).
+    tutee_penalty_incorrects_cap: int = 5
+
 
     # step_penalty: float = -0.01
     # correct_reward: float = 0.02
@@ -964,16 +976,14 @@ class KDDLearnerModel:
             if random.random() > p_succ:
                 return 0.0  # failed retrieval => no mastery gain
 
-        # --- 4) fix only helps when there is "something to fix" (struggle signal)
-        # if a == LowLevelAction.TUTEE_FIX:
-        #     # Use EMAs you already track (values are normalized later; keep it simple)
-        #     # If you know these EMAs are in raw units, clamp aggressively.
-        #     struggle = float(s.inc_ema[topic_id] + s.hint_ema[topic_id])
-        #     struggle = max(0.0, min(1.0, struggle))
-        #     struggle = max(struggle, 0.15)  # training floor
-        #     b *= struggle
-        #     if b <= 0.0:
-        #         return 0.0
+        # --- 4) FIX only helps when there is "something to fix" (struggle signal)
+        if a == LowLevelAction.TUTEE_FIX:
+            # inc_ema/hint_ema are already normalized to ~[0,1]; sum -> [0,2]
+            struggle = float(s.inc_ema[topic_id]) + float(s.hint_ema[topic_id])
+            struggle = max(0.0, min(1.0, struggle))
+            if struggle < float(self.cfg.tutee_fix_struggle_min):
+                return 0.0  # wasted diagnostic step (no measurable struggle)
+            b *= struggle
 
         # --- 5) keep your diminishing returns (optional)
         # Your original (1-m)*2 is fine; with bell this becomes "mid-mastery sweet spot".
@@ -1113,6 +1123,10 @@ class KDDLearnerModel:
         s = self.state
 
         is_tutee = int(action_meta.action) >= 5
+        # Tutee penalty diagnostics (always defined for info dict)
+        tutee_success = False
+        tutee_inc_pen = 0
+        tutee_dur_mult = 1.0
 
         # Pre-compute x_state / leaf for backoff (only if we have a bank)
         leaf_id = -1
@@ -1240,22 +1254,44 @@ class KDDLearnerModel:
 
         tutee_bonus = 0.0
         if is_tutee:
-            # Neutral quality update (no penalty/reward from tutor-derived leaf qualities)
-            # self._apply_mastery_quality_update(topic_id, "good")
-            # Mechanistic bounded bonus
             tutee_bonus = self._apply_tutee_bonus(topic_id, action_meta.action)
-            # NEW: increase per-topic teach_boost (protégé / self-explanation effect)
+            # --- Penalties (observable cost channels only) ---
             cfg = self.cfg
-            if action_meta.action == LowLevelAction.TUTEE_EXPLAIN:
-                inc = float(cfg.teach_boost_inc_explain)
-            elif action_meta.action == LowLevelAction.TUTEE_FIX:
-                inc = float(cfg.teach_boost_inc_fix)
-            else:  # TUTEE_QUIZ
-                inc = float(cfg.teach_boost_inc_quiz)
+            tutee_success = (tutee_bonus > 0.0)
+            tutee_inc_pen = 0
+            tutee_dur_mult = 1.0
 
-            s.teach_boost[topic_id] = min(float(cfg.teach_boost_max), float(s.teach_boost[topic_id]) + inc)
-            # NEW: tutee increases retention for this topic (reduces future forgetting)
-            s.retention[topic_id] = _clip01(float(s.retention[topic_id]) + float(self.cfg.retention_from_tutee))
+            # Failed retrieval: quiz wrong => extra incorrects + longer time
+            if action_meta.action == LowLevelAction.TUTEE_QUIZ and cfa == 0:
+                tutee_inc_pen += int(cfg.tutee_quiz_fail_extra_incorrects)
+                tutee_dur_mult *= float(cfg.tutee_quiz_fail_duration_mult)
+
+            # Misapplied intervention: no bonus => wasted time (bounded)
+            if not tutee_success:
+                tutee_dur_mult *= float(cfg.tutee_misapply_duration_mult)
+
+            if tutee_inc_pen:
+                incorrects = min(int(incorrects) + int(tutee_inc_pen), int(cfg.tutee_penalty_incorrects_cap))
+            if abs(tutee_dur_mult - 1.0) > 1e-9:
+                duration = float(duration) * float(tutee_dur_mult)
+
+
+            # Only grant downstream benefits (teach_boost, retention) if the tutee step *worked*.
+            if tutee_bonus > 0.0:
+                cfg = self.cfg
+                if action_meta.action == LowLevelAction.TUTEE_EXPLAIN:
+                    inc = float(cfg.teach_boost_inc_explain)
+                elif action_meta.action == LowLevelAction.TUTEE_FIX:
+                    inc = float(cfg.teach_boost_inc_fix)
+                else:  # TUTEE_QUIZ
+                    inc = float(cfg.teach_boost_inc_quiz)
+
+                s.teach_boost[topic_id] = min(float(cfg.teach_boost_max), float(s.teach_boost[topic_id]) + inc)
+
+                # Tutee increases retention only on successful tutee learning
+                s.retention[topic_id] = _clip01(
+                    float(s.retention[topic_id]) + float(cfg.retention_from_tutee)
+                )
 
 
 
