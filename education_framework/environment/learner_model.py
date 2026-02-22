@@ -430,12 +430,12 @@ class KDDLearnerConfig:
     tutee_duration_mult_fix: float = 1.20
 
     tutee_ready_quiz: float = 0.40
-    tutee_ready_explain: float = 0.45
+    tutee_ready_explain: float = 0.50
     tutee_ready_fix: float = 0.55
     tutee_cap_high: float = 0.98
 
     tutee_reward_lambda: float = 0.0  # start at 0, test 0.1 later
-    tutee_fix_struggle_min: float = 0.15
+    tutee_fix_struggle_min: float = 0.30
     # --- Penalties for failed / misapplied tutee steps (observable cost channels only) ---
     # Failed retrieval (quiz wrong) => slightly more incorrects + longer time.
     tutee_quiz_fail_extra_incorrects: int = 1

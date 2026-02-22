@@ -983,23 +983,38 @@ class TuteeLowLevelAgent(DQNLowLevelAgent):
     def select_action(self, obs: List[float]) -> int:
         self._ensure_networks(input_dim=len(obs))
 
-        if random.random() < self.cfg.epsilon:
-            return random.randrange(self.num_actions)
-
+        # Tutee readiness is based on mastery (obs[0])
         m = float(obs[0])
 
+        idx_quiz, idx_explain, idx_fix = 0, 1, 2
+
+        # Build admissible action set (readiness thresholds)
+        allowed: List[int] = []
+        if m >= float(self.cfg.tutee_ready_quiz):
+            allowed.append(idx_quiz)
+        if m >= float(self.cfg.tutee_ready_explain):
+            allowed.append(idx_explain)
+        if m >= float(self.cfg.tutee_ready_fix):
+            allowed.append(idx_fix)
+
+        # Safety fallback: if nothing admissible, force quiz
+        if not allowed:
+            allowed = [idx_quiz]
+
+        # ε-greedy exploration ONLY over admissible actions
+        if random.random() < float(self.cfg.epsilon):
+            return int(random.choice(allowed))
+
+        # Greedy over Q-values, but hard-mask non-admissible actions
         with torch.no_grad():
             x = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             q = self.policy_net(x).squeeze(0).detach().cpu().numpy()
 
-        idx_quiz, idx_explain, idx_fix = 0, 1, 2
-
-        # hard mask not-ready actions
-        if m < self.cfg.tutee_ready_quiz:
+        if idx_quiz not in allowed:
             q[idx_quiz] = -1e9
-        if m < self.cfg.tutee_ready_explain:
+        if idx_explain not in allowed:
             q[idx_explain] = -1e9
-        if m < self.cfg.tutee_ready_fix:
+        if idx_fix not in allowed:
             q[idx_fix] = -1e9
 
         return int(q.argmax())
